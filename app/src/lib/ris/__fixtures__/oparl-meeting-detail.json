@@ -1,0 +1,51 @@
+{
+  "id": "https://oparl.example-kommune.de/api/meeting/101",
+  "type": "https://schema.oparl.org/1.1/Meeting",
+  "name": "Stadtrat",
+  "start": "2026-05-12T15:00:00+02:00",
+  "location": {
+    "description": "Rathaus Sitzungssaal"
+  },
+  "web": "https://www.example-kommune.de/stadtrat/sitzung/101",
+  "invitation": {
+    "id": "https://oparl.example-kommune.de/api/file/201",
+    "type": "https://schema.oparl.org/1.1/File",
+    "mimeType": "application/pdf",
+    "accessUrl": "https://files.example-kommune.de/einladung-101.pdf",
+    "downloadUrl": "https://files.example-kommune.de/einladung-101.pdf",
+    "web": "https://www.example-kommune.de/dokumente/einladung-101",
+    "name": "Einladung Stadtrat 12.05.2026"
+  },
+  "resultsProtocol": {
+    "id": "https://oparl.example-kommune.de/api/file/202",
+    "type": "https://schema.oparl.org/1.1/File",
+    "mimeType": "application/pdf",
+    "accessUrl": "https://files.example-kommune.de/protokoll-101.pdf",
+    "downloadUrl": "https://files.example-kommune.de/protokoll-101.pdf",
+    "web": "https://www.example-kommune.de/dokumente/protokoll-101",
+    "name": "Beschlussprotokoll Stadtrat 12.05.2026"
+  },
+  "agendaItem": [
+    {
+      "id": "https://oparl.example-kommune.de/api/agendaitem/301",
+      "type": "https://schema.oparl.org/1.1/AgendaItem",
+      "auxiliaryFile": [
+        {
+          "id": "https://oparl.example-kommune.de/api/file/301",
+          "type": "https://schema.oparl.org/1.1/File",
+          "mimeType": "application/pdf",
+          "accessUrl": "https://files.example-kommune.de/anlage-top1.pdf",
+          "downloadUrl": "https://files.example-kommune.de/anlage-top1.pdf",
+          "web": "https://www.example-kommune.de/dokumente/anlage-top1",
+          "name": "Anlage zu TOP 1"
+        }
+      ]
+    },
+    {
+      "id": "https://oparl.example-kommune.de/api/agendaitem/302",
+      "type": "https://schema.oparl.org/1.1/AgendaItem",
+      "deleted": true,
+      "auxiliaryFile": []
+    }
+  ]
+}

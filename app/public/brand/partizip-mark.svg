@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Partizip Bildzeichen (2026-07): Sprechblase + Haken = mitreden und entscheiden.
+       Farben = Design-Tokens: Teal pz-brand #0d6a70, warmes Weiss #fffdf8. -->
+  <circle cx="256" cy="256" r="256" fill="#0d6a70"/>
+  <path d="M176 320 L150 392 L258 330 Z" fill="#fffdf8"/>
+  <rect x="126" y="150" width="260" height="180" rx="52" fill="#fffdf8"/>
+  <polyline points="196,242 240,286 322,198" fill="none" stroke="#0d6a70" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

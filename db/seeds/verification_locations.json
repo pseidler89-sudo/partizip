@@ -1,0 +1,51 @@
+[
+  {
+    "tenantSlug": "taunusstein",
+    "name": "Rathaus Taunusstein (Beispiel)",
+    "address": "Aarstraße 150, 65232 Taunusstein",
+    "hinweise": "Bitte bringen Sie Ihren Personalausweis oder Reisepass mit.",
+    "lat": "50.1314",
+    "lon": "8.1567",
+    "isActive": true,
+    "slots": [
+      { "startsAt": "2026-06-11T09:00:00+02:00", "endsAt": "2026-06-11T09:30:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-06-11T09:30:00+02:00", "endsAt": "2026-06-11T10:00:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-06-11T10:00:00+02:00", "endsAt": "2026-06-11T10:30:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-06-12T09:00:00+02:00", "endsAt": "2026-06-12T09:30:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-06-12T09:30:00+02:00", "endsAt": "2026-06-12T10:00:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-06-16T14:00:00+02:00", "endsAt": "2026-06-16T14:30:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-06-16T14:30:00+02:00", "endsAt": "2026-06-16T15:00:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-06-17T09:00:00+02:00", "endsAt": "2026-06-17T09:30:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-06-18T10:00:00+02:00", "endsAt": "2026-06-18T10:30:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-06-24T09:00:00+02:00", "endsAt": "2026-06-24T09:30:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-06-30T09:00:00+02:00", "endsAt": "2026-06-30T09:30:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-07-07T09:00:00+02:00", "endsAt": "2026-07-07T09:30:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-07-07T09:30:00+02:00", "endsAt": "2026-07-07T10:00:00+02:00", "capacity": 2 },
+      { "startsAt": "2026-07-14T14:00:00+02:00", "endsAt": "2026-07-14T14:30:00+02:00", "capacity": 2 }
+    ]
+  },
+  {
+    "tenantSlug": "taunusstein",
+    "name": "Bürgerbüro Wehen (Beispiel)",
+    "address": "Wiesbadener Straße 14, 65232 Taunusstein-Wehen",
+    "hinweise": "Termine nur nach vorheriger Anmeldung über die Plattform.",
+    "lat": "50.1175",
+    "lon": "8.1403",
+    "isActive": true,
+    "slots": [
+      { "startsAt": "2026-06-13T10:00:00+02:00", "endsAt": "2026-06-13T10:30:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-06-13T10:30:00+02:00", "endsAt": "2026-06-13T11:00:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-06-13T11:00:00+02:00", "endsAt": "2026-06-13T11:30:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-06-14T10:00:00+02:00", "endsAt": "2026-06-14T10:30:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-06-14T10:30:00+02:00", "endsAt": "2026-06-14T11:00:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-06-19T14:00:00+02:00", "endsAt": "2026-06-19T14:30:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-06-19T14:30:00+02:00", "endsAt": "2026-06-19T15:00:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-06-20T10:00:00+02:00", "endsAt": "2026-06-20T10:30:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-06-21T10:00:00+02:00", "endsAt": "2026-06-21T10:30:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-06-23T09:00:00+02:00", "endsAt": "2026-06-23T09:30:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-07-01T10:00:00+02:00", "endsAt": "2026-07-01T10:30:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-07-08T10:00:00+02:00", "endsAt": "2026-07-08T10:30:00+02:00", "capacity": 1 },
+      { "startsAt": "2026-07-15T14:00:00+02:00", "endsAt": "2026-07-15T14:30:00+02:00", "capacity": 1 }
+    ]
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "id": "https://oparl.example-kommune.de/api/body/1",
+  "type": "https://schema.oparl.org/1.1/Body",
+  "name": "Beispielkommune",
+  "website": "https://www.example-kommune.de",
+  "meeting": "https://oparl.example-kommune.de/api/body/1/meeting"
+}

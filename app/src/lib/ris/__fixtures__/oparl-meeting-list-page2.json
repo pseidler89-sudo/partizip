@@ -1,0 +1,15 @@
+{
+  "data": [
+    {
+      "id": "https://oparl.example-kommune.de/api/meeting/103",
+      "type": "https://schema.oparl.org/1.1/Meeting",
+      "name": "Gemeinderat",
+      "start": "2026-06-15T18:00:00+02:00",
+      "location": {
+        "description": "Gemeindehaus"
+      },
+      "web": "https://www.example-kommune.de/gemeinderat/sitzung/103"
+    }
+  ],
+  "links": {}
+}

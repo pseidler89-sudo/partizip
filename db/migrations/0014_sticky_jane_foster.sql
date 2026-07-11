@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "notify_new_polls" boolean DEFAULT true NOT NULL;

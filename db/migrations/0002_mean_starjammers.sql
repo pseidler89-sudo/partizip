@@ -1,0 +1,1 @@
+ALTER TABLE "verification_locations" ADD CONSTRAINT "verification_locations_tenant_name_unique" UNIQUE("tenant_id","name");

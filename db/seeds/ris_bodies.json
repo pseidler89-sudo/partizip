@@ -1,0 +1,18 @@
+[
+  {
+    "tenantSlug": "taunusstein",
+    "key": "rheingau-taunus-kreis",
+    "name": "Rheingau-Taunus-Kreis (Kreistag)",
+    "risType": "provox_iip",
+    "baseUrl": "https://www.rheingau-taunus.de",
+    "isActive": true
+  },
+  {
+    "tenantSlug": "taunusstein",
+    "key": "taunusstein-stadt",
+    "name": "Stadt Taunusstein (Stadtverordnetenversammlung)",
+    "risType": "allris4",
+    "baseUrl": "https://www.taunusstein.de",
+    "isActive": true
+  }
+]

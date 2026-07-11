@@ -1,0 +1,18 @@
+# Build-Kontext-Hygiene (P0-7): niemals Secrets/Artefakte ins Image
+.git
+.github
+.gitignore
+node_modules
+app/node_modules
+app/.next
+app/var
+.env
+.env.*
+!.env.example
+app/.env
+app/.env.*
+letsencrypt/
+acme.json
+*.log
+docs/
+infra/

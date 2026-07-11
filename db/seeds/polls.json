@@ -1,0 +1,34 @@
+[
+  {
+    "seedKey": "ts-ortsteil-wehen-spielplatz",
+    "tenantSlug": "taunusstein",
+    "scopeLevel": "ortsteil",
+    "scopeCode": "wehen",
+    "frage": "Soll der Spielplatz am Rathausplatz in Wehen erneuert werden?",
+    "verbindlich": false
+  },
+  {
+    "seedKey": "ts-stadt-tempo30",
+    "tenantSlug": "taunusstein",
+    "scopeLevel": "stadt",
+    "scopeCode": null,
+    "frage": "Soll Taunusstein in Wohngebieten flächendeckend Tempo 30 einführen?",
+    "verbindlich": false
+  },
+  {
+    "seedKey": "ts-kreis-radwege",
+    "tenantSlug": "taunusstein",
+    "scopeLevel": "kreis",
+    "scopeCode": null,
+    "frage": "Soll der Rheingau-Taunus-Kreis den Ausbau sicherer Radwege priorisieren?",
+    "verbindlich": false
+  },
+  {
+    "seedKey": "ts-land-nahverkehr",
+    "tenantSlug": "taunusstein",
+    "scopeLevel": "land",
+    "scopeCode": null,
+    "frage": "Soll Hessen den ländlichen Nahverkehr stärker fördern?",
+    "verbindlich": false
+  }
+]

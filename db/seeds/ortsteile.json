@@ -1,0 +1,12 @@
+[
+  { "tenantSlug": "taunusstein", "code": "bleidenstadt", "name": "Bleidenstadt" },
+  { "tenantSlug": "taunusstein", "code": "hahn",         "name": "Hahn" },
+  { "tenantSlug": "taunusstein", "code": "hambach",      "name": "Hambach" },
+  { "tenantSlug": "taunusstein", "code": "neuhof",       "name": "Neuhof" },
+  { "tenantSlug": "taunusstein", "code": "niederlibbach","name": "Niederlibbach" },
+  { "tenantSlug": "taunusstein", "code": "orlen",        "name": "Orlen" },
+  { "tenantSlug": "taunusstein", "code": "seitzenhahn",  "name": "Seitzenhahn" },
+  { "tenantSlug": "taunusstein", "code": "watzhahn",     "name": "Watzhahn" },
+  { "tenantSlug": "taunusstein", "code": "wehen",        "name": "Wehen" },
+  { "tenantSlug": "taunusstein", "code": "wingsbach",    "name": "Wingsbach" }
+]

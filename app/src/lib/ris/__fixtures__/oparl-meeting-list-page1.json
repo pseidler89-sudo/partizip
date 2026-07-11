@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "id": "https://oparl.example-kommune.de/api/meeting/101",
+      "type": "https://schema.oparl.org/1.1/Meeting",
+      "name": "Stadtrat",
+      "start": "2026-05-12T15:00:00+02:00",
+      "location": {
+        "description": "Rathaus Sitzungssaal"
+      },
+      "web": "https://www.example-kommune.de/stadtrat/sitzung/101"
+    },
+    {
+      "id": "https://oparl.example-kommune.de/api/meeting/102",
+      "type": "https://schema.oparl.org/1.1/Meeting",
+      "name": "Ausschuss für Finanzen",
+      "start": "2026-06-03T17:30:00+02:00",
+      "location": {
+        "description": "Kleiner Sitzungssaal"
+      },
+      "web": "https://www.example-kommune.de/ausschuss-finanzen/sitzung/102",
+      "deleted": false
+    },
+    {
+      "id": "https://oparl.example-kommune.de/api/meeting/999",
+      "type": "https://schema.oparl.org/1.1/Meeting",
+      "name": "Gelöschte Sitzung",
+      "start": "2026-04-01T10:00:00+02:00",
+      "deleted": true
+    }
+  ],
+  "links": {
+    "next": "https://oparl.example-kommune.de/api/body/1/meeting?page=2"
+  }
+}

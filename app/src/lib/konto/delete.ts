@@ -1,0 +1,176 @@
+/**
+ * delete.ts — Kern-Logik der Konto-Löschung (H3 DSGVO, Art. 17).
+ *
+ * Bewusst KEIN "use server": dieses Modul enthält die testbare Kern-Logik
+ * (deleteKontoCore, isLetzterAdmin) und die Konstante KONTO_LOESCHEN_BESTAETIGUNG.
+ * Die dünne Server-Action liegt in actions.ts und ruft hier hinein.
+ *
+ * Tenant-scoped + user-scoped in jeder Query. Anliegen bleiben erhalten
+ * (Pseudonymität via creator_ref). Audit ist PII-frei.
+ */
+
+import { and, eq, inArray, isNull, ne, count, sql } from "drizzle-orm";
+import type { Db } from "@/db/client";
+import {
+  users,
+  roles,
+  sessions,
+  authTokens,
+  anliegenFollowers,
+  auditEvents,
+  qrRedemptions,
+} from "@/db/schema";
+import { ADMIN_ROLES } from "@/lib/auth/roles";
+import { buildAnonymizePayload } from "@/lib/konto/anonymize";
+import { KONTO_LOESCHEN_BESTAETIGUNG } from "@/lib/konto/constants";
+
+export { KONTO_LOESCHEN_BESTAETIGUNG };
+
+/**
+ * Prüft, ob der User der letzte Admin (kommune_admin/super_admin) des Tenants
+ * ist. Einfache Zählung: gibt es im Tenant noch einen ANDEREN User mit
+ * Admin-Rolle? Wenn nicht UND der zu löschende User selbst Admin ist → letzter
+ * Admin → Löschung verweigern (verhindert verwaisten Tenant).
+ */
+export async function isLetzterAdmin(
+  db: Db,
+  tenantId: string,
+  userId: string,
+): Promise<boolean> {
+  // Ist der zu löschende User überhaupt Admin?
+  const ownAdminRows = await db
+    .select({ userId: roles.userId })
+    .from(roles)
+    .where(
+      and(
+        eq(roles.tenantId, tenantId),
+        eq(roles.userId, userId),
+        inArray(roles.roleType, [...ADMIN_ROLES]),
+      ),
+    )
+    .limit(1);
+  if (ownAdminRows.length === 0) return false; // kein Admin → nie „letzter Admin"
+
+  // Gibt es noch einen ANDEREN Admin im Tenant?
+  const otherAdminRows = await db
+    .select({ n: count() })
+    .from(roles)
+    .where(
+      and(
+        eq(roles.tenantId, tenantId),
+        ne(roles.userId, userId),
+        inArray(roles.roleType, [...ADMIN_ROLES]),
+      ),
+    );
+  const otherAdminCount = otherAdminRows[0]?.n ?? 0;
+  return otherAdminCount === 0;
+}
+
+/**
+ * Kern-Logik der Löschung — ohne Session/Cookie, damit sie unter Test
+ * (Integrationstest mit echter DB) direkt aufrufbar ist.
+ *
+ * Schritte (alle in EINER Transaktion):
+ *   1. users-Zeile anonymisieren (Zeile bleibt — referenzielle Integrität).
+ *   2. roles des Users löschen.
+ *   3. anliegen_followers des Users löschen.
+ *   4. alle Sessions des Users revoken.
+ *   5. offene auth_tokens des Users löschen (per alter E-Mail).
+ *   6. Anliegen NICHT löschen (creator_ref bleibt pseudonym).
+ *   7. Audit konto.deleted (PII-frei).
+ */
+export async function deleteKontoCore(
+  db: Db,
+  tenantId: string,
+  userId: string,
+  now: Date = new Date(),
+): Promise<{ ok: boolean; error?: string }> {
+  // Gesamte Löschung in EINER Transaktion. Ein per-Tenant Advisory-Lock
+  // serialisiert nebenläufige Konto-Löschungen DESSELBEN Tenants — sonst könnten
+  // zwei „vorletzte" Admins gleichzeitig löschen, beide den jeweils anderen noch
+  // als Admin sehen und den Tenant verwaisen lassen (Gate-B MAJOR-E).
+  return await db.transaction(async (tx: Db) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${tenantId}))`);
+
+    // Letzter-Admin-Guard INNERHALB der gesperrten Transaktion (race-frei).
+    if (await isLetzterAdmin(tx, tenantId, userId)) {
+      return {
+        ok: false as const,
+        error:
+          "Sie sind die einzige Administratorin oder der einzige Administrator " +
+          "dieser Kommune. Bitte übertragen Sie die Administration zuerst an eine " +
+          "andere Person, bevor Sie Ihr Konto löschen.",
+      };
+    }
+
+    // Alte E-Mail VOR der Anonymisierung lesen (für auth_tokens-Cleanup).
+    const userRows = await tx
+      .select({ email: users.email })
+      .from(users)
+      .where(and(eq(users.tenantId, tenantId), eq(users.id, userId)))
+      .limit(1);
+    const userRow = userRows[0];
+    if (!userRow) {
+      return { ok: false as const, error: "Benutzer nicht gefunden." };
+    }
+    const alteEmail = userRow.email;
+
+    const payload = buildAnonymizePayload(userId, now);
+
+    // 1. users-Zeile anonymisieren (tenant + user scoped).
+    await tx
+      .update(users)
+      .set(payload)
+      .where(and(eq(users.tenantId, tenantId), eq(users.id, userId)));
+
+    // 2. roles des Users löschen (kein Admin-Recht behalten).
+    await tx
+      .delete(roles)
+      .where(and(eq(roles.tenantId, tenantId), eq(roles.userId, userId)));
+
+    // 3. anliegen_followers des Users löschen. anliegen_followers hat KEINE
+    //    tenantId-Spalte; userId ist global eindeutig und gehört genau einem
+    //    Tenant — der user-scoped Delete ist daher korrekt und tenant-sicher.
+    await tx.delete(anliegenFollowers).where(eq(anliegenFollowers.userId, userId));
+
+    // 4. alle Sessions des Users revoken (tenant-scoped).
+    await tx
+      .update(sessions)
+      .set({ revokedAt: now })
+      .where(
+        and(
+          eq(sessions.tenantId, tenantId),
+          eq(sessions.userId, userId),
+          isNull(sessions.revokedAt),
+        ),
+      );
+
+    // 5. offene auth_tokens des Users löschen (per alter E-Mail, tenant-scoped).
+    await tx
+      .delete(authTokens)
+      .where(and(eq(authTokens.tenantId, tenantId), eq(authTokens.email, alteEmail)));
+
+    // 5b. qr_redemptions des Users löschen (direkter user_id-FK → sonst nach der
+    //     Anonymisierung re-identifizierbar; Art. 17). tenant+user-scoped. Der
+    //     QR-Cap (redemption_count) bleibt unberührt — eine bereits erfolgte
+    //     Verifizierung wird nicht „zurückgegeben", nur die personenbezogene Spur.
+    await tx
+      .delete(qrRedemptions)
+      .where(and(eq(qrRedemptions.tenantId, tenantId), eq(qrRedemptions.userId, userId)));
+
+    // 6. Anliegen werden NICHT gelöscht (pseudonymer Vorgang bleibt).
+
+    // 7. Audit (PII-frei: actorRef=userId, metadata minimal).
+    await tx.insert(auditEvents).values({
+      tenantId,
+      actorType: "user",
+      actorRef: userId,
+      action: "konto.deleted",
+      targetType: "user",
+      targetId: userId,
+      metadata: { tenantId },
+    });
+
+    return { ok: true as const };
+  });
+}

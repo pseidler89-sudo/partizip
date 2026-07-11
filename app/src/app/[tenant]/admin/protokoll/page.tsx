@@ -1,0 +1,205 @@
+/**
+ * [tenant]/admin/protokoll/page.tsx — Audit-Log-Ansicht (Achse B, Gate B)
+ *
+ * Read-only, admin-only (kommune_admin/super_admin). Listet die letzten N
+ * audit_events des Tenants, absteigend nach createdAt.
+ *
+ * PII-FREIHEIT (nicht verhandelbar):
+ *   - KEIN Join auf users.email, KEINE E-Mail-Anzeige.
+ *   - actorRef / targetId werden GEKÜRZT angezeigt (erste 8 Zeichen der UUID)
+ *     oder „—" wenn null. Roh-UUIDs sind kein PII (kein Klarname), die Kürzung
+ *     reduziert zusätzlich die Re-Identifizierbarkeit in Screenshots/Exports.
+ *   - metadata wird bewusst NICHT roh gerendert (könnte künftig versehentlich
+ *     PII enthalten) — nur whitelist-Felder (roleType, scopeLevel, …).
+ *
+ * Filter (?filter=privileg): zeigt nur privilegierte Aktionen.
+ */
+
+import { notFound, redirect } from "next/navigation";
+import { headers, cookies } from "next/headers";
+import { and, eq, desc, inArray } from "drizzle-orm";
+import { createDb } from "@/db/client";
+import { getTenantFromHost } from "@/lib/tenant";
+import { auditEvents, roles, sessions } from "@/db/schema";
+import { sha256Hex } from "@/lib/auth/crypto";
+import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
+import { isAdmin } from "@/lib/auth/roles";
+import Link from "next/link";
+
+const LIMIT = 200;
+
+/** Privilegierte Aktionen für den optionalen Filter ?filter=privileg. */
+const PRIVILEGIERTE_ACTIONS = [
+  "role.granted",
+  "role.revoked",
+  "digest.approved",
+  "digest.published",
+  "anliegen.status_changed",
+  "anliegen.verborgen",
+  "anliegen.wiederhergestellt",
+  "konto.deleted",
+];
+
+/** Menschenlesbare Labels (rein kosmetisch; unbekannte Actions roh anzeigen). */
+const ACTION_LABELS: Record<string, string> = {
+  "role.granted": "Rolle vergeben",
+  "role.revoked": "Rolle entzogen",
+  "digest.approved": "Digest freigegeben",
+  "digest.published": "Digest veröffentlicht",
+  "digest.statements_geprueft": "Aussagen geprüft",
+  "anliegen.status_changed": "Anliegen-Status geändert",
+  "anliegen.verborgen": "Anliegen verborgen",
+  "anliegen.wiederhergestellt": "Anliegen wiederhergestellt",
+  "konto.deleted": "Konto gelöscht",
+};
+
+/** Kürzt eine UUID/Referenz PII-arm auf die ersten 8 Zeichen (oder „—"). */
+function kuerze(ref: string | null): string {
+  if (!ref) return "—";
+  return ref.length > 8 ? `${ref.slice(0, 8)}…` : ref;
+}
+
+interface PageProps {
+  params: Promise<{ tenant: string }>;
+  searchParams: Promise<{ filter?: string }>;
+}
+
+export default async function AdminProtokollPage({ params, searchParams }: PageProps) {
+  const { tenant: slugFromPath } = await params;
+  const { filter } = await searchParams;
+  const nurPrivileg = filter === "privileg";
+
+  const headerStore = await headers();
+  const host = headerStore.get("host") ?? "localhost";
+  const tenant = await getTenantFromHost(host);
+
+  if (!tenant || tenant.slug !== slugFromPath) notFound();
+
+  const cookieStore = await cookies();
+  const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  if (!rawToken) redirect(`/${slugFromPath}/anmelden`);
+
+  const db = createDb(
+    process.env.DATABASE_URL ?? "postgres://partizip:partizip@127.0.0.1:5433/partizip"
+  );
+  const tokenHash = sha256Hex(rawToken);
+  const now = new Date();
+
+  const sessionRows = await db
+    .select()
+    .from(sessions)
+    .where(and(eq(sessions.tokenHash, tokenHash), eq(sessions.tenantId, tenant.id)))
+    .limit(1);
+
+  const session = sessionRows[0];
+  if (!session || session.revokedAt || session.expiresAt < now) redirect(`/${slugFromPath}/anmelden`);
+
+  const callerRoleRows = await db
+    .select({ roleType: roles.roleType })
+    .from(roles)
+    .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
+  const callerRoleTypes = callerRoleRows.map((r: { roleType: string }) => r.roleType);
+  if (!isAdmin(callerRoleTypes)) redirect(`/${slugFromPath}/anmelden`);
+
+  // Tenant-scoped + optional auf privilegierte Aktionen gefiltert.
+  // KEIN Join auf users — PII-frei.
+  const whereClause = nurPrivileg
+    ? and(eq(auditEvents.tenantId, tenant.id), inArray(auditEvents.action, PRIVILEGIERTE_ACTIONS))
+    : eq(auditEvents.tenantId, tenant.id);
+
+  const events = await db
+    .select({
+      id: auditEvents.id,
+      action: auditEvents.action,
+      actorType: auditEvents.actorType,
+      actorRef: auditEvents.actorRef,
+      targetType: auditEvents.targetType,
+      targetId: auditEvents.targetId,
+      createdAt: auditEvents.createdAt,
+    })
+    .from(auditEvents)
+    .where(whereClause)
+    .orderBy(desc(auditEvents.createdAt))
+    .limit(LIMIT);
+
+  return (
+    <main className="min-h-screen px-6 py-10 max-w-4xl mx-auto">
+      <div className="mb-6">
+        <Link href={`/${slugFromPath}/admin`} className="text-sm text-zinc-500 hover:text-zinc-700">
+          ← Admin-Bereich
+        </Link>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Protokoll</h1>
+        <p className="text-sm text-zinc-500 mt-1">
+          Technisches Audit-Log (PII-frei, ohne E-Mail). Letzte {LIMIT} Ereignisse,
+          neueste zuerst.
+        </p>
+      </div>
+
+      {/* Filter-Umschalter */}
+      <div className="mb-5 flex gap-2 text-sm">
+        <Link
+          href={`/${slugFromPath}/admin/protokoll`}
+          className={`rounded-md px-3 py-1 ${
+            !nurPrivileg ? "bg-zinc-900 text-white" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+          }`}
+        >
+          Alle
+        </Link>
+        <Link
+          href={`/${slugFromPath}/admin/protokoll?filter=privileg`}
+          className={`rounded-md px-3 py-1 ${
+            nurPrivileg ? "bg-zinc-900 text-white" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+          }`}
+        >
+          Nur privilegierte Aktionen
+        </Link>
+      </div>
+
+      {events.length === 0 ? (
+        <div className="rounded-lg border border-zinc-200 p-8 text-center text-zinc-500">
+          Keine Protokoll-Einträge.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-zinc-200">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-4 py-2 font-medium">Zeitpunkt</th>
+                <th className="px-4 py-2 font-medium">Aktion</th>
+                <th className="px-4 py-2 font-medium">Akteur</th>
+                <th className="px-4 py-2 font-medium">Ziel</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {events.map((e: typeof events[number]) => (
+                <tr key={e.id} className="text-zinc-700">
+                  <td className="whitespace-nowrap px-4 py-2 text-zinc-500">
+                    {e.createdAt.toLocaleString("de-DE")}
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className="font-medium">{ACTION_LABELS[e.action] ?? e.action}</span>
+                    <span className="block text-xs text-zinc-400">{e.action}</span>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2">
+                    <span className="text-zinc-500">{e.actorType}</span>{" "}
+                    <span className="font-mono text-xs text-zinc-400">{kuerze(e.actorRef)}</span>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2">
+                    {e.targetType ? (
+                      <>
+                        <span className="text-zinc-500">{e.targetType}</span>{" "}
+                        <span className="font-mono text-xs text-zinc-400">{kuerze(e.targetId)}</span>
+                      </>
+                    ) : (
+                      <span className="text-zinc-400">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </main>
+  );
+}

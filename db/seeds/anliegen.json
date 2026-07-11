@@ -1,0 +1,53 @@
+[
+  {
+    "tenantSlug": "taunusstein",
+    "trackingCode": "TS-2026-0001",
+    "creatorRef": "anon-a1b2c3d4",
+    "titel": "Defekte Straßenlaterne in der Aarstraße",
+    "beschreibung": "Im Bereich Aarstraße zwischen Hausnummer 80 und 100 fällt die Straßenlaterne seit ca. zwei Wochen regelmäßig aus. Besonders abends und nachts ist der Bereich schlecht ausgeleuchtet.",
+    "ortsteilCode": "bleidenstadt",
+    "events": [
+      {
+        "status": "eingegangen",
+        "notiz": "Anliegen automatisch erfasst."
+      },
+      {
+        "status": "in_pruefung",
+        "notiz": "An den Bereich Stadtbeleuchtung weitergeleitet. Überprüfung vor Ort angekündigt."
+      }
+    ]
+  },
+  {
+    "tenantSlug": "taunusstein",
+    "trackingCode": "TS-2026-0002",
+    "creatorRef": "anon-e5f6g7h8",
+    "titel": "Spielgeräte im Spielplatz Wehen reparieren",
+    "beschreibung": "Die Schaukel auf dem Spielplatz an der Wiesbadener Straße ist beschädigt. Eine Kette hängt lose herunter, das Gerät sollte aus Sicherheitsgründen gesperrt oder repariert werden.",
+    "ortsteilCode": "wehen",
+    "events": [
+      {
+        "status": "eingegangen",
+        "notiz": "Anliegen automatisch erfasst."
+      }
+    ]
+  },
+  {
+    "tenantSlug": "taunusstein",
+    "trackingCode": "TS-2026-0003",
+    "creatorRef": "anon-i9j0k1l2",
+    "titel": "Radwegmarkierungen auf der Verbindungsstraße erneuern",
+    "beschreibung": "Die Fahrbahnmarkierungen auf dem Radweg zwischen Bleidenstadt und Hahn sind stark verblasst und kaum noch erkennbar. Besonders bei Nässe ist die Führung unklar.",
+    "ortsteilCode": "bleidenstadt",
+    "events": [
+      {
+        "status": "eingegangen",
+        "notiz": "Anliegen automatisch erfasst."
+      },
+      {
+        "status": "in_pruefung",
+        "notiz": null,
+        "quelle": null
+      }
+    ]
+  }
+]

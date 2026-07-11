@@ -1,0 +1,2 @@
+ALTER TABLE "anliegen_events" ADD CONSTRAINT "anliegen_events_anliegen_status_notiz_unique" UNIQUE("anliegen_id","status","notiz");--> statement-breakpoint
+ALTER TABLE "verification_slots" ADD CONSTRAINT "verification_slots_location_starts_unique" UNIQUE("location_id","starts_at");

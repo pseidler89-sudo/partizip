@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "reverify_reminder_sent_at" timestamp with time zone;
