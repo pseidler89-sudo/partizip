@@ -85,7 +85,9 @@ async function getPublicPoll(tenantSlug: string, pollId: string) {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { tenant: tenantSlug, id } = await params;
   const data = await getPublicPoll(tenantSlug, id);
-  if (!data) return { title: "Umfrage — Partizip" };
+  // Kein eigener "— Partizip"-Zusatz: das Layout-Template (%s · Partizip)
+  // haengt die Marke bereits an — sonst steht sie doppelt im Tab-Titel.
+  if (!data) return { title: "Umfrage" };
 
   const { poll } = data;
   const frage = kuerzen(poll.frage.trim(), 70);
@@ -94,7 +96,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   }). Ergebnis zeigt Gesamt- und verifizierte Stimmen.`;
 
   return {
-    title: `${frage} — Partizip`,
+    title: frage,
     description: beschreibung,
     openGraph: {
       type: "website",
