@@ -1,5 +1,7 @@
 # Partizip
 
+[![CI](https://github.com/pseidler89-sudo/partizip/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pseidler89-sudo/partizip/actions/workflows/ci.yml) [![Lizenz: AGPL-3.0](https://img.shields.io/badge/Lizenz-AGPL--3.0-blue.svg)](LICENSE)
+
 **Überparteiliche Beteiligungsplattform für Kommunen.** Bürgerinnen und Bürger werden
 zu lokalen Themen *gefragt* — Stimmungsbilder mit geheimer Stimmabgabe, nachvollziehbaren
 Ergebnissen und quellengeprüften Ratsinformationen als Tiefenschicht.
