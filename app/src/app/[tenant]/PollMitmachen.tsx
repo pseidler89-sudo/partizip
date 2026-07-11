@@ -5,8 +5,12 @@
  *   - nicht eingeloggt: Frage + ERGEBNIS sichtbar (Wert vor der Anmeldung) +
  *     freundlicher CTA „Zum Mitstimmen anmelden" (kein aktiver Abstimm-Button).
  *   - "frage":    Abstimm-Buttons (ja/nein/enthaltung) → Server-Action abstimmen()
- *   - "ergebnis": Balken je Option, Gesamtzahl + "davon Y verifiziert" (dezent,
- *                 mit kurzer Erklärung), Hinweis (un)verbindlich, Folge-CTAs.
+ *   - "ergebnis": Bei BEENDETER Umfrage Balken je Option, Gesamtzahl + "davon Y
+ *                 verifiziert" (dezent, mit kurzer Erklärung); bei LAUFENDER
+ *                 Umfrage (ADR-022, ergebnis.aufschluesselungNachSchluss) statt
+ *                 Balken ein positiver "Ausgezählt wird nach Abstimmungsende"-
+ *                 Hinweis mit Gesamt + Verifiziert. Hinweis (un)verbindlich,
+ *                 Folge-CTAs.
  *
  * Mitstimmen erfordert ein Konto (Stufe 1). Frage UND Ergebnis bleiben für alle
  * sichtbar — nur das Mitstimmen kostet die kurze Anmeldung. Falls die Action
@@ -29,7 +33,7 @@ import { demoSessionStarten } from "@/lib/demo/actions";
 import { K_ANONYMITY_SCHWELLE, type PollErgebnis } from "@/lib/polls/ergebnis";
 import { OPEN_LOGIN_EVENT } from "./LoginEntry";
 import StufenFortschritt from "./StufenFortschritt";
-import { Check, X, Minus, Lock, BadgeCheck, EyeOff, Bookmark, Copy, HelpCircle, ChevronDown } from "lucide-react";
+import { Check, X, Minus, Lock, BadgeCheck, EyeOff, Bookmark, Copy, HelpCircle, ChevronDown, Hourglass } from "lucide-react";
 
 type Choice = "ja" | "nein" | "enthaltung";
 
@@ -82,6 +86,59 @@ export function VerifiziertHinweis({ ergebnis }: { ergebnis: PollErgebnis }) {
   );
 }
 
+/**
+ * ADR-022: Laufende Umfrage — die per-Option-Aufschlüsselung kommt erst nach
+ * Abstimmungsende (serverseitig sind alle Options-Zahlen null). Statt Balken
+ * ein positiver Hinweis mit den beiden Poll-Ebene-Signalen (ADR-014).
+ */
+function AuszaehlungNachSchluss({
+  ergebnis,
+  verbindlich,
+}: {
+  ergebnis: PollErgebnis;
+  verbindlich: boolean;
+}) {
+  return (
+    <div>
+      <div
+        className="flex items-start gap-2.5 rounded-md border border-[color:var(--pz-line)] px-3 py-3"
+        style={{ backgroundColor: "var(--pz-page)" }}
+      >
+        <Hourglass
+          aria-hidden
+          className="mt-0.5 h-4 w-4 shrink-0"
+          style={{ color: "var(--pz-brand-strong)" }}
+          strokeWidth={2}
+        />
+        <span className="text-sm" style={{ color: "var(--pz-body)" }}>
+          <b style={{ color: "var(--pz-ink)" }}>
+            Ausgezählt wird nach Abstimmungsende.
+          </b>{" "}
+          {ergebnis.gesamt === 0 ? (
+            "Machen Sie den Anfang — Ihre Stimme zählt."
+          ) : (
+            <>
+              Bisher <strong>{ergebnis.gesamt}</strong>{" "}
+              {ergebnis.gesamt === 1 ? "Stimme" : "Stimmen"}, davon{" "}
+              <strong>{ergebnis.verifiziert}</strong> wohnsitz-verifiziert.
+            </>
+          )}
+        </span>
+      </div>
+      <p className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
+        Wie bei einer Wahl veröffentlichen wir das Ergebnis je Antwort als einen
+        finalen Stand nach dem Ende der Abstimmung — so bleibt jede Stimme
+        unbeeinflusst von Zwischenständen.
+      </p>
+      <p className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
+        {verbindlich
+          ? "Verbindliche Abstimmung — gewertet werden wohnsitz-verifizierte Stimmen."
+          : "Unverbindliches Stimmungsbild."}
+      </p>
+    </div>
+  );
+}
+
 function Ergebnisanzeige({
   ergebnis,
   verbindlich,
@@ -89,6 +146,11 @@ function Ergebnisanzeige({
   ergebnis: PollErgebnis;
   verbindlich: boolean;
 }) {
+  // ADR-022: laufende Umfrage → kein Balken/Prozent, nur der positive Hinweis.
+  if (ergebnis.aufschluesselungNachSchluss) {
+    return <AuszaehlungNachSchluss ergebnis={ergebnis} verbindlich={verbindlich} />;
+  }
+
   const choices: Choice[] = ["ja", "nein", "enthaltung"];
   return (
     <div>
@@ -258,7 +320,8 @@ function AnmeldeCta({ tenantSlug }: { tenantSlug: string }) {
       </p>
       <p className="mx-auto mt-1 max-w-sm text-xs" style={{ color: "var(--pz-muted)" }}>
         Mitstimmen geht nur mit Konto (E-Mail-Link, ohne Passwort) — so hängt jede
-        Stimme an einer bestätigten Person. Das Ergebnis sehen Sie auch ohne Anmeldung.
+        Stimme an einer bestätigten Person. Das Ergebnis wird nach Abstimmungsende
+        für alle sichtbar — ganz ohne Anmeldung.
       </p>
       <Link
         href={`/${tenantSlug}/anmelden`}

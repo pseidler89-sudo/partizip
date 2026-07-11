@@ -6,7 +6,9 @@
  * Template → Treiber-Abbruch („Received an instance of Date") → 500 auf der
  * Landing. Diese Tests führen die echten Queries aus (nicht gespiegelt), damit
  * ein solcher Binding-Fehler sofort auffällt — und prüfen Scope-Filter +
- * Zeitfenster der Listing-Queries (ADR-014).
+ * Zeitfenster der Listing-Queries (ADR-014) sowie ADR-022 (Aufschlüsselung
+ * erst nach Abstimmungsende: laufend = keine Options-Zahlen im Payload;
+ * beendet via status ODER closesAt = volle Aufschlüsselung mit k-Suppression).
  *
  * next/headers wird gemockt, weil queries.ts (in anderen Funktionen) next/headers
  * importieren kann; die getesteten Funktionen lesen keine Cookies.
@@ -86,7 +88,7 @@ describe("polls/queries (Integration)", () => {
     await sql_.end();
   });
 
-  it.skipIf(SKIP)("getPollErgebnis aggregiert Stimmen + verifizierte korrekt", async () => {
+  it.skipIf(SKIP)("getPollErgebnis (LAUFEND): Poll-Ebene korrekt, aber KEINE Options-Zahlen im Payload (ADR-022)", async () => {
     const [p] = await db
       .insert(polls)
       .values({ tenantId, scopeLevel: "stadt", frage: "Ergebnis?", typ: "ja_nein_enthaltung", status: "aktiv" })
@@ -98,8 +100,75 @@ describe("polls/queries (Integration)", () => {
     ]);
     const erg = await getPollErgebnis(db as never, tenantId, p.id);
     expect(erg).not.toBeNull();
+    // Poll-Ebene (ADR-014) bleibt sichtbar …
     expect(erg!.gesamt).toBe(3);
     expect(erg!.verifiziert).toBe(1);
+    // … aber die Aufschlüsselung verlässt den Server erst nach Schluss.
+    expect(erg!.aufschluesselungNachSchluss).toBe(true);
+    expect(erg!.optionen).toHaveLength(3);
+    for (const o of erg!.optionen) {
+      expect(o.count).toBeNull();
+      expect(o.verifiziert).toBeNull();
+      expect(o.prozent).toBeNull();
+      expect(o.maskiert).toBe(false); // auch das Masken-Muster leakt nicht
+    }
+  });
+
+  it.skipIf(SKIP)("getPollErgebnis (BEENDET via status='geschlossen'): volle Aufschlüsselung", async () => {
+    const [p] = await db
+      .insert(polls)
+      .values({ tenantId, scopeLevel: "stadt", frage: "Zu?", typ: "ja_nein_enthaltung", status: "geschlossen" })
+      .returning();
+    // ja=5 (≥ k), nein/enthaltung=0 → nichts maskiert, alles sichtbar.
+    await db.insert(votes).values(
+      Array.from({ length: 5 }, (_, i) => ({
+        pollId: p.id, tenantId, voterRef: `zu-${i}`, choice: "ja", warVerifiziert: i < 2,
+      }))
+    );
+    const erg = await getPollErgebnis(db as never, tenantId, p.id);
+    expect(erg).not.toBeNull();
+    expect(erg!.aufschluesselungNachSchluss).toBe(false);
+    expect(erg!.gesamt).toBe(5);
+    expect(erg!.verifiziert).toBe(2);
+    const ja = erg!.optionen.find((o) => o.choice === "ja")!;
+    expect(ja.count).toBe(5);
+    expect(ja.verifiziert).toBe(2);
+    expect(ja.prozent).toBe(100);
+    expect(ja.maskiert).toBe(false);
+  });
+
+  it.skipIf(SKIP)("getPollErgebnis (BEENDET via closesAt in der Vergangenheit): Aufschlüsselung da, k-Suppression greift weiter", async () => {
+    const [p] = await db
+      .insert(polls)
+      .values({
+        tenantId, scopeLevel: "stadt", frage: "Abgelaufen?", typ: "ja_nein_enthaltung",
+        status: "aktiv", closesAt: new Date(Date.now() - 60_000),
+      })
+      .returning();
+    // Kleingruppen-Fall: ja=6, nein=2 → nein primär maskiert; komplementäre
+    // Suppression eskaliert hier zur vollen Maskierung (maskierte Summe < k).
+    await db.insert(votes).values([
+      ...Array.from({ length: 6 }, (_, i) => ({
+        pollId: p.id, tenantId, voterRef: `ab-ja-${i}`, choice: "ja", warVerifiziert: false,
+      })),
+      ...Array.from({ length: 2 }, (_, i) => ({
+        pollId: p.id, tenantId, voterRef: `ab-nein-${i}`, choice: "nein", warVerifiziert: false,
+      })),
+    ]);
+    const erg = await getPollErgebnis(db as never, tenantId, p.id);
+    expect(erg).not.toBeNull();
+    // Beendet (closesAt erreicht) → Endergebnis-Sicht, kein Zurückhalte-Flag.
+    expect(erg!.aufschluesselungNachSchluss).toBe(false);
+    expect(erg!.gesamt).toBe(8);
+    // k-Suppression bleibt NACH Poll-Ende unverändert wirksam: die Kleingruppe
+    // (nein=2) und — komplementär/Rekonstruktions-Schutz — alle Optionen sind
+    // maskiert; keine Kleingruppen-Zahl verlässt den Server.
+    for (const o of erg!.optionen) {
+      expect(o.maskiert).toBe(true);
+      expect(o.count).toBeNull();
+      expect(o.verifiziert).toBeNull();
+      expect(o.prozent).toBeNull();
+    }
   });
 
   // -------------------------------------------------------------------------
@@ -224,9 +293,19 @@ describe("polls/queries (Integration)", () => {
 
     const b = teiln.find((p) => p.id === pB.id)!;
     expect(b.ergebnis.gesamt).toBe(2); // beide Stimmen aggregiert
+    // ADR-022: B läuft noch → keine Options-Zahlen im Payload.
+    expect(b.ergebnis.aufschluesselungNachSchluss).toBe(true);
+    for (const o of b.ergebnis.optionen) {
+      expect(o.count).toBeNull();
+      expect(o.verifiziert).toBeNull();
+      expect(o.prozent).toBeNull();
+    }
     const a = teiln.find((p) => p.id === pA.id)!;
     expect(a.ergebnis.gesamt).toBe(1);
     expect(a.ergebnis.verifiziert).toBe(1);
+    // A ist geschlossen → Endergebnis-Sicht (hier greift die k-Suppression,
+    // 1 Stimme < k → maskiert, aber ohne Zurückhalte-Flag).
+    expect(a.ergebnis.aufschluesselungNachSchluss).toBe(false);
   });
 
   it.skipIf(SKIP)("getMeineTeilnahmen ist tenant-scoped (Stimme im Fremd-Tenant zählt nicht)", async () => {

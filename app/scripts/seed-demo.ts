@@ -225,7 +225,14 @@ async function main() {
   // ----- 3. Stimmen + Belege für die GESCHLOSSENE Frage --------------------
   // Idempotenz: feste Demo-voter_refs (UNIQUE poll,voter_ref). Belege werden EINMAL
   // erzeugt; bei erneutem Lauf vorhandene Anzahl beibehalten (kein Doppel-Insert).
-  const DEMO_CHOICES = ["ja", "ja", "ja", "ja", "nein", "nein", "enthaltung"];
+  // Verteilung mit jeder Option ≥ K_ANONYMITY_SCHWELLE (9/6/5): die geschlossene
+  // Frage trägt den Ergebnis-Moment der Demo (ADR-022) und soll die volle
+  // Aufschlüsselung zeigen, nicht den Suppressions-Fall.
+  const DEMO_CHOICES = [
+    ...Array.from({ length: 9 }, () => "ja"),
+    ...Array.from({ length: 6 }, () => "nein"),
+    ...Array.from({ length: 5 }, () => "enthaltung"),
+  ];
   const existingVotes = await db
     .select({ id: votes.id })
     .from(votes)

@@ -20,7 +20,7 @@ const SCHRITTE = [
   },
   {
     titel: "In Ruhe ansehen",
-    text: "Frage und bisheriges Ergebnis sind für alle sichtbar. Schauen Sie, was vor Ort gerade bewegt wird.",
+    text: "Frage und Beteiligung sind für alle sichtbar; ausgezählt wird nach Abstimmungsende. Schauen Sie, was vor Ort gerade bewegt wird.",
   },
   {
     titel: "Mit einem Klick mitstimmen",
@@ -43,7 +43,7 @@ const VERTRAUEN = [
   },
   {
     titel: "Ergebnisse öffentlich",
-    text: "Wie abgestimmt wurde, ist für alle einsehbar — Mitmachen wird sichtbar.",
+    text: "Nach Abstimmungsende ist das Ergebnis für alle einsehbar — wie bei einer Wahl wird nach Schluss ausgezählt.",
   },
 ];
 
@@ -239,7 +239,7 @@ export function Landing({ tenantName, slug }: { tenantName: string; slug: string
             <div className="mb-6 text-center">
               <h2 className="text-xl font-semibold" style={{ color: "var(--pz-ink)" }}>Schon dabei? Anmelden</h2>
               <p className="mt-1 text-sm" style={{ color: "var(--pz-muted)" }}>
-                Per E-Mail-Link, ohne Passwort. Frage und Ergebnis sehen Sie auch ohne Anmeldung.
+                Per E-Mail-Link, ohne Passwort. Frage und Beteiligung sehen Sie auch ohne Anmeldung.
               </p>
             </div>
             <LoginForm tenantSlug={slug} />

@@ -79,6 +79,13 @@ function KurzErgebnis({ ergebnis }: { ergebnis: PollErgebnis }) {
     <div className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
       {ergebnis.gesamt === 0 ? (
         <span>Noch keine Stimmen.</span>
+      ) : ergebnis.aufschluesselungNachSchluss ? (
+        // ADR-022: laufende Umfrage — Aufschlüsselung erst nach Abstimmungsende.
+        <span>
+          <strong>{ergebnis.gesamt}</strong>{" "}
+          {ergebnis.gesamt === 1 ? "Stimme" : "Stimmen"} · Ausgezählt wird nach
+          Abstimmungsende
+        </span>
       ) : maskiert ? (
         <span>
           <strong>{ergebnis.gesamt}</strong> {ergebnis.gesamt === 1 ? "Stimme" : "Stimmen"} ·
@@ -243,7 +250,12 @@ export default async function TenantLandingPage({ params }: PageProps) {
       .map(async (p) => ({
         ...p,
         ergebnis:
-          (await getPollErgebnis(db, tenant.id, p.id)) ?? { gesamt: 0, verifiziert: 0, optionen: [] },
+          (await getPollErgebnis(db, tenant.id, p.id)) ?? {
+            gesamt: 0,
+            verifiziert: 0,
+            optionen: [],
+            aufschluesselungNachSchluss: false,
+          },
       }))
   );
   const gruppen = gruppiereNachEbene(aktiveMitErgebnis);
