@@ -1,10 +1,13 @@
 /**
  * [tenant]/umfrage/[id]/page.tsx — Öffentliche Detail-/Ergebnisseite einer Umfrage.
  *
- * Zeigt die Frage, den (un)verbindlich-Hinweis und das aktuelle Ergebnis
- * (Balken + Gesamt + "davon Y verifiziert"). Bei aktiver, offener Umfrage kann
- * direkt mitgestimmt werden (PollMitmachen). Alles tenant-scoped, ohne Konto
- * erreichbar (Default = unverbindliches Stimmungsbild).
+ * Zeigt die Frage, den (un)verbindlich-Hinweis und das Ergebnis: bei BEENDETER
+ * Umfrage die volle Aufschlüsselung (Balken + Gesamt + "davon Y verifiziert",
+ * k-Suppression), bei LAUFENDER Umfrage nur Gesamt + Verifiziert mit dem
+ * "Ausgezählt wird nach Abstimmungsende"-Hinweis (ADR-022, serverseitig via
+ * getPollErgebnis). Bei aktiver, offener Umfrage kann direkt mitgestimmt werden
+ * (PollMitmachen). Alles tenant-scoped, ohne Konto erreichbar (Default =
+ * unverbindliches Stimmungsbild).
  */
 
 import { notFound } from "next/navigation";
@@ -17,6 +20,7 @@ import { polls, sessions, users } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getPollErgebnis, hatBereitsAbgestimmt } from "@/lib/polls/queries";
+import { istBeendet } from "@/lib/polls/ergebnis";
 import { getStufe } from "@/lib/eligibility/stufe";
 import { SCOPE_LABEL, type ScopeLevel } from "@/lib/polls/gruppierung";
 import PollMitmachen from "../../PollMitmachen";
@@ -93,7 +97,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const frage = kuerzen(poll.frage.trim(), 70);
   const beschreibung = `Stimmungsbild auf Partizip (Ebene: ${
     SCOPE_LABEL[poll.scopeLevel as ScopeLevel]
-  }). Ergebnis zeigt Gesamt- und verifizierte Stimmen.`;
+  }). Ergebnis nach Abstimmungsende, mit Gesamt- und verifizierten Stimmen.`;
 
   return {
     title: frage,
@@ -116,11 +120,11 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
 
   const { tenant, db, poll } = data;
 
-  // D4: Beleg-Liste wird nach Poll-Ende öffentlich — hart geschlossen ODER
-  // Schlusszeit erreicht (deckungsgleich mit getBelegListe / der Stimm-Schlusslogik).
-  const belegeVerfuegbar =
-    poll.status === "geschlossen" ||
-    (poll.closesAt != null && poll.closesAt <= new Date());
+  // Gemeinsame Beendet-Semantik (ADR-022): Beleg-Liste UND Ergebnis-
+  // Aufschlüsselung werden nach Poll-Ende öffentlich — deckungsgleich mit
+  // getBelegListe / getPollErgebnis / der Stimm-Schlusslogik.
+  const beendet = istBeendet(poll);
+  const belegeVerfuegbar = beendet;
 
   const ergebnis = await getPollErgebnis(db, tenant.id, poll.id);
   if (!ergebnis) notFound();
@@ -208,7 +212,9 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
 
       {!istOffen && (
         <p className="mt-4 text-sm" style={{ color: "var(--pz-muted)" }}>
-          Diese Abstimmung ist derzeit nicht offen — Sie sehen das bisherige Ergebnis.
+          {beendet
+            ? "Diese Abstimmung ist beendet — Sie sehen das ausgezählte Endergebnis."
+            : "Diese Abstimmung ist noch nicht geöffnet — schauen Sie bald wieder vorbei."}
         </p>
       )}
 

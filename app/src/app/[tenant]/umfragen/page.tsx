@@ -58,6 +58,14 @@ function KurzErgebnis({ ergebnis }: { ergebnis: PollErgebnis }) {
     <div className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
       {ergebnis.gesamt === 0 ? (
         <span>Noch keine Stimmen.</span>
+      ) : ergebnis.aufschluesselungNachSchluss ? (
+        // ADR-022: laufende Umfrage — Aufschlüsselung erst nach Abstimmungsende.
+        <span>
+          <strong>{ergebnis.gesamt}</strong>{" "}
+          {ergebnis.gesamt === 1 ? "Stimme" : "Stimmen"}, davon{" "}
+          {ergebnis.verifiziert} wohnsitz-verifiziert · Ausgezählt wird nach
+          Abstimmungsende
+        </span>
       ) : maskiert ? (
         <span>
           <strong>{ergebnis.gesamt}</strong>{" "}
@@ -201,6 +209,7 @@ export default async function UmfragenListePage({ params }: PageProps) {
         gesamt: 0,
         verifiziert: 0,
         optionen: [],
+        aufschluesselungNachSchluss: false,
       },
     }))
   );
@@ -227,8 +236,9 @@ export default async function UmfragenListePage({ params }: PageProps) {
             Abstimmungen
           </h1>
           <p className="mt-2 text-sm" style={{ color: "var(--pz-body)" }}>
-            Aktuelle lokale Abstimmungen — Frage und Ergebnis sehen Sie ohne Anmeldung.
-            Zum Mitstimmen genügt ein Konto (E-Mail-Link, ohne Passwort).
+            Aktuelle lokale Abstimmungen — Frage und Beteiligung sehen Sie ohne
+            Anmeldung; ausgezählt wird nach Abstimmungsende. Zum Mitstimmen genügt
+            ein Konto (E-Mail-Link, ohne Passwort).
           </p>
         </header>
 

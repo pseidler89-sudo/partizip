@@ -170,7 +170,15 @@ async function main() {
   // ----- 3. Seed-Stimmen + Belege der GESCHLOSSENEN Frage --------------------
   // Feste Demo-voter_refs (UNIQUE poll,voter_ref) → idempotent; der nächtliche
   // Reset lässt diese Frage unangetastet (nur aktive Fragen werden geleert).
-  const CHOICES = ["ja", "ja", "ja", "ja", "nein", "nein", "enthaltung"];
+  // Verteilung BEWUSST mit jeder Option ≥ K_ANONYMITY_SCHWELLE (9/6/5): die
+  // geschlossene Frage ist der Ergebnis-Moment des Demo-Rundgangs (ADR-022 —
+  // laufende Fragen zeigen keine Aufschlüsselung mehr) und soll die volle
+  // Balken-Aufschlüsselung zeigen, nicht den Suppressions-Fall.
+  const CHOICES = [
+    ...Array.from({ length: 9 }, () => "ja"),
+    ...Array.from({ length: 6 }, () => "nein"),
+    ...Array.from({ length: 5 }, () => "enthaltung"),
+  ];
   const existing = await db
     .select({ id: votes.id })
     .from(votes)

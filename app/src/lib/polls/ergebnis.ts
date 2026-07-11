@@ -22,14 +22,22 @@
  *      konsistente Zerlegung zu (z. B. 0/4/4 → sichtbar 0, Summe 8 = zwingend
  *      4+4), volle Suppression. Garantie (PRO EINZEL-SNAPSHOT): kein exakter
  *      Kleingruppen-Wert ist aus dem Payload rekonstruierbar (Sweep-Test);
- *      Wertebereiche bleiben naturgemäß eingrenzbar. GRENZEN (Gate-B-Review
- *      2026-07-11): (a) Wer ein LAUFENDES Ergebnis über die Zeit beobachtet,
- *      kann Kleingruppen per Differenzbildung teils rekonstruieren — für
- *      sensible Fragen ist "Aufschlüsselung erst nach Schluss" die saubere
- *      Antwort (Roadmap). (b) `gesamt`/`verifiziert` (Poll-Ebene) bleiben
- *      bewusst öffentlich (ADR-014); die k-Garantie erstreckt sich NICHT auf
- *      die per-Option-Verifiziert-Zahlen sichtbarer Optionen (können < k sein).
- * Segment-Aufschlüsselungen (PLZ/Ortsteil) bleiben Roadmap (K_ANONYMITY.md).
+ *      Wertebereiche bleiben naturgemäß eingrenzbar.
+ *
+ * AUFSCHLÜSSELUNG ERST NACH ABSTIMMUNGSENDE (ADR-022, Patrick 2026-07-11):
+ * Die Snapshot-Garantie oben schützt NICHT gegen zeitliche Differenzbildung —
+ * wer ein laufendes Ergebnis über die Zeit beobachtet, könnte maskierte
+ * Kleingruppen aus Snapshot-Differenzen rekonstruieren. Deshalb verlässt bei
+ * LAUFENDEN Umfragen keinerlei per-Option-Zahl den Server (ohneAufschluesselung:
+ * count/verifiziert/prozent = null für ALLE Optionen, Flag
+ * `aufschluesselungNachSchluss: true`); nur die Poll-Ebene gesamt/verifiziert
+ * bleibt öffentlich (ADR-014). Nach dem Ende (istBeendet: status 'geschlossen'
+ * ODER closesAt erreicht) gibt es die Aufschlüsselung als EINEN finalen Stand —
+ * mit unveränderter k-Suppression. Damit gilt die k-Garantie praktisch fürs
+ * Endergebnis. Verbleibende Grenze: die k-Garantie erstreckt sich NICHT auf die
+ * per-Option-Verifiziert-Zahlen sichtbarer Optionen (ADR-014-gewollt, können
+ * < k sein). Segment-Aufschlüsselungen (PLZ/Ortsteil) bleiben Roadmap
+ * (K_ANONYMITY.md).
  */
 
 export type Choice = "ja" | "nein" | "enthaltung";
@@ -55,11 +63,14 @@ export interface VoteRow {
 
 export interface OptionErgebnis {
   choice: Choice;
-  /** Stimmen der Option; null wenn maskiert (Zahl verlässt den Server nicht). */
+  /**
+   * Stimmen der Option; null wenn maskiert (k-Anonymität) ODER die Umfrage
+   * noch läuft (aufschluesselungNachSchluss) — die Zahl verlässt den Server nicht.
+   */
   count: number | null;
-  /** Davon wohnsitz-verifizierte Stimmen; null wenn maskiert. */
+  /** Davon wohnsitz-verifizierte Stimmen; null wenn maskiert/zurückgehalten. */
   verifiziert: number | null;
-  /** Anteil an gesamt in Prozent (0–100, gerundet); null wenn maskiert. */
+  /** Anteil an gesamt in Prozent (0–100, gerundet); null wenn maskiert/zurückgehalten. */
   prozent: number | null;
   /** k-Anonymität: true → Zahlen sind serverseitig redigiert (null). */
   maskiert: boolean;
@@ -69,13 +80,62 @@ export interface PollErgebnis {
   gesamt: number;
   verifiziert: number;
   optionen: OptionErgebnis[];
+  /**
+   * ADR-022: true → die Umfrage läuft noch, die per-Option-Aufschlüsselung wird
+   * erst nach Abstimmungsende veröffentlicht (alle Options-Zahlen sind null).
+   * gesamt/verifiziert (Poll-Ebene) bleiben sichtbar (ADR-014).
+   */
+  aufschluesselungNachSchluss: boolean;
 }
 
 /**
- * Aggregiert Stimm-Zeilen zu einem Ergebnis — inklusive serverseitiger
- * k-Anonymitäts-Suppression (siehe Datei-Header). Unbekannte choice-Werte
- * (sollte es dank CHECK nicht geben) werden ignoriert und zählen NICHT in
- * gesamt — defensiv gegen kaputte Daten.
+ * Gemeinsame Beendet-Semantik (ADR-022, deckungsgleich mit der Freigabe der
+ * Beleg-Liste in beleg.getBelegListe und der Stimm-Schlusslogik in abstimmen):
+ * beendet = hart geschlossen (status) ODER Schlusszeit erreicht (closesAt<=now).
+ * Entwürfe sind NIE beendet (nie öffentlich, Defense-in-Depth). Reiner
+ * JS-Vergleich — kein Date in Roh-SQL.
+ */
+export function istBeendet(
+  poll: { status: string; closesAt: Date | null },
+  now: Date = new Date()
+): boolean {
+  if (poll.status === "entwurf") return false;
+  return (
+    poll.status === "geschlossen" ||
+    (poll.closesAt != null && poll.closesAt <= now)
+  );
+}
+
+/**
+ * ADR-022: Serverseitige Redaktion für LAUFENDE Umfragen — die per-Option-
+ * Aufschlüsselung verlässt den Server nicht (Schutz gegen zeitliche
+ * Differenzbildung; erwünschter Nebeneffekt: keine Anker-/Herdeneffekte durch
+ * Zwischenstände). Poll-Ebene gesamt/verifiziert bleibt erhalten (ADR-014).
+ * maskiert bleibt false — selbst das Maskierungs-MUSTER würde sonst verraten,
+ * welche Optionen klein sind.
+ */
+export function ohneAufschluesselung(ergebnis: PollErgebnis): PollErgebnis {
+  return {
+    gesamt: ergebnis.gesamt,
+    verifiziert: ergebnis.verifiziert,
+    aufschluesselungNachSchluss: true,
+    optionen: ergebnis.optionen.map(({ choice }) => ({
+      choice,
+      count: null,
+      verifiziert: null,
+      prozent: null,
+      maskiert: false,
+    })),
+  };
+}
+
+/**
+ * Aggregiert Stimm-Zeilen zu einem VOLLEN Ergebnis (Endergebnis-Sicht) —
+ * inklusive serverseitiger k-Anonymitäts-Suppression (siehe Datei-Header).
+ * Für LAUFENDE Umfragen muss der Aufrufer das Ergebnis zusätzlich durch
+ * ohneAufschluesselung() schicken (macht queries.getPollErgebnis zentral).
+ * Unbekannte choice-Werte (sollte es dank CHECK nicht geben) werden ignoriert
+ * und zählen NICHT in gesamt — defensiv gegen kaputte Daten.
  */
 export function aggregateVotes(rows: VoteRow[]): PollErgebnis {
   const counts: Record<Choice, number> = { ja: 0, nein: 0, enthaltung: 0 };
@@ -109,7 +169,7 @@ export function aggregateVotes(rows: VoteRow[]): PollErgebnis {
     };
   });
 
-  return { gesamt, verifiziert, optionen };
+  return { gesamt, verifiziert, optionen, aufschluesselungNachSchluss: false };
 }
 
 /**

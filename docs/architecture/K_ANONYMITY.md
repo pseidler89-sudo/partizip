@@ -1,12 +1,17 @@
 > **Herkunft:** Übernommen aus den autonomen Loop-Iterationen (Ralph/Self-Improvement, `origin/main` b08e8af) und am 2026-06-15 gegen den überparteilich-kommunalen Mitmachen-Pivot bereinigt. Ergänzende Referenz; bei Widerspruch gilt der real gebaute Code + `docs/decisions/`.
 
-> **Pilot-Status (2026-07-02):** Auf **Options-Ebene (ja/nein/enthaltung) implementiert** in `app/src/lib/polls/ergebnis.ts` (`aggregateVotes`/`bestimmeMaskierteOptionen`): primäre + komplementäre Suppression + **Rekonstruktions-Check** (eindeutige Zerlegung der maskierten Summe → volle Suppression; Gate-B H1 2026-07-02) SERVERSEITIG, maskierte Optionen verlassen den Server mit `count/verifiziert/prozent = null`, kein exakter Kleingruppen-Wert aus dem Payload rekonstruierbar (Sweep-Test) (fester k = `K_ANONYMITY_SCHWELLE` = 5; Schwellen-Änderung = Produktentscheidung). **Weiter Roadmap:** per-Poll `polls.min_k_anonymity`, Segment-Aufschlüsselungen (PLZ/Ortsteil) nach dem Algorithmus unten.
+> **Pilot-Status (2026-07-02):** Auf **Options-Ebene (ja/nein/enthaltung) implementiert** in `app/src/lib/polls/ergebnis.ts` (`aggregateVotes`/`bestimmeMaskierteOptionen`): primäre + komplementäre Suppression + **Rekonstruktions-Check** (eindeutige Zerlegung der maskierten Summe → volle Suppression; Gate-B H1 2026-07-02) SERVERSEITIG, maskierte Optionen verlassen den Server mit `count/verifiziert/prozent = null`, kein exakter Kleingruppen-Wert aus dem Payload rekonstruierbar (Sweep-Test) (fester k = `K_ANONYMITY_SCHWELLE` = 5; Schwellen-Änderung = Produktentscheidung). **Seit ADR-022 (2026-07-11):** per-Option-Aufschlüsselung erst nach Abstimmungsende (laufende Umfragen liefern nur `gesamt`/`verifiziert`). **Weiter Roadmap:** per-Poll `polls.min_k_anonymity`, Segment-Aufschlüsselungen (PLZ/Ortsteil) nach dem Algorithmus unten.
 
-> **Bekannte Grenzen der Garantie (Gate-B-Review 2026-07-11):** (1) Die Garantie gilt **pro
-> Einzel-Snapshot**. Bei laufenden Abstimmungen kann ein Beobachter über die Zeit
-> (Differenzbildung zwischen Snapshots) maskierte Kleingruppen teils exakt rekonstruieren —
-> die saubere Antwort für sensible Fragen ist „Aufschlüsselung erst nach Abstimmungsende"
-> (Roadmap/Produktentscheidung). (2) Die k-Garantie erstreckt sich **nicht** auf die
+> **Bekannte Grenzen der Garantie (Gate-B-Review 2026-07-11):** (1) ~~Die Garantie gilt nur
+> pro Einzel-Snapshot (Differenzbildung über die Zeit)~~ — **adressiert durch
+> [ADR-022](../decisions/ADR-022-aufschluesselung-nach-abstimmungsende.md)** (2026-07-11):
+> Solange eine Umfrage läuft, verlässt KEINE per-Option-Aufschlüsselung den Server
+> (`aufschluesselungNachSchluss`, serverseitig in `queries.getPollErgebnis` via
+> `ohneAufschluesselung`); nur `gesamt`/`verifiziert` auf Poll-Ebene bleiben sichtbar
+> (ADR-014). Die Aufschlüsselung erscheint nach Abstimmungsende (`istBeendet`: Status
+> `geschlossen` ODER `closesAt` erreicht, deckungsgleich mit der Beleg-Listen-Freigabe)
+> als EIN finaler Stand mit k-Suppression — die Snapshot-Garantie gilt damit praktisch
+> fürs Endergebnis. (2) Die k-Garantie erstreckt sich **nicht** auf die
 > per-Option-„davon verifiziert"-Zahlen sichtbarer Optionen (ADR-014-gewollt, können < k sein).
 
 # k-Anonymity for Segmented Results (Loop 2)

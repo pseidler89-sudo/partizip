@@ -15,6 +15,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { polls, voteReceipts } from "@/db/schema";
+import { istBeendet } from "@/lib/polls/ergebnis";
 import { generateReadableCode, readableCodePattern } from "@/lib/readable-code";
 
 export const BELEG_PREFIX = "BELEG";
@@ -87,15 +88,11 @@ export async function getBelegListe(
     .where(and(eq(polls.id, pollId), eq(polls.tenantId, tenantId)))
     .limit(1);
   const poll = pollRows[0];
-  // Belege sind prüfbar, sobald die ABSTIMMUNG BEENDET ist — entweder hart
-  // geschlossen (status) ODER die Schlusszeit ist erreicht (closesAt<=now, analog
-  // zur Stimm-Schlusslogik in abstimmen). Reiner JS-Vergleich, kein Date in Roh-SQL.
-  const beendet =
-    !!poll &&
-    poll.status !== "entwurf" && // Entwürfe sind nie öffentlich (Defense-in-Depth)
-    (poll.status === "geschlossen" ||
-      (poll.closesAt != null && poll.closesAt <= new Date()));
-  if (!beendet) return null;
+  // Belege sind prüfbar, sobald die ABSTIMMUNG BEENDET ist — gemeinsame
+  // Beendet-Semantik istBeendet (ergebnis.ts, ADR-022): hart geschlossen (status)
+  // ODER Schlusszeit erreicht; Entwürfe nie (Defense-in-Depth). Deckungsgleich
+  // mit der Ergebnis-Aufschlüsselung und der Stimm-Schlusslogik in abstimmen.
+  if (!poll || !istBeendet(poll)) return null;
 
   const rows = await db
     .select({ code: voteReceipts.code })

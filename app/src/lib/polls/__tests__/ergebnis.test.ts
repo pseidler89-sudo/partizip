@@ -6,14 +6,18 @@
  * und die SERVERSEITIGE k-Anonymitäts-Suppression (Projekt-Review P1-1):
  * maskierte Optionen dürfen den Server nur mit count/verifiziert/prozent
  * = null verlassen, inkl. komplementärer Suppression gegen Rückrechnung.
+ * Dazu ADR-022: istBeendet (gemeinsame Beendet-Semantik) und
+ * ohneAufschluesselung (Redaktion laufender Umfragen).
  */
 
 import { describe, it, expect } from "vitest";
 import {
   aggregateVotes,
   bestimmeMaskierteOptionen,
+  istBeendet,
   isValidChoice,
   K_ANONYMITY_SCHWELLE,
+  ohneAufschluesselung,
   type VoteRow,
 } from "@/lib/polls/ergebnis";
 
@@ -36,6 +40,13 @@ describe("aggregateVotes", () => {
       expect(o.prozent).toBe(0);
       expect(o.maskiert).toBe(false);
     }
+  });
+
+  it("liefert die Endergebnis-Sicht (aufschluesselungNachSchluss=false)", () => {
+    // ADR-022: aggregateVotes selbst ist die volle Sicht — die Redaktion für
+    // laufende Umfragen macht ohneAufschluesselung (via queries.getPollErgebnis).
+    expect(aggregateVotes([]).aufschluesselungNachSchluss).toBe(false);
+    expect(aggregateVotes(stimmen(6, 5, 5)).aufschluesselungNachSchluss).toBe(false);
   });
 
   it("zählt gesamt und verifiziert getrennt (oberhalb der Schwelle)", () => {
@@ -235,6 +246,63 @@ describe("Rekonstruktions-Sweep (Gate-B H1): kein maskierter Wert eindeutig best
       geprueft++;
     }
     expect(geprueft).toBeGreaterThan(100); // Sanity: der Sweep prüft real etwas.
+  });
+});
+
+describe("ohneAufschluesselung (ADR-022: laufende Umfrage)", () => {
+  it("redigiert ALLE Options-Zahlen zu null und setzt das Flag; Poll-Ebene bleibt", () => {
+    const voll = aggregateVotes(stimmen(10, 6, 5, 3));
+    const r = ohneAufschluesselung(voll);
+
+    expect(r.aufschluesselungNachSchluss).toBe(true);
+    expect(r.gesamt).toBe(21);
+    expect(r.verifiziert).toBe(3);
+    expect(r.optionen).toHaveLength(3);
+    for (const o of r.optionen) {
+      expect(o.count).toBeNull();
+      expect(o.verifiziert).toBeNull();
+      expect(o.prozent).toBeNull();
+    }
+    // Choice-Reihenfolge bleibt erhalten (UI-Stabilität).
+    expect(r.optionen.map((o) => o.choice)).toEqual(["ja", "nein", "enthaltung"]);
+  });
+
+  it("leakt auch das Maskierungs-MUSTER nicht (maskiert überall false)", () => {
+    // 25/8/3 würde im Endergebnis nein+enthaltung maskieren — während des
+    // Laufs darf nicht einmal erkennbar sein, WELCHE Optionen klein sind.
+    const r = ohneAufschluesselung(aggregateVotes(stimmen(25, 8, 3)));
+    for (const o of r.optionen) {
+      expect(o.maskiert).toBe(false);
+      expect(o.count).toBeNull();
+    }
+  });
+});
+
+describe("istBeendet (gemeinsame Beendet-Semantik, ADR-022)", () => {
+  const now = new Date("2026-07-11T12:00:00Z");
+  const vorher = new Date("2026-07-11T11:00:00Z");
+  const nachher = new Date("2026-07-11T13:00:00Z");
+
+  it("hart geschlossen (status) → beendet, unabhängig von closesAt", () => {
+    expect(istBeendet({ status: "geschlossen", closesAt: null }, now)).toBe(true);
+    // Vorzeitig geschlossen: closesAt läge noch in der Zukunft.
+    expect(istBeendet({ status: "geschlossen", closesAt: nachher }, now)).toBe(true);
+  });
+
+  it("aktiv mit erreichter Schlusszeit (closesAt <= now) → beendet", () => {
+    expect(istBeendet({ status: "aktiv", closesAt: vorher }, now)).toBe(true);
+    // Exakt auf der Schlusszeit: beendet (<=, deckungsgleich mit abstimmen/Belegen).
+    expect(istBeendet({ status: "aktiv", closesAt: now }, now)).toBe(true);
+  });
+
+  it("aktiv und offen (kein/künftiges closesAt) → NICHT beendet", () => {
+    expect(istBeendet({ status: "aktiv", closesAt: null }, now)).toBe(false);
+    expect(istBeendet({ status: "aktiv", closesAt: nachher }, now)).toBe(false);
+  });
+
+  it("Entwürfe sind NIE beendet (nie öffentlich, Defense-in-Depth)", () => {
+    expect(istBeendet({ status: "entwurf", closesAt: vorher }, now)).toBe(false);
+    expect(istBeendet({ status: "entwurf", closesAt: null }, now)).toBe(false);
   });
 });
 

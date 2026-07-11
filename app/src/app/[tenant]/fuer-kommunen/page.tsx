@@ -32,7 +32,7 @@ const SCHRITTE: { n: string; titel: string; text: string }[] = [
   {
     n: "3",
     titel: "Ergebnis auf einen Blick",
-    text: "Nach Ebene gekennzeichnet, mit Anteil wohnsitz-verifizierter Stimmen — die Wahl selbst bleibt geheim.",
+    text: "Ausgezählt nach Abstimmungsende — nach Ebene gekennzeichnet, mit Anteil wohnsitz-verifizierter Stimmen. Die Wahl selbst bleibt geheim.",
   },
   {
     n: "4",

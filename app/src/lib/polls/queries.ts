@@ -5,6 +5,11 @@
  * Lesezugriffe und werden nur aus Server-Komponenten aufgerufen. Lägen sie in
  * der "use server"-Action-Datei, würde Next.js sie als client-aufrufbare
  * RPC-Endpunkte mit client-kontrolliertem tenantId exponieren (Gate-B MAJOR-G).
+ *
+ * ADR-022 (Aufschlüsselung erst nach Abstimmungsende): Alle Ergebnis-Aggregate
+ * hier (getPollErgebnis, getMeineTeilnahmen) liefern für LAUFENDE Umfragen die
+ * Optionen OHNE Zahlen (ohneAufschluesselung) — serverseitig hart, nie nur UI.
+ * Beendet-Semantik: istBeendet (deckungsgleich mit der Beleg-Listen-Freigabe).
  */
 
 import { and, eq, or, isNull, lte, gt, desc, inArray, count, sql } from "drizzle-orm";
@@ -12,11 +17,21 @@ import type { Db } from "@/db/client";
 import { polls, votes, scopeLevelEnum, pollStatusEnum } from "@/db/schema";
 import type { TenantRow } from "@/lib/tenant";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
-import { aggregateVotes, type PollErgebnis } from "@/lib/polls/ergebnis";
+import {
+  aggregateVotes,
+  istBeendet,
+  ohneAufschluesselung,
+  type PollErgebnis,
+} from "@/lib/polls/ergebnis";
 
 /**
  * Aggregiertes Ergebnis einer Umfrage (tenant-scoped). Liefert null, wenn die
  * Umfrage nicht zum Tenant gehört.
+ *
+ * ADR-022: Läuft die Umfrage noch (nicht istBeendet), enthält das Ergebnis
+ * KEINE per-Option-Zahlen (alle null, aufschluesselungNachSchluss=true) — nur
+ * gesamt/verifiziert auf Poll-Ebene. Erst nach Abstimmungsende kommt die volle
+ * Aufschlüsselung (ein finaler Stand), weiterhin mit k-Suppression.
  */
 export async function getPollErgebnis(
   db: Db,
@@ -24,18 +39,20 @@ export async function getPollErgebnis(
   pollId: string
 ): Promise<PollErgebnis | null> {
   const pollRows = await db
-    .select({ id: polls.id })
+    .select({ id: polls.id, status: polls.status, closesAt: polls.closesAt })
     .from(polls)
     .where(and(eq(polls.id, pollId), eq(polls.tenantId, tenantId)))
     .limit(1);
-  if (pollRows.length === 0) return null;
+  const poll = pollRows[0];
+  if (!poll) return null;
 
   const rows = await db
     .select({ choice: votes.choice, warVerifiziert: votes.warVerifiziert })
     .from(votes)
     .where(and(eq(votes.pollId, pollId), eq(votes.tenantId, tenantId)));
 
-  return aggregateVotes(rows);
+  const ergebnis = aggregateVotes(rows);
+  return istBeendet(poll) ? ergebnis : ohneAufschluesselung(ergebnis);
 }
 
 /**
@@ -117,6 +134,7 @@ export interface PollListItem {
   id: string;
   frage: string;
   typ: "ja_nein_enthaltung";
+  status: (typeof pollStatusEnum.enumValues)[number];
   verbindlich: boolean;
   scopeLevel: (typeof scopeLevelEnum.enumValues)[number];
   scopeCode: string | null;
@@ -162,6 +180,7 @@ export async function getAktivePolls(
       id: polls.id,
       frage: polls.frage,
       typ: polls.typ,
+      status: polls.status,
       verbindlich: polls.verbindlich,
       scopeLevel: polls.scopeLevel,
       scopeCode: polls.scopeCode,
@@ -188,6 +207,9 @@ export async function getAktivePolls(
  *
  * Einschluss bewusst unabhängig vom Status/Zeitfenster: bereits beendete oder
  * geschlossene Umfragen sollen in "Bereits teilgenommen" sichtbar bleiben.
+ *
+ * ADR-022: Ergebnisse laufender Umfragen kommen OHNE per-Option-Zahlen
+ * (ohneAufschluesselung) — gleiche Beendet-Semantik wie getPollErgebnis.
  */
 export async function getMeineTeilnahmen(
   db: Db,
@@ -217,6 +239,7 @@ export async function getMeineTeilnahmen(
       id: polls.id,
       frage: polls.frage,
       typ: polls.typ,
+      status: polls.status,
       verbindlich: polls.verbindlich,
       scopeLevel: polls.scopeLevel,
       scopeCode: polls.scopeCode,
@@ -235,12 +258,17 @@ export async function getMeineTeilnahmen(
     .where(and(eq(votes.tenantId, tenantId), inArray(votes.pollId, pollIds)));
 
   type VoteAggRow = { pollId: string; choice: string; warVerifiziert: boolean };
-  return pollRows.map((p: PollListItem) => ({
-    ...p,
-    ergebnis: aggregateVotes(
+  const now = new Date();
+  return pollRows.map((p: PollListItem) => {
+    const ergebnis = aggregateVotes(
       (allVotes as VoteAggRow[]).filter((v: VoteAggRow) => v.pollId === p.id)
-    ),
-  }));
+    );
+    return {
+      ...p,
+      // ADR-022: laufende Umfragen ohne per-Option-Aufschlüsselung.
+      ergebnis: istBeendet(p, now) ? ergebnis : ohneAufschluesselung(ergebnis),
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
