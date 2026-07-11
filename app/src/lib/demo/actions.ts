@@ -84,12 +84,11 @@ export async function demoSessionStarten(): Promise<DemoSessionResult> {
   }
 
   // --- Missbrauchsdeckel 1: IP-Rate-Limit (Muster lib/auth/rate-limit) ---
-  // ANNAHME (Gate-B MINOR-1, wie polls/rate-limit): getClientIp() vertraut dem
-  // linken x-forwarded-for-Eintrag. Das ist nur hinter Traefik sicher, der
-  // client-gelieferte XFF-Header standardmäßig ersetzt (keine
-  // forwardedHeaders.insecure/trustedIPs-Ausnahmen konfiguriert — verifiziert)
-  // und solange der App-Port 3000 nicht direkt erreichbar ist. Ohne IP greift
-  // NUR der 24-h-Cap unten.
+  // getClientIp() (lib/client-ip.ts, seit PR #19) nimmt das LETZTE
+  // x-forwarded-for-Element — das einzige, das Traefik als vertrauenswürdiger
+  // Proxy selbst anhängt; client-gelieferte linke Einträge sind fälschbar.
+  // Voraussetzung bleibt, dass der App-Port 3000 nicht direkt erreichbar ist.
+  // Ohne IP greift NUR der 24-h-Cap unten.
   const ip = await getClientIp();
   if (ip) {
     const keyHash = hmacRateLimit(ip);

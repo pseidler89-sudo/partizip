@@ -20,11 +20,15 @@
  *      bleibt, zusätzlich die kleinste noch sichtbare Option maskieren.
  *   3. Rekonstruktions-Check (Gate-B H1): Lässt die maskierte Summe nur EINE
  *      konsistente Zerlegung zu (z. B. 0/4/4 → sichtbar 0, Summe 8 = zwingend
- *      4+4), volle Suppression. Garantie: kein exakter Kleingruppen-Wert ist
- *      aus dem Payload rekonstruierbar (Sweep-Test); Wertebereiche bleiben
- *      naturgemäß eingrenzbar. `gesamt`/`verifiziert` (Poll-Ebene) bleiben
- *      bewusst öffentlich (ADR-014); die Verifiziert-Differenz sichtbarer
- *      Optionen betrifft nach Suppression stets eine Gruppe ≥ k.
+ *      4+4), volle Suppression. Garantie (PRO EINZEL-SNAPSHOT): kein exakter
+ *      Kleingruppen-Wert ist aus dem Payload rekonstruierbar (Sweep-Test);
+ *      Wertebereiche bleiben naturgemäß eingrenzbar. GRENZEN (Gate-B-Review
+ *      2026-07-11): (a) Wer ein LAUFENDES Ergebnis über die Zeit beobachtet,
+ *      kann Kleingruppen per Differenzbildung teils rekonstruieren — für
+ *      sensible Fragen ist "Aufschlüsselung erst nach Schluss" die saubere
+ *      Antwort (Roadmap). (b) `gesamt`/`verifiziert` (Poll-Ebene) bleiben
+ *      bewusst öffentlich (ADR-014); die k-Garantie erstreckt sich NICHT auf
+ *      die per-Option-Verifiziert-Zahlen sichtbarer Optionen (können < k sein).
  * Segment-Aufschlüsselungen (PLZ/Ortsteil) bleiben Roadmap (K_ANONYMITY.md).
  */
 

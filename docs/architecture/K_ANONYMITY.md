@@ -2,6 +2,13 @@
 
 > **Pilot-Status (2026-07-02):** Auf **Options-Ebene (ja/nein/enthaltung) implementiert** in `app/src/lib/polls/ergebnis.ts` (`aggregateVotes`/`bestimmeMaskierteOptionen`): primäre + komplementäre Suppression + **Rekonstruktions-Check** (eindeutige Zerlegung der maskierten Summe → volle Suppression; Gate-B H1 2026-07-02) SERVERSEITIG, maskierte Optionen verlassen den Server mit `count/verifiziert/prozent = null`, kein exakter Kleingruppen-Wert aus dem Payload rekonstruierbar (Sweep-Test) (fester k = `K_ANONYMITY_SCHWELLE` = 5; Schwellen-Änderung = Produktentscheidung). **Weiter Roadmap:** per-Poll `polls.min_k_anonymity`, Segment-Aufschlüsselungen (PLZ/Ortsteil) nach dem Algorithmus unten.
 
+> **Bekannte Grenzen der Garantie (Gate-B-Review 2026-07-11):** (1) Die Garantie gilt **pro
+> Einzel-Snapshot**. Bei laufenden Abstimmungen kann ein Beobachter über die Zeit
+> (Differenzbildung zwischen Snapshots) maskierte Kleingruppen teils exakt rekonstruieren —
+> die saubere Antwort für sensible Fragen ist „Aufschlüsselung erst nach Abstimmungsende"
+> (Roadmap/Produktentscheidung). (2) Die k-Garantie erstreckt sich **nicht** auf die
+> per-Option-„davon verifiziert"-Zahlen sichtbarer Optionen (ADR-014-gewollt, können < k sein).
+
 # k-Anonymity for Segmented Results (Loop 2)
 
 Public results may be broken down by segment (e.g. by PLZ region or scope). Segmentation must
