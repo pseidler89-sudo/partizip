@@ -51,6 +51,38 @@ export async function sendMagicLinkEmail(
   // Kein Logging des Links hier (PII-Minimierung, der Link ist ein Credential).
 }
 
+/**
+ * Versendet eine Rollen-Einladung. Der Roh-Token steht ausschließlich in der
+ * übergebenen URL (Credential) — hier wird er NIEMALS geloggt.
+ *
+ * `roleLabel` ist eine menschenlesbare Rollen-Bezeichnung (z. B. „Redakteur:in");
+ * `kommuneName` der Kommunen-Name für die Anrede.
+ */
+export async function sendInvitationEmail(
+  email: string,
+  inviteUrl: string,
+  roleLabel: string,
+  kommuneName: string,
+): Promise<void> {
+  const transport = createTransport();
+
+  await transport.sendMail({
+    from: EMAIL_FROM,
+    to: email,
+    subject: `Ihre Einladung als ${roleLabel} bei Partizip`,
+    text: `Sie wurden von ${kommuneName} eingeladen, bei Partizip als ${roleLabel} mitzuwirken.\n\nUm die Einladung anzunehmen, öffnen Sie diesen Link und melden sich mit dieser E-Mail-Adresse an:\n\n${inviteUrl}\n\nDie Einladung ist an Ihre E-Mail-Adresse gebunden und nur eine begrenzte Zeit gültig.\n\nFalls Sie diese Einladung nicht erwartet haben, können Sie diese E-Mail ignorieren.`,
+    html: `
+      <p>Sie wurden von <strong>${kommuneName}</strong> eingeladen, bei Partizip als <strong>${roleLabel}</strong> mitzuwirken.</p>
+      <p>Um die Einladung anzunehmen, öffnen Sie den Link und melden sich mit dieser E-Mail-Adresse an:</p>
+      <p><a href="${inviteUrl}" style="display:inline-block;padding:12px 24px;background:${BRAND_COLOR};color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Einladung ansehen</a></p>
+      <p style="color:#6b7280;font-size:14px;">Die Einladung ist an Ihre E-Mail-Adresse gebunden und nur eine begrenzte Zeit gültig.</p>
+      <p style="color:#6b7280;font-size:14px;">Falls Sie diese Einladung nicht erwartet haben, können Sie diese E-Mail ignorieren.</p>
+    `,
+  });
+
+  // Kein Logging des Links (PII-Minimierung, der Link ist ein Credential).
+}
+
 export async function sendRegistrationHintEmail(email: string): Promise<void> {
   // Wird gesendet wenn User nicht existiert aber minAgeConfirmed NICHT mitgesandt wurde.
   // Neutral formuliert — kein User-Enumeration-Leak (gleiche Antwort nach außen).

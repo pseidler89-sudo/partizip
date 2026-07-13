@@ -22,8 +22,10 @@ import { users, roles, sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin, manageableRoleTypes } from "@/lib/auth/roles";
+import { einladungenListeCore } from "@/lib/admin/invitation-core";
 import Link from "next/link";
 import { RollenVerwaltung } from "./RollenVerwaltung";
+import { EinladungenVerwaltung } from "./EinladungenVerwaltung";
 
 interface PageProps {
   params: Promise<{ tenant: string }>;
@@ -112,6 +114,19 @@ export default async function AdminRollenPage({ params }: PageProps) {
   // Nur die für den Caller erlaubten roleTypes anbieten (Server erzwingt zusätzlich).
   const erlaubteRollen = manageableRoleTypes(callerRoleTypes);
 
+  // Einladungen (neueste zuerst) — für den Einladungs-Bereich. Kein token_hash.
+  const einladungen = (await einladungenListeCore(db, tenant.id)).map((e) => ({
+    id: e.id,
+    email: e.email,
+    roleType: e.roleType,
+    scopeLevel: e.scopeLevel,
+    scopeCode: e.scopeCode,
+    status: e.status,
+    resendCount: e.resendCount,
+    expiresAt: e.expiresAt.toISOString(),
+    createdAt: e.createdAt.toISOString(),
+  }));
+
   return (
     <main className="min-h-screen px-6 py-10 max-w-4xl mx-auto">
       <div className="mb-8">
@@ -133,6 +148,13 @@ export default async function AdminRollenPage({ params }: PageProps) {
         users={tenantUsers}
         erlaubteRollen={erlaubteRollen}
       />
+
+      <div className="mt-12 border-t border-zinc-200 pt-10">
+        <EinladungenVerwaltung
+          erlaubteRollen={erlaubteRollen}
+          einladungen={einladungen}
+        />
+      </div>
     </main>
   );
 }

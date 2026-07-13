@@ -91,6 +91,20 @@ export const accountStatusEnum = pgEnum("account_status", [
   "deleted",
 ]);
 
+// Einladungs-Flow: Lebenszyklus einer Rollen-Einladung.
+//   pending  = versendet, noch nicht angenommen (einlösbar)
+//   accepted = angenommen, Rolle wurde vergeben (Endzustand)
+//   revoked  = vom Admin zurückgezogen (uneinlösbar)
+//   expired  = abgelaufen (nur als Diagnose-Wert; Ablauf wird primär über
+//              expires_at geprüft, dieser Status ist der optionale Endzustand
+//              eines Cleanups)
+export const invitationStatusEnum = pgEnum("invitation_status", [
+  "pending",
+  "accepted",
+  "revoked",
+  "expired",
+]);
+
 // ---------------------------------------------------------------------------
 // tenants
 // ---------------------------------------------------------------------------
@@ -544,6 +558,71 @@ export const rateLimitEvents = pgTable(
   },
   (t) => [
     index("idx_rate_limit_events_scope_key_created").on(t.scope, t.keyHash, t.createdAt),
+  ]
+);
+
+// ---------------------------------------------------------------------------
+// invitations — Einladungs-Flow für Rollen (Ablösung der grant-role-CLI)
+//
+// Eine Kommune lädt Mitwirkende (redakteur/verifier/beobachter/kommune_admin,
+// im Rahmen der Eskalationsgrenze) per E-Mail ein. Die Einladung wird per Mail
+// zugestellt; angenommen wird sie über die bestehende Magic-Link-Infrastruktur:
+// die eingeladene Person meldet sich mit der eingeladenen Adresse an (Konto
+// anlegen/anmelden) und nimmt dann bewusst an — erst dann wird die Rolle im
+// vorgesehenen Scope vergeben.
+//
+// SICHERHEITS-DESIGN (analog auth_tokens / qr_codes):
+//   - token_hash = SHA-256-Hex des Roh-Tokens (CSPRNG). Der Roh-Token steht NUR
+//     in der Einladungs-URL und verlässt nie das Server-Gedächtnis; in der DB
+//     liegt ausschließlich der Hash. UNIQUE → O(1)-Lookup beim Annehmen.
+//   - email wird für den Versand + die E-Mail-Bindung der Annahme benötigt
+//     (analog users/auth_tokens), erscheint aber NIEMALS in audit_events.
+//   - Tenant-Isolation: tenant_id in JEDER Query.
+//   - Höchstens EINE offene (pending) Einladung je (tenant, email) — partieller
+//     UNIQUE-Index. Erneutes Einladen rotiert den Token statt zu duplizieren.
+//   - invited_by/resent_by/revoked_by/accepted_by: SET NULL, damit Konto-
+//     löschungen die Einladungshistorie nicht blockieren.
+// ---------------------------------------------------------------------------
+
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    // Zweckbindung: Versand + E-Mail-Bindung der Annahme. Niemals in Logs/Audit.
+    // Immer normalisiert (trim + lowercase) gespeichert.
+    email: text("email").notNull(),
+    roleType: roleTypeEnum("role_type").notNull(),
+    scopeLevel: scopeLevelEnum("scope_level").notNull(),
+    scopeCode: text("scope_code"),
+    // SHA-256-Hex des Roh-Tokens — Roh-Token verlässt nie den Server.
+    tokenHash: text("token_hash").notNull().unique(),
+    status: invitationStatusEnum("status").notNull().default("pending"),
+    // Einladende:r (für Audit-Lineage + Grenzprüfung zum Annahme-Zeitpunkt).
+    invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "set null" }),
+    resentBy: uuid("resent_by").references(() => users.id, { onDelete: "set null" }),
+    revokedBy: uuid("revoked_by").references(() => users.id, { onDelete: "set null" }),
+    acceptedBy: uuid("accepted_by").references(() => users.id, { onDelete: "set null" }),
+    resendCount: integer("resend_count").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`)
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    // Höchstens EINE offene Einladung je (tenant, email). Angenommene/
+    // zurückgezogene Zeilen bleiben als Historie erhalten und blockieren keine
+    // spätere Neu-Einladung.
+    uniqueIndex("invitations_tenant_email_pending_unique")
+      .on(t.tenantId, t.email)
+      .where(sql`${t.status} = 'pending'`),
+    index("idx_invitations_tenant_id").on(t.tenantId),
+    // Retention/Cleanup abgelaufener Einladungen.
+    index("idx_invitations_expires_at").on(t.expiresAt),
   ]
 );
 

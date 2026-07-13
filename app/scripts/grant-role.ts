@@ -1,8 +1,14 @@
 /**
- * grant-role.ts — Rollen-Vergabe-CLI (M7, Gate-B: auditiert)
+ * grant-role.ts — Rollen-Vergabe-CLI (Bootstrap / Notnagel)
+ *
+ * NUR für den ERST-ADMIN einer Kommune (Bootstrap) oder den Notfall (kein
+ * erreichbarer Admin mehr). Im REGELBETRIEB werden Mitwirkende NICHT mehr per
+ * CLI berechtigt, sondern über den Einladungs-Flow eingeladen: Admin-Bereich →
+ * „Rollen verwalten" → „Mitwirkende einladen" (auditiert, eskalationsgeschützt,
+ * per E-Mail bestätigt). Diese CLI bleibt bewusst bestehen, um den allerersten
+ * kommune_admin/super_admin anzulegen, bevor überhaupt jemand einladen kann.
  *
  * Vergibt eine Rolle an einen User per E-Mail.
- * Da noch keine Rollen-Vergabe-UI existiert (kommt M8), ist dies der einzige Weg.
  *
  * Verwendung:
  *   npm run grant-role -- --tenant taunusstein --email admin@example.com --role kommune_admin --scope stadt
