@@ -2,7 +2,7 @@
 
 - **Status:** Akzeptiert (Owner-Entscheidung 2026-07-13)
 - **Kontext-Quelle:** Marktanalyse zu Beteiligungsplattformen und Verifizierungs-Bausteinen (2026-07)
-- **Betrifft:** [ADR-014](ADR-014-mitstimmen-ab-stufe-1.md) (Stufenmodell), [ADR-018](ADR-018-eid-eudi-verifizierung.md) (eID/EUDI als Provider)
+- **Betrifft:** [ADR-014](ADR-014-abstimm-verifikationsmodell.md) (Stufenmodell), [ADR-018](ADR-018-eid-eudi-verifizierung.md) (eID/EUDI als Provider)
 
 ## Kontext
 
