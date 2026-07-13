@@ -24,7 +24,7 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { ortsteile as ortsteileTable, roles, sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { isAdmin } from "@/lib/auth/roles";
+import { isAdmin, beobachterDarfSehen } from "@/lib/auth/roles";
 import { getAllPollsForAdmin, type PollAdminItem } from "@/lib/polls/queries";
 import PollComposerForm from "./PollComposerForm";
 import PollAdminActions from "./PollAdminActions";
@@ -99,12 +99,21 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
   }
 
   const roleRows = await db
-    .select({ roleType: roles.roleType })
+    .select({
+      roleType: roles.roleType,
+      scopeLevel: roles.scopeLevel,
+      scopeCode: roles.scopeCode,
+    })
     .from(roles)
     .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
   const roleTypes = roleRows.map((r: { roleType: string }) => r.roleType);
 
-  if (!isAdmin(roleTypes)) redirect(`/${slugFromPath}/anmelden`);
+  // Rollen-Governance: Admins voll; `beobachter` sieht die Übersicht READ-ONLY
+  // und NUR Abstimmungen im eigenen Scope (Composer/Aktionen bleiben Admins
+  // vorbehalten — serverseitig zusätzlich in den Actions erzwungen).
+  const admin = isAdmin(roleTypes);
+  const hatBeobachterRolle = roleTypes.includes("beobachter");
+  if (!admin && !hatBeobachterRolle) redirect(`/${slugFromPath}/anmelden`);
 
   // Ortsteile (für das Ortsteil-Dropdown) + alle Umfragen mit Zählern.
   const ortsteilRows = await db
@@ -113,7 +122,14 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
     .where(eq(ortsteileTable.tenantId, tenant.id))
     .orderBy(asc(ortsteileTable.name));
 
-  const allPolls = await getAllPollsForAdmin(db, tenant.id);
+  const allPollsUnfiltered = await getAllPollsForAdmin(db, tenant.id);
+  // Beobachter: nur Abstimmungen im eigenen Scope (fail-closed über die reine
+  // Funktion beobachterDarfSehen); Admins sehen alle des Tenants.
+  const allPolls = admin
+    ? allPollsUnfiltered
+    : allPollsUnfiltered.filter((p) =>
+        beobachterDarfSehen(roleRows, p.scopeLevel, p.scopeCode),
+      );
   const byStatus = (s: string) => allPolls.filter((p) => p.status === s);
 
   return (
@@ -129,8 +145,19 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
         </p>
       </div>
 
-      {/* Erstellen-Formular */}
-      <PollComposerForm ortsteile={ortsteilRows} />
+      {/* Erstellen-Formular (nur Admins; Beobachter: reine Lese-Ansicht) */}
+      {admin ? (
+        <PollComposerForm ortsteile={ortsteilRows} />
+      ) : (
+        <div
+          className="rounded-lg border p-4 text-sm"
+          style={{ borderColor: "var(--pz-line)", color: "var(--pz-muted)" }}
+        >
+          Lesender Zugriff: Sie sehen hier die Abstimmungen und Ergebnisse in
+          Ihrem Bereich. Erstellen, Aktivieren und Schließen übernehmen
+          Administrator:innen.
+        </div>
+      )}
 
       {/* Übersicht, gruppiert nach Status */}
       <div className="mt-10 space-y-10">
@@ -203,7 +230,7 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
                         </p>
 
                         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-                          <PollAdminActions pollId={p.id} status={p.status} />
+                          {admin && <PollAdminActions pollId={p.id} status={p.status} />}
 
                           {p.status === "aktiv" && (
                             <Link

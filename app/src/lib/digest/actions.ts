@@ -6,6 +6,10 @@
  *
  * Freigabe-Gate (Konzept Kap. 10, nicht verhandelbar):
  *   - Freigeben: nur kommune_admin oder super_admin
+ *   - Vier-Augen-Sperre (SoD): Wer Aussagen selbst geprüft hat, darf den
+ *     Digest NICHT freigeben — atomar erzwungen in freigabe-core.ts;
+ *     Pilot-Überbrückung nur per ALLOW_SELF_APPROVAL=true (fail-closed,
+ *     im Audit als selfApproval markiert)
  *   - Veröffentlichen: nur aus Status 'freigegeben'
  *   - KEIN Pfad entwurf → veroeffentlicht ohne approved_at
  *   - DB-CHECK als letzte Verteidigungslinie (Migration 0006)
@@ -21,10 +25,9 @@
 "use server";
 
 import { cookies, headers } from "next/headers";
-import { eq, and, count, notExists, isNull, or } from "drizzle-orm";
-import { createHash } from "node:crypto";
+import { eq, and, count, notExists, isNull } from "drizzle-orm";
 import { createDb, type Db } from "@/db/client";
-import { digests, digestStatements, tenants, sessions, auditEvents } from "@/db/schema";
+import { digests, digestStatements, sessions, auditEvents } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { getTenantFromHost } from "@/lib/tenant";
 import { sendDigestToMastodon } from "@/lib/channels/mastodon";
@@ -32,6 +35,11 @@ import { sendDigestToBluesky } from "@/lib/channels/bluesky";
 import type { DigestSummary } from "@/lib/channels/types";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getUserRoleTypes, canRedaktion, canFreigeben } from "@/lib/auth/roles";
+import {
+  freigebenCore,
+  isSelfApprovalAllowed,
+  computeStatementsHash,
+} from "@/lib/digest/freigabe-core";
 
 // ---------------------------------------------------------------------------
 // Auth-Hilfsfunktionen
@@ -73,21 +81,8 @@ async function getAuthContext() {
 
 // Rollen-Logik liegt jetzt zentral in @/lib/auth/roles (canRedaktion / canFreigeben).
 
-// ---------------------------------------------------------------------------
-// N1: Content-Hash über alle Statements
-// ---------------------------------------------------------------------------
-
-/**
- * Berechnet einen sha256-Hash über alle Statements eines Digests.
- * Deterministisch serialisiert: position|text|source_url, sortiert nach position.
- */
-function computeStatementsHash(
-  stmts: Array<{ position: number; text: string; sourceUrl: string }>
-): string {
-  const sorted = [...stmts].sort((a, b) => a.position - b.position);
-  const canonical = sorted.map((s) => `${s.position}|${s.text}|${s.sourceUrl}`).join("\n");
-  return createHash("sha256").update(canonical, "utf-8").digest("hex");
-}
+// N1: Content-Hash über alle Statements — liegt jetzt (mit der gesamten
+// Freigabe-Kern-Logik) testbar in @/lib/digest/freigabe-core.
 
 // ---------------------------------------------------------------------------
 // Action: Aussage als quellen-geprüft markieren / Markierung aufheben
@@ -232,160 +227,16 @@ export async function freigeben(digestId: string): Promise<{ ok: boolean; error?
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
 
   const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
-  if (!canFreigeben(roleTypes)) {
-    return {
-      ok: false,
-      error: "Freigabe nur durch kommune_admin/super_admin. Redakteure dürfen Aussagen prüfen, aber nicht freigeben (Vier-Augen-Prinzip).",
-    };
-  }
 
-  // Statements laden für N1 Content-Hash und Anzeige-Zählung (nicht sicherheitskritisch)
-  const digestRows = await ctx.db
-    .select({ id: digests.id, status: digests.status })
-    .from(digests)
-    .where(and(eq(digests.id, digestId), eq(digests.tenantId, ctx.tenant.id)))
-    .limit(1);
-
-  if (digestRows.length === 0) return { ok: false, error: "Digest nicht gefunden." };
-
-  const stmts = await ctx.db
-    .select({
-      position: digestStatements.position,
-      text: digestStatements.text,
-      sourceUrl: digestStatements.sourceUrl,
-      geprueftAt: digestStatements.geprueftAt,
-      geprueftBy: digestStatements.geprueftBy,
-    })
-    .from(digestStatements)
-    .where(eq(digestStatements.digestId, digestId));
-
-  // M1: Leerer Digest nicht freigebbar
-  if (stmts.length === 0) {
-    return { ok: false, error: "Ein Digest ohne Aussagen kann nicht freigegeben werden." };
-  }
-
-  // Anzeige-Zählung (nur für Fehlermeldung; sicherheitskritische Prüfung erfolgt atomar im UPDATE)
-  const gesamtAnzahl = stmts.length;
-  const geprueftAnzahl = stmts.filter((s: { geprueftAt: Date | null }) => s.geprueftAt !== null).length;
-  if (geprueftAnzahl < gesamtAnzahl) {
-    return {
-      ok: false,
-      error: `Freigabe erst möglich, wenn alle Aussagen quellen-geprüft sind (${geprueftAnzahl} von ${gesamtAnzahl} geprüft).`,
-    };
-  }
-
-  // H1 Vier-Augen-Toggle: wenn für den Tenant aktiv, darf der Freigeber keine der
-  // Aussagen selbst geprüft haben (Freigeber ≠ Bearbeiter), und jede Aussage muss
-  // einen erfassten (anderen) Prüfer haben. Pilot-Default: false (Ein-Personen-Betrieb).
-  const tenantRow = await ctx.db
-    .select({ vierAugen: tenants.vierAugenPflicht })
-    .from(tenants)
-    .where(eq(tenants.id, ctx.tenant.id))
-    .limit(1);
-  const vierAugenPflicht = tenantRow[0]?.vierAugen ?? false;
-
-  if (vierAugenPflicht) {
-    const selbstOderUngeprueft = stmts.some(
-      (s: { geprueftBy: string | null }) => s.geprueftBy === null || s.geprueftBy === ctx.userId,
-    );
-    if (selbstOderUngeprueft) {
-      return {
-        ok: false,
-        error: "Vier-Augen-Prinzip aktiv: Der Freigeber darf keine Aussage dieses Digests selbst geprüft haben — jede Aussage muss von einer anderen Person geprüft sein.",
-      };
-    }
-  }
-
-  const contentHash = computeStatementsHash(stmts);
-  const now = new Date();
-
-  // H4: Status-UPDATE + Audit in gemeinsamer Transaktion
-  // B1-Fix: atomares Gate — NOT EXISTS stellt sicher, dass kein Statement ungeprüft ist,
-  // auch wenn zwischen der Anzeige-Zählung oben und diesem UPDATE ein nebenläufiges
-  // setStatementGeprueft(stmt, false) ausgeführt wurde (TOCTOU-Schutz).
-  const result = await ctx.db.transaction(async (tx: Db) => {
-    // H1 Vier-Augen: atomarer Backstop — wenn aktiv, schlägt das UPDATE fehl, falls
-    // irgendeine Aussage keinen (anderen) Prüfer hat (TOCTOU-Schutz zur Vorprüfung).
-    const vierAugenGuard = vierAugenPflicht
-      ? notExists(
-          tx
-            .select({ id: digestStatements.id })
-            .from(digestStatements)
-            .where(
-              and(
-                eq(digestStatements.digestId, digestId),
-                or(
-                  isNull(digestStatements.geprueftBy),
-                  eq(digestStatements.geprueftBy, ctx.userId),
-                ),
-              ),
-            ),
-        )
-      : undefined;
-
-    const updated = await tx
-      .update(digests)
-      .set({
-        status: "freigegeben",
-        approvedBy: ctx.userId,
-        approvedAt: now,
-        approvedContentHash: contentHash, // N1
-      })
-      .where(
-        and(
-          eq(digests.id, digestId),
-          eq(digests.tenantId, ctx.tenant.id),
-          eq(digests.status, "entwurf"),
-          // B1: atomares Gate — UPDATE schlägt fehl, wenn irgendein Statement ungeprueft ist
-          notExists(
-            tx.select({ id: digestStatements.id })
-              .from(digestStatements)
-              .where(
-                and(
-                  eq(digestStatements.digestId, digestId),
-                  isNull(digestStatements.geprueftAt)
-                )
-              )
-          ),
-          // H1: atomarer Vier-Augen-Backstop (undefined wenn Toggle aus → von and() ignoriert)
-          vierAugenGuard
-        )
-      )
-      .returning({ id: digests.id });
-
-    if (updated.length === 0) {
-      // Ursache unterscheiden: Status nicht mehr 'entwurf' oder ungeprüfte Statements
-      const current = await tx
-        .select({ status: digests.status })
-        .from(digests)
-        .where(and(eq(digests.id, digestId), eq(digests.tenantId, ctx.tenant.id)))
-        .limit(1);
-
-      if (current.length === 0 || current[0].status !== "entwurf") {
-        return { ok: false as const, error: "Ungültiger Statusübergang: Freigabe nur aus Status 'entwurf' möglich." };
-      }
-      // Status ist 'entwurf', aber NOT EXISTS hat angeschlagen → ungeprüfte Statements
-      return {
-        ok: false as const,
-        error: `Freigabe abgelehnt: Es gibt noch ungeprüfte Aussagen (atomare Prüfung). Bitte alle Aussagen quellen-prüfen.`,
-      };
-    }
-
-    // Audit (PII-frei: actor_ref = User-UUID)
-    await tx.insert(auditEvents).values({
-      tenantId: ctx.tenant.id,
-      actorType: "admin",
-      actorRef: ctx.userId,
-      action: "digest.approved",
-      targetType: "digest",
-      targetId: digestId,
-      metadata: { digestId, contentHash },
-    });
-
-    return { ok: true as const };
+  // Gesamte Kern-Logik (Rolle, Vollständigkeit, Vier-Augen-Sperre/SoD atomar im
+  // Status-UPDATE, Audit) liegt testbar in freigabe-core.ts. Die Pilot-
+  // Überbrückung kommt AUSSCHLIESSLICH aus der Env (fail-closed).
+  return freigebenCore(ctx.db, ctx.tenant.id, {
+    digestId,
+    callerUserId: ctx.userId,
+    callerRoleTypes: roleTypes,
+    allowSelfApproval: isSelfApprovalAllowed(),
   });
-
-  return result;
 }
 
 // ---------------------------------------------------------------------------

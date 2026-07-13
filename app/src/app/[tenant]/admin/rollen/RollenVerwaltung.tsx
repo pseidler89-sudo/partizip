@@ -20,6 +20,7 @@ const ROLE_LABELS: Record<string, string> = {
   user: "Bürger:in",
   verifier: "Verifizierer:in",
   redakteur: "Redakteur:in",
+  beobachter: "Beobachter:in (nur Lesen)",
   kommune_admin: "Kommune-Admin",
   super_admin: "Super-Admin",
   ortsteil_admin: "Ortsteil-Admin",

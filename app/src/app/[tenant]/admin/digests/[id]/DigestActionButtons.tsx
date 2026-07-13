@@ -29,6 +29,10 @@ interface Props {
   showNurAlleGeprueftButton: boolean;
   // H1: darf der aktuelle Nutzer freigeben/veröffentlichen? (Redakteur: false)
   canFreigeben?: boolean;
+  // Vier-Augen-Sperre (SoD): true, wenn der aktuelle Nutzer Aussagen dieses
+  // Digests selbst geprüft hat und die Selbstfreigabe nicht überbrückt ist.
+  // NUR Komfort — die Sperre wirkt serverseitig atomar in der Freigabe-Action.
+  sodGesperrt?: boolean;
   // Für Statement-Toggles (Modus 2)
   statementId?: string;
   statementGeprueft?: boolean;
@@ -45,6 +49,7 @@ export function DigestActionButtons({
   gesamtAnzahl,
   showNurAlleGeprueftButton,
   canFreigeben = true,
+  sodGesperrt = false,
   statementId,
   statementGeprueft,
   statementGeprueftAt: _statementGeprueftAt,
@@ -199,11 +204,13 @@ export function DigestActionButtons({
         <>
           <button
             onClick={handleFreigeben}
-            disabled={isPending || !alleGeprueft}
+            disabled={isPending || !alleGeprueft || sodGesperrt}
             title={
-              !alleGeprueft
-                ? `Freigabe erst möglich, wenn alle Aussagen geprüft sind (${geprueftAnzahl} von ${gesamtAnzahl} geprüft)`
-                : "Digest freigeben"
+              sodGesperrt
+                ? "Vier-Augen-Prinzip: Freigabe durch eine zweite Person"
+                : !alleGeprueft
+                  ? `Freigabe erst möglich, wenn alle Aussagen geprüft sind (${geprueftAnzahl} von ${gesamtAnzahl} geprüft)`
+                  : "Digest freigeben"
             }
             className="rounded-md bg-[color:var(--pz-brand)] px-4 py-2 text-sm font-medium text-white hover:bg-[color:var(--pz-brand-strong)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
@@ -212,6 +219,13 @@ export function DigestActionButtons({
           {!alleGeprueft && gesamtAnzahl > 0 && (
             <p className="text-xs text-amber-700">
               Freigabe erst möglich, wenn alle Aussagen quellen-geprüft sind ({geprueftAnzahl} von {gesamtAnzahl} geprüft).
+            </p>
+          )}
+          {alleGeprueft && sodGesperrt && (
+            <p className="text-xs text-amber-700">
+              <strong>Vier-Augen-Prinzip:</strong> Sie haben Aussagen dieses Digests
+              selbst quellen-geprüft. Die Freigabe muss durch eine zweite Person
+              erfolgen.
             </p>
           )}
         </>
