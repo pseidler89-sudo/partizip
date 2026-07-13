@@ -19,7 +19,8 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { digests, digestStatements, roles, sessions, risDocuments } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { canRedaktion, canFreigeben } from "@/lib/auth/roles";
+import { canRedaktion, canFreigeben, beobachterDarfSehen } from "@/lib/auth/roles";
+import { hatDigestRedigiert, isSelfApprovalAllowed } from "@/lib/digest/freigabe-core";
 import Link from "next/link";
 import { DigestActionButtons } from "./DigestActionButtons";
 import { decodeHtmlEntities } from "@/lib/text/html-entities";
@@ -53,14 +54,24 @@ async function getDigestData(tenantSlug: string, digestId: string) {
   }
 
   const roleRows = await db
-    .select({ roleType: roles.roleType })
+    .select({
+      roleType: roles.roleType,
+      scopeLevel: roles.scopeLevel,
+      scopeCode: roles.scopeCode,
+    })
     .from(roles)
     .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
   const roleTypes = roleRows.map((r: { roleType: string }) => r.roleType);
 
   // H1: Redakteure dürfen die Detailansicht sehen + prüfen; Freigabe nur Admins.
   // `isAdmin` heißt hier „hat redaktionellen Zugang"; canFreigeben trennt die Freigabe-Rechte.
-  if (!canRedaktion(roleTypes)) return { tenant, digest: null, isAdmin: false, canFreigeben: false };
+  // Rollen-Governance: `beobachter` (stadtweiter Scope — Digests sind stadtweit)
+  // sieht Entwürfe READ-ONLY; alle Mutationen bleiben serverseitig gesperrt.
+  const kannRedigieren = canRedaktion(roleTypes);
+  const istBeobachter = beobachterDarfSehen(roleRows, "stadt", null);
+  if (!kannRedigieren && !istBeobachter) {
+    return { tenant, digest: null, isAdmin: false, canFreigeben: false };
+  }
   const canFreigebenFlag = canFreigeben(roleTypes);
 
   // Digest + Tenant-Isolierung
@@ -70,9 +81,19 @@ async function getDigestData(tenantSlug: string, digestId: string) {
     .where(and(eq(digests.id, digestId), eq(digests.tenantId, tenant.id)))
     .limit(1);
 
-  if (digestRows.length === 0) return { tenant, digest: null, isAdmin: true, canFreigeben: canFreigebenFlag };
+  if (digestRows.length === 0)
+    return { tenant, digest: null, isAdmin: true, canFreigeben: canFreigebenFlag, kannRedigieren };
 
   const digest = digestRows[0];
+
+  // Vier-Augen-Sperre (SoD, nur UI-Komfort — serverseitig atomar erzwungen):
+  // Hat die aktuell angemeldete Person Aussagen dieses Digests selbst geprüft
+  // und ist die Selbstfreigabe nicht per ALLOW_SELF_APPROVAL überbrückt?
+  const sodGesperrt =
+    digest.status === "entwurf" &&
+    canFreigebenFlag &&
+    !isSelfApprovalAllowed() &&
+    (await hatDigestRedigiert(db, tenant.id, digestId, session.userId));
 
   // Aussagen mit Quelldokument-Info, geprueft_at und ist_highlight laden
   const stmtRows = await db
@@ -91,7 +112,15 @@ async function getDigestData(tenantSlug: string, digestId: string) {
     .where(eq(digestStatements.digestId, digestId))
     .orderBy(digestStatements.position);
 
-  return { tenant, digest, statements: stmtRows, isAdmin: true, canFreigeben: canFreigebenFlag };
+  return {
+    tenant,
+    digest,
+    statements: stmtRows,
+    isAdmin: true,
+    canFreigeben: canFreigebenFlag,
+    kannRedigieren,
+    sodGesperrt,
+  };
 }
 
 interface PageProps {
@@ -107,6 +136,8 @@ export default async function AdminDigestDetailPage({ params }: PageProps) {
   if (!data.digest) notFound();
 
   const { digest, statements, canFreigeben: canFreigebenFlag } = data;
+  const kannRedigieren = data.kannRedigieren ?? false;
+  const sodGesperrt = data.sodGesperrt ?? false;
 
   const statusLabel: Record<string, string> = {
     entwurf: "Entwurf",
@@ -169,7 +200,7 @@ export default async function AdminDigestDetailPage({ params }: PageProps) {
                 <span className="ml-2 text-green-600">✓ Alle geprüft</span>
               )}
             </p>
-            {digest.status === "entwurf" && (
+            {digest.status === "entwurf" && kannRedigieren && (
               <DigestActionButtons
                 digestId={digest.id}
                 status={digest.status}
@@ -191,17 +222,25 @@ export default async function AdminDigestDetailPage({ params }: PageProps) {
         </div>
       )}
 
-      {/* Freigabe-Gate Aktionen */}
-      <DigestActionButtons
-        digestId={digest.id}
-        status={digest.status}
-        tenantSlug={slugFromPath}
-        alleGeprueft={alleGeprueft}
-        geprueftAnzahl={geprueftAnzahl}
-        gesamtAnzahl={gesamtAnzahl}
-        showNurAlleGeprueftButton={false}
-        canFreigeben={canFreigebenFlag}
-      />
+      {/* Freigabe-Gate Aktionen (Beobachter: reine Lese-Ansicht, keine Aktionen) */}
+      {kannRedigieren ? (
+        <DigestActionButtons
+          digestId={digest.id}
+          status={digest.status}
+          tenantSlug={slugFromPath}
+          alleGeprueft={alleGeprueft}
+          geprueftAnzahl={geprueftAnzahl}
+          gesamtAnzahl={gesamtAnzahl}
+          showNurAlleGeprueftButton={false}
+          canFreigeben={canFreigebenFlag}
+          sodGesperrt={sodGesperrt}
+        />
+      ) : (
+        <div className="rounded-md bg-zinc-50 border border-zinc-200 p-3 text-sm text-zinc-600">
+          Lesender Zugriff: Sie können diesen Entwurf einsehen, aber nicht
+          bearbeiten, freigeben oder veröffentlichen.
+        </div>
+      )}
 
       {/* Aussagen */}
       <section className="mt-8">
@@ -220,8 +259,8 @@ export default async function AdminDigestDetailPage({ params }: PageProps) {
               >
                 <div className="flex items-start justify-between gap-3">
                   <p className="text-zinc-900 text-sm leading-relaxed flex-1">{stmt.text}</p>
-                  {/* Toggle-Buttons: nur im Entwurf aktiv */}
-                  {digest.status === "entwurf" ? (
+                  {/* Toggle-Buttons: nur im Entwurf UND mit Redaktionsrecht aktiv */}
+                  {digest.status === "entwurf" && kannRedigieren ? (
                     <DigestActionButtons
                       digestId={digest.id}
                       status={digest.status}

@@ -53,6 +53,11 @@ export const roleTypeEnum = pgEnum("role_type", [
   "ortsteil_admin", // Reserve, im Pilot nicht vergeben
   "kreis_admin",    // Reserve
   "land_admin",     // Reserve
+  // Rollen-Governance: View-Only-Rolle für Multiplikatoren — sieht im eigenen
+  // Scope Ergebnisse und Digest-Entwürfe, KEINERLEI Mutationen (roles.ts:
+  // BEOBACHTUNG_ROLES; bewusst in keiner Mutations-Achse). Ans ENDE angehängt,
+  // damit die Migration ein reines ALTER TYPE ... ADD VALUE bleibt.
+  "beobachter",
 ]);
 
 export const scopeLevelEnum = pgEnum("scope_level", [

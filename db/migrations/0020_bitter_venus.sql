@@ -1,0 +1,1 @@
+ALTER TYPE "public"."role_type" ADD VALUE 'beobachter';

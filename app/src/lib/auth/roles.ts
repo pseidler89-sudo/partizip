@@ -19,6 +19,17 @@ import type { Db } from "@/db/client";
 export const REDAKTION_ROLES = ["redakteur", "kommune_admin", "super_admin"] as const;
 export const FREIGABE_ROLES = ["kommune_admin", "super_admin"] as const;
 export const ADMIN_ROLES = ["kommune_admin", "super_admin"] as const;
+// Rollen-Governance: Lese-Zugriff auf den Verwaltungs-Bereich (Ergebnisse,
+// Digest-Entwürfe). `beobachter` ist eine reine View-Only-Rolle für
+// Multiplikatoren — sie taucht BEWUSST in KEINER Mutations-Achse auf
+// (REDAKTION/FREIGABE/ADMIN/VERIFIER): kein Bearbeiten, kein Freigeben,
+// keine Rollenvergabe, keine Verifizierung.
+export const BEOBACHTUNG_ROLES = [
+  "beobachter",
+  "redakteur",
+  "kommune_admin",
+  "super_admin",
+] as const;
 // ADR-014 Block 2: Wer QR-Codes für die Wohnsitz-Verifizierung erzeugen/
 // widerrufen darf. Bewusst eng: verifier (Bürgerbüro/Institution) + Admins.
 // Ein normaler User kann sich NUR über einen gültigen QR verifizieren — nie
@@ -81,6 +92,97 @@ export function canVerify(roleTypes: string[]): boolean {
   return hasAnyRole(roleTypes, VERIFIER_ROLES);
 }
 
+/**
+ * Darf den LESE-Teil der Verwaltung sehen (Ergebnisse, Digest-Entwürfe):
+ * beobachter, redakteur oder Admin. REINE Lese-Achse — sie gibt NIEMALS
+ * Mutationsrechte (dafür gelten weiterhin canRedaktion/canFreigeben/isAdmin/
+ * canVerify, in denen `beobachter` nicht vorkommt).
+ */
+export function canBeobachten(roleTypes: string[]): boolean {
+  return hasAnyRole(roleTypes, BEOBACHTUNG_ROLES);
+}
+
+// ---------------------------------------------------------------------------
+// Scope-Sichtbarkeit für die View-Only-Rolle `beobachter`
+// ---------------------------------------------------------------------------
+
+/** Rollenzeile mit Scope — Eingabe für die Scope-Sichtbarkeits-Prüfung. */
+export interface RoleScopeRow {
+  roleType: string;
+  scopeLevel: string;
+  scopeCode: string | null;
+}
+
+/** Hierarchie der Scope-Ebenen: höherer Rang deckt niedrigere Ebenen ab. */
+const SCOPE_RANG: Record<string, number> = {
+  ortsteil: 0,
+  stadt: 1,
+  kreis: 2,
+  land: 3,
+};
+
+/**
+ * Sieht ein `beobachter` mit diesen Rollen ein Objekt im Scope
+ * (objScopeLevel, objScopeCode)? REINE Funktion, fail-closed:
+ *
+ *   - Betrachtet werden AUSSCHLIESSLICH `beobachter`-Rollen — Admin-/
+ *     Redaktions-Sichtbarkeit läuft weiterhin über die bestehenden Achsen.
+ *   - Höherer Scope deckt niedrigere ab (stadt-Beobachter sieht auch
+ *     Ortsteil-Objekte des Tenants).
+ *   - Gleiche Ebene: scopeCode muss übereinstimmen; eine Rolle mit
+ *     scopeCode NULL deckt die ganze Ebene ab.
+ *   - Niedrigerer Scope sieht NICHTS auf höherer Ebene (ein Ortsteil-
+ *     Beobachter sieht keine stadtweiten Objekte) und unbekannte Ebenen
+ *     sind nie sichtbar.
+ */
+export function beobachterDarfSehen(
+  rollen: RoleScopeRow[],
+  objScopeLevel: string,
+  objScopeCode: string | null,
+): boolean {
+  const objRang = SCOPE_RANG[objScopeLevel];
+  if (objRang === undefined) return false;
+
+  return rollen.some((r) => {
+    if (r.roleType !== "beobachter") return false;
+    const rollenRang = SCOPE_RANG[r.scopeLevel];
+    if (rollenRang === undefined) return false;
+    if (rollenRang > objRang) return true;
+    if (rollenRang === objRang) {
+      return r.scopeCode === null || r.scopeCode === objScopeCode;
+    }
+    return false;
+  });
+}
+
+/**
+ * Lädt die Rollen eines aktiven Users MIT Scope (für die Beobachter-
+ * Sichtbarkeit). Gleiche Eskalationsgrenze wie getUserRoleTypes:
+ * gesperrte/gelöschte Konten erhalten [] (innerer JOIN auf users.active).
+ */
+export async function getUserRolesMitScope(
+  db: Db,
+  tenantId: string,
+  userId: string,
+): Promise<RoleScopeRow[]> {
+  const rows = await db
+    .select({
+      roleType: roles.roleType,
+      scopeLevel: roles.scopeLevel,
+      scopeCode: roles.scopeCode,
+    })
+    .from(roles)
+    .innerJoin(users, eq(users.id, roles.userId))
+    .where(
+      and(
+        eq(roles.tenantId, tenantId),
+        eq(roles.userId, userId),
+        eq(users.accountStatus, "active"),
+      ),
+    );
+  return rows as RoleScopeRow[];
+}
+
 // ---------------------------------------------------------------------------
 // Rollen-Verwaltung & Eskalationsgrenze (Achse B — Rollenvergabe auditiert)
 // ---------------------------------------------------------------------------
@@ -93,6 +195,7 @@ export const ALL_ROLE_TYPES = [
   "user",
   "verifier",
   "redakteur",
+  "beobachter",
   "kommune_admin",
   "super_admin",
   "ortsteil_admin",
@@ -112,6 +215,10 @@ export const KOMMUNE_ADMIN_MANAGEABLE_ROLES = [
   "user",
   "verifier",
   "redakteur",
+  // View-Only-Rolle für Multiplikatoren — Vergabe wie redakteur durch
+  // kommune_admin erlaubt. `beobachter` selbst darf NIEMALS Rollen verwalten
+  // (canManageRole kennt nur Admin-Caller); Eskalationsgrenze unverändert.
+  "beobachter",
   "kommune_admin",
 ] as const;
 

@@ -14,7 +14,7 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { digests, risMeetings, roles, sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { canRedaktion } from "@/lib/auth/roles";
+import { canRedaktion, beobachterDarfSehen } from "@/lib/auth/roles";
 import Link from "next/link";
 
 async function getAdminDigests(tenantSlug: string) {
@@ -46,13 +46,21 @@ async function getAdminDigests(tenantSlug: string) {
   }
 
   const roleRows = await db
-    .select({ roleType: roles.roleType })
+    .select({
+      roleType: roles.roleType,
+      scopeLevel: roles.scopeLevel,
+      scopeCode: roles.scopeCode,
+    })
     .from(roles)
     .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
   const roleTypes = roleRows.map((r: { roleType: string }) => r.roleType);
 
   // H1: Redakteure dürfen die Liste sehen (prüfen); Freigabe nur Admins (Detailseite).
-  if (!canRedaktion(roleTypes)) return { tenant, digests: null, isAdmin: false };
+  // Rollen-Governance: `beobachter` mit stadtweitem Scope (Digests sind stadtweit)
+  // sieht die Liste READ-ONLY — Mutationen bleiben serverseitig gesperrt.
+  if (!canRedaktion(roleTypes) && !beobachterDarfSehen(roleRows, "stadt", null)) {
+    return { tenant, digests: null, isAdmin: false };
+  }
 
   const digestRows = await db
     .select({

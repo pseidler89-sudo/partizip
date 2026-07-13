@@ -10,11 +10,16 @@ import {
   canRedaktion,
   canFreigeben,
   isAdmin,
+  canVerify,
+  canBeobachten,
+  beobachterDarfSehen,
   hasAnyRole,
   canManageRole,
   manageableRoleTypes,
   REDAKTION_ROLES,
   FREIGABE_ROLES,
+  ADMIN_ROLES,
+  VERIFIER_ROLES,
   ALL_ROLE_TYPES,
   RESERVE_ROLES,
 } from "../roles";
@@ -155,5 +160,115 @@ describe("manageableRoleTypes — UI-Filter", () => {
   it("Nicht-Admin sieht keine verwaltbaren Rollen", () => {
     expect(manageableRoleTypes(["user"])).toEqual([]);
     expect(manageableRoleTypes([])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// beobachter — View-Only-Rolle (Rollen-Governance)
+// ---------------------------------------------------------------------------
+
+describe("beobachter — View-Only-Rolle: JEDER Mutations-Guard sagt NEIN", () => {
+  // Tabellarisch: jeder Mutations-Guard × beobachter → false (sicherheitskritisch).
+  const MUTATION_GUARDS: Array<[string, (roleTypes: string[]) => boolean]> = [
+    ["canRedaktion", canRedaktion],
+    ["canFreigeben", canFreigeben],
+    ["isAdmin", isAdmin],
+    ["canVerify", canVerify],
+  ];
+
+  for (const [name, guard] of MUTATION_GUARDS) {
+    it(`${name}(["beobachter"]) → false`, () => {
+      expect(guard(["beobachter"])).toBe(false);
+    });
+
+    it(`${name}(["user", "beobachter"]) → false (Mehrfachrolle hebt nichts auf)`, () => {
+      expect(guard(["user", "beobachter"])).toBe(false);
+    });
+  }
+
+  it("beobachter taucht in KEINER Mutations-Rollenliste auf (Invariante)", () => {
+    for (const list of [REDAKTION_ROLES, FREIGABE_ROLES, ADMIN_ROLES, VERIFIER_ROLES]) {
+      expect((list as readonly string[]).includes("beobachter")).toBe(false);
+    }
+  });
+
+  it("canBeobachten: beobachter/redakteur/Admins ja — user/verifier/Reserve nein", () => {
+    expect(canBeobachten(["beobachter"])).toBe(true);
+    expect(canBeobachten(["redakteur"])).toBe(true);
+    expect(canBeobachten(["kommune_admin"])).toBe(true);
+    expect(canBeobachten(["super_admin"])).toBe(true);
+    expect(canBeobachten(["user"])).toBe(false);
+    expect(canBeobachten(["verifier"])).toBe(false);
+    expect(canBeobachten(["ortsteil_admin"])).toBe(false);
+    expect(canBeobachten([])).toBe(false);
+  });
+
+  it("beobachter darf KEINE einzige Rolle verwalten (Eskalationsgrenze)", () => {
+    for (const r of ALL_ROLE_TYPES) {
+      expect(canManageRole(["beobachter"], r)).toBe(false);
+    }
+    expect(manageableRoleTypes(["beobachter"])).toEqual([]);
+  });
+
+  it("kommune_admin und super_admin dürfen beobachter vergeben/entziehen", () => {
+    expect(canManageRole(["kommune_admin"], "beobachter")).toBe(true);
+    expect(canManageRole(["super_admin"], "beobachter")).toBe(true);
+    expect(manageableRoleTypes(["kommune_admin"])).toContain("beobachter");
+  });
+
+  it("Eskalationsgrenze unverändert: kommune_admin weiterhin ohne super_admin/Reserve", () => {
+    expect(canManageRole(["kommune_admin"], "super_admin")).toBe(false);
+    for (const r of RESERVE_ROLES) {
+      expect(canManageRole(["kommune_admin"], r)).toBe(false);
+    }
+  });
+});
+
+describe("beobachterDarfSehen — Scope-Sichtbarkeit (fail-closed)", () => {
+  const stadtBeobachter = [
+    { roleType: "beobachter", scopeLevel: "stadt", scopeCode: null },
+  ];
+  const nordBeobachter = [
+    { roleType: "beobachter", scopeLevel: "ortsteil", scopeCode: "nord" },
+  ];
+
+  it("stadt-Beobachter sieht stadtweite UND Ortsteil-Objekte", () => {
+    expect(beobachterDarfSehen(stadtBeobachter, "stadt", null)).toBe(true);
+    expect(beobachterDarfSehen(stadtBeobachter, "ortsteil", "nord")).toBe(true);
+    expect(beobachterDarfSehen(stadtBeobachter, "ortsteil", "sued")).toBe(true);
+  });
+
+  it("stadt-Beobachter sieht NICHTS auf höherer Ebene (kreis/land)", () => {
+    expect(beobachterDarfSehen(stadtBeobachter, "kreis", null)).toBe(false);
+    expect(beobachterDarfSehen(stadtBeobachter, "land", null)).toBe(false);
+  });
+
+  it("ortsteil-Beobachter sieht NUR den eigenen Ortsteil-Code", () => {
+    expect(beobachterDarfSehen(nordBeobachter, "ortsteil", "nord")).toBe(true);
+    expect(beobachterDarfSehen(nordBeobachter, "ortsteil", "sued")).toBe(false);
+    expect(beobachterDarfSehen(nordBeobachter, "stadt", null)).toBe(false);
+  });
+
+  it("scopeCode NULL auf gleicher Ebene deckt die ganze Ebene ab", () => {
+    const ohneCode = [
+      { roleType: "beobachter", scopeLevel: "ortsteil", scopeCode: null },
+    ];
+    expect(beobachterDarfSehen(ohneCode, "ortsteil", "nord")).toBe(true);
+    expect(beobachterDarfSehen(ohneCode, "ortsteil", "sued")).toBe(true);
+  });
+
+  it("NUR beobachter-Rollen zählen — Admin-/Redaktions-Rollen laufen über eigene Achsen", () => {
+    const nurAdmin = [
+      { roleType: "kommune_admin", scopeLevel: "stadt", scopeCode: null },
+      { roleType: "redakteur", scopeLevel: "stadt", scopeCode: null },
+    ];
+    expect(beobachterDarfSehen(nurAdmin, "stadt", null)).toBe(false);
+  });
+
+  it("unbekannte Scope-Ebenen → false (fail-closed)", () => {
+    const kaputt = [{ roleType: "beobachter", scopeLevel: "galaxie", scopeCode: null }];
+    expect(beobachterDarfSehen(kaputt, "stadt", null)).toBe(false);
+    expect(beobachterDarfSehen(stadtBeobachter, "galaxie", null)).toBe(false);
+    expect(beobachterDarfSehen([], "stadt", null)).toBe(false);
   });
 });
