@@ -47,7 +47,26 @@ export function getEffectiveHost(
   return normalizeHost(rawHost);
 }
 
+/**
+ * Auth-Seiten (z. B. /auth/verify?token=…) tragen den Magic-Link-Token in der
+ * URL. Referrer-Policy: no-referrer verhindert, dass die Token-URL beim
+ * Verlassen der Seite (Links, Assets) via Referer-Header abfließt —
+ * zusätzlich zum <meta name="referrer"> der Seite selbst.
+ * Matcht sowohl "/auth/…" (vor Rewrite) als auch "/<slug>/auth/…".
+ */
+function isAuthPath(pathname: string): boolean {
+  return /^\/(?:[^/]+\/)?auth(?:\/|$)/.test(pathname);
+}
+
 export function middleware(request: NextRequest): NextResponse {
+  const response = resolveRouting(request);
+  if (isAuthPath(request.nextUrl.pathname)) {
+    response.headers.set("Referrer-Policy", "no-referrer");
+  }
+  return response;
+}
+
+function resolveRouting(request: NextRequest): NextResponse {
   const host = getEffectiveHost(request);
   const slug = slugFromNormalizedHost(host);
 
