@@ -11,10 +11,10 @@ import { headers, cookies } from "next/headers";
 import { and, eq, desc, sql } from "drizzle-orm";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
-import { digests, risMeetings, roles, sessions } from "@/db/schema";
+import { digests, risMeetings, sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { canRedaktion, beobachterDarfSehen } from "@/lib/auth/roles";
+import { canRedaktion, beobachterDarfSehen, getUserRolesMitScope } from "@/lib/auth/roles";
 import Link from "next/link";
 
 async function getAdminDigests(tenantSlug: string) {
@@ -45,14 +45,9 @@ async function getAdminDigests(tenantSlug: string) {
     return { tenant, digests: null, isAdmin: false };
   }
 
-  const roleRows = await db
-    .select({
-      roleType: roles.roleType,
-      scopeLevel: roles.scopeLevel,
-      scopeCode: roles.scopeCode,
-    })
-    .from(roles)
-    .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
+  // Rollen account-status-gefiltert laden (kein Direktzugriff auf `roles`): ein
+  // gesperrtes/gelöschtes Konto erhält [] und kann die Digest-Liste nicht laden.
+  const roleRows = await getUserRolesMitScope(db, tenant.id, session.userId);
   const roleTypes = roleRows.map((r: { roleType: string }) => r.roleType);
 
   // H1: Redakteure dürfen die Liste sehen (prüfen); Freigabe nur Admins (Detailseite).

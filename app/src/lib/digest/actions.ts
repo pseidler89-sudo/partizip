@@ -25,7 +25,7 @@
 "use server";
 
 import { cookies, headers } from "next/headers";
-import { eq, and, count, notExists, isNull } from "drizzle-orm";
+import { eq, and, count, notExists, isNull, sql } from "drizzle-orm";
 import { createDb, type Db } from "@/db/client";
 import { digests, digestStatements, sessions, auditEvents } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
@@ -210,9 +210,28 @@ export async function setStatementHighlight(
   if (rows.length === 0) return { ok: false, error: "Aussage nicht gefunden." };
   if (rows[0].digestStatus !== "entwurf") return { ok: false, error: "Highlight-Markierung nur im Status 'entwurf' möglich." };
 
+  // SoD-Spur (Separation of Duties): beim SETZEN eines Highlights halten wir fest,
+  // WER es gesetzt hat — redaktionelle Gewichtung zählt als Mitgestaltung, und die
+  // Selbstfreigabe-Sperre in freigebenCore konsultiert diese Spur.
+  // ABSICHTLICH persistent UND nicht überschreibbar:
+  //   - istHighlight=false setzt highlightedBy NICHT zurück (Mitwirkungs-Spur
+  //     bleibt), sonst ließe sich die Sperre durch Setzen+Entfernen umgehen.
+  //   - Ein ZWEITER Setzer überschreibt eine bereits vorhandene Spur NICHT
+  //     (COALESCE: nur schreiben, wenn aktuell NULL) — sonst würde die Spur des
+  //     ERSTEN Highlighters verloren gehen und dieser könnte doch selbst
+  //     freigeben. Der erste Highlighter bleibt die verbindliche SoD-Spur.
+  //   Bewusst anders als geprueftBy, das durch das Vollständigkeits-Gate ohnehin
+  //   gebunden ist (fail-closed).
   await ctx.db
     .update(digestStatements)
-    .set({ istHighlight })
+    .set(
+      istHighlight
+        ? {
+            istHighlight,
+            highlightedBy: sql`coalesce(${digestStatements.highlightedBy}, ${ctx.userId}::uuid)`,
+          }
+        : { istHighlight },
+    )
     .where(eq(digestStatements.id, statementId));
 
   return { ok: true };

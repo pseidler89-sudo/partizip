@@ -21,7 +21,7 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { users, roles, sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { isAdmin, manageableRoleTypes } from "@/lib/auth/roles";
+import { isAdmin, manageableRoleTypes, getUserRoleTypes } from "@/lib/auth/roles";
 import { einladungenListeCore } from "@/lib/admin/invitation-core";
 import Link from "next/link";
 import { RollenVerwaltung } from "./RollenVerwaltung";
@@ -59,11 +59,10 @@ export default async function AdminRollenPage({ params }: PageProps) {
   const session = sessionRows[0];
   if (!session || session.revokedAt || session.expiresAt < now) redirect(`/${slugFromPath}/anmelden`);
 
-  const callerRoleRows = await db
-    .select({ roleType: roles.roleType })
-    .from(roles)
-    .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
-  const callerRoleTypes = callerRoleRows.map((r: { roleType: string }) => r.roleType);
+  // Caller-Rollen account-status-gefiltert laden (kein Direktzugriff auf `roles`):
+  // ein gesperrtes/gelöschtes Konto erhält [] und kann die Rollen-Verwaltung nicht
+  // laden — konsistent mit den übrigen Admin-Lese-Sichten.
+  const callerRoleTypes = await getUserRoleTypes(db, tenant.id, session.userId);
 
   if (!isAdmin(callerRoleTypes)) redirect(`/${slugFromPath}/anmelden`);
 

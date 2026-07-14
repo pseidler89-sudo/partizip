@@ -21,10 +21,10 @@ import { and, eq, asc } from "drizzle-orm";
 import Link from "next/link";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
-import { ortsteile as ortsteileTable, roles, sessions } from "@/db/schema";
+import { ortsteile as ortsteileTable, sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { isAdmin, beobachterDarfSehen } from "@/lib/auth/roles";
+import { isAdmin, beobachterDarfSehen, getUserRolesMitScope } from "@/lib/auth/roles";
 import { getAllPollsForAdmin, type PollAdminItem } from "@/lib/polls/queries";
 import PollComposerForm from "./PollComposerForm";
 import PollAdminActions from "./PollAdminActions";
@@ -98,14 +98,9 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
     redirect(`/${slugFromPath}/anmelden`);
   }
 
-  const roleRows = await db
-    .select({
-      roleType: roles.roleType,
-      scopeLevel: roles.scopeLevel,
-      scopeCode: roles.scopeCode,
-    })
-    .from(roles)
-    .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
+  // Rollen account-status-gefiltert laden (kein Direktzugriff auf `roles`): ein
+  // gesperrtes/gelöschtes Konto erhält [] und kann diese Admin-Sicht nicht laden.
+  const roleRows = await getUserRolesMitScope(db, tenant.id, session.userId);
   const roleTypes = roleRows.map((r: { roleType: string }) => r.roleType);
 
   // Rollen-Governance: Admins voll; `beobachter` sieht die Übersicht READ-ONLY

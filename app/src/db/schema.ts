@@ -774,6 +774,13 @@ export const digestStatements = pgTable(
     geprueftBy: uuid("geprueft_by").references(() => users.id, { onDelete: "set null" }),
     // Highlight: vom Prüfer als besonders wichtig für Bürger markiert
     istHighlight: boolean("ist_highlight").notNull().default(false),
+    // Separation of Duties (Highlight): WER zuletzt eine Highlight-Markierung
+    // gesetzt hat. Redaktionelle Gewichtung ist Mitgestaltung — wer highlightet
+    // hat, darf den Digest nicht selbst freigeben (freigebenCore konsultiert
+    // diese Spur atomar im Status-UPDATE). Bewusst SoD-Spur, NICHT im Content-
+    // Hash (computeStatementsHash) — kein Bruch bestehender Freigabe-Hashes.
+    // SET NULL: Person löschbar, Aussage bleibt.
+    highlightedBy: uuid("highlighted_by").references(() => users.id, { onDelete: "set null" }),
   },
   (t) => [
     unique("digest_statements_digest_position_unique").on(t.digestId, t.position),

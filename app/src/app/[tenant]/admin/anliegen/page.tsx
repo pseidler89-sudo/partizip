@@ -11,9 +11,10 @@ import { headers, cookies } from "next/headers";
 import { and, eq, desc } from "drizzle-orm";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
-import { anliegen, ortsteile, roles, sessions, anliegenStatusEnum } from "@/db/schema";
+import { anliegen, ortsteile, sessions, anliegenStatusEnum } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
+import { isAdmin, getUserRoleTypes } from "@/lib/auth/roles";
 import Link from "next/link";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -72,16 +73,11 @@ export default async function AdminAnliegenPage({ params, searchParams }: PagePr
     redirect(`/${slugFromPath}/anmelden`);
   }
 
-  const roleRows = await db
-    .select({ roleType: roles.roleType })
-    .from(roles)
-    .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
-
-  const isAdmin = roleRows.some(
-    (r: { roleType: string }) => r.roleType === "kommune_admin" || r.roleType === "super_admin"
-  );
-
-  if (!isAdmin) redirect(`/${slugFromPath}/anmelden`);
+  // Rollen account-status-gefiltert laden (kein Direktzugriff auf `roles`): ein
+  // gesperrtes/gelöschtes Konto erhält [] und kann die Anliegen-Liste (ggf. PII)
+  // nicht laden.
+  const roleTypes = await getUserRoleTypes(db, tenant.id, session.userId);
+  if (!isAdmin(roleTypes)) redirect(`/${slugFromPath}/anmelden`);
 
   // Anliegen laden (tenant-scoped, optional nach Status gefiltert).
   // validStatuses + Typ direkt aus dem Enum abgeleitet → kein Drift, kein `as any`.

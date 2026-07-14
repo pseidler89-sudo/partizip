@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import { eq, and } from "drizzle-orm";
 import * as schema from "@/db/schema.js";
 import type { Db } from "@/db/client";
-import { freigebenCore, isSelfApprovalAllowed, hatDigestRedigiert } from "../freigabe-core";
+import { freigebenCore, isSelfApprovalAllowed, hatDigestRedigiert, computeStatementsHash } from "../freigabe-core";
 
 const {
   tenants, users, roles, risBodies, risMeetings, risDocuments,
@@ -398,6 +398,88 @@ describe("Digest-Freigabe — Separation of Duties (Integration, echte freigeben
     expect(await hatDigestRedigiert(db, tenantId, digest.id, zweiterAdminId)).toBe(false);
     // Cross-Tenant: falscher Tenant → keine Spur sichtbar
     expect(await hatDigestRedigiert(db, tenant2Id, digest.id, adminId)).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // 8. Highlight-Separation-of-Duties (MINOR 3): wer hervorhebt, gibt nicht selbst frei.
+  //    Kompat-sicher über die highlighted_by-Spur — NICHT über den Content-Hash.
+  // -------------------------------------------------------------------------
+
+  /** Setzt highlighted_by (+ ist_highlight) auf der ersten Aussage eines Digests. */
+  async function highlightErsteAussage(digestId: string, von: string) {
+    const [stmt] = await db
+      .select({ id: digestStatements.id })
+      .from(digestStatements)
+      .where(eq(digestStatements.digestId, digestId))
+      .limit(1);
+    await db
+      .update(digestStatements)
+      .set({ istHighlight: true, highlightedBy: von })
+      .where(eq(digestStatements.id, stmt.id));
+  }
+
+  it.skipIf(SKIP)("8. Highlight durch Admin ⇒ Selbstfreigabe blockiert (SoD über highlighted_by)", async () => {
+    // Alle Aussagen vom Redakteur geprüft; der Admin hat nur HERVORGEHOBEN.
+    const digest = await createGeprueftenDigest(2, redakteurId);
+    await highlightErsteAussage(digest.id, adminId);
+
+    const result = await freigebenCore(db, tenantId, {
+      digestId: digest.id,
+      callerUserId: adminId,
+      callerRoleTypes: ADMIN_ROLLEN,
+      allowSelfApproval: false,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Vier-Augen/);
+    expect(await digestStatus(digest.id)).toBe("entwurf");
+    expect((await approvedAudits(digest.id)).length).toBe(0);
+    // UI-Spur erkennt die Mitgestaltung auch über das Highlight.
+    expect(await hatDigestRedigiert(db, tenantId, digest.id, adminId)).toBe(true);
+  });
+
+  it.skipIf(SKIP)("8b. Highlight-Selbstfreigabe mit allowSelfApproval=true erlaubt UND als selfApproval auditiert", async () => {
+    const digest = await createGeprueftenDigest(2, redakteurId);
+    await highlightErsteAussage(digest.id, adminId);
+
+    const result = await freigebenCore(db, tenantId, {
+      digestId: digest.id,
+      callerUserId: adminId,
+      callerRoleTypes: ADMIN_ROLLEN,
+      allowSelfApproval: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await digestStatus(digest.id)).toBe("freigegeben");
+    const audits = await approvedAudits(digest.id);
+    expect(audits.length).toBe(1);
+    expect((audits[0].metadata as Record<string, unknown>).selfApproval).toBe(true);
+  });
+
+  it.skipIf(SKIP)("8c. Zweiter Admin (weder geprüft noch hervorgehoben) darf trotz Highlight freigeben", async () => {
+    const digest = await createGeprueftenDigest(2, redakteurId);
+    await highlightErsteAussage(digest.id, adminId);
+
+    const result = await freigebenCore(db, tenantId, {
+      digestId: digest.id,
+      callerUserId: zweiterAdminId,
+      callerRoleTypes: ADMIN_ROLLEN,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await digestStatus(digest.id)).toBe("freigegeben");
+  });
+
+  it.skipIf(SKIP)("8d. HASH-KOMPAT: istHighlight geht NICHT in computeStatementsHash ein", async () => {
+    const stmts = [
+      { position: 1, text: "Aussage A", sourceUrl: "https://x/1" },
+      { position: 2, text: "Aussage B", sourceUrl: "https://x/2" },
+    ];
+    // computeStatementsHash nimmt istHighlight strukturell nicht entgegen —
+    // ein Highlight-Wechsel kann den Freigabe-Hash also nie verändern.
+    const h1 = computeStatementsHash(stmts);
+    const h2 = computeStatementsHash([...stmts]);
+    expect(h1).toBe(h2);
   });
 });
 
