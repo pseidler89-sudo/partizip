@@ -25,6 +25,8 @@ const user: UserRow = {
   birthYear: 1990,
   birthMonth: 5,
   ortsteilId: "ortsteil-1",
+  homeRegionId: null,
+  residencyRegionId: null,
   verificationStatus: "verified",
   verificationMethod: "in_person",
   residencyVerifiedAt: T0,

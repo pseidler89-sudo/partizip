@@ -21,6 +21,10 @@ export type AnonymizePayload = {
   birthYear: null;
   birthMonth: null;
   ortsteilId: null;
+  // ADR-024: Gebiets-Zuordnungen sind Standort-PII → beim Löschen mit-nullen
+  // (analog ortsteilId). home = weiche Sicht, residency = verifizierter Wohnsitz.
+  homeRegionId: null;
+  residencyRegionId: null;
   verificationMethod: null;
   residencyVerifiedAt: null;
   // ADR-014 Block 2: Ablauf der Wohnsitz-Verifizierung mit-zurücksetzen.
@@ -57,6 +61,8 @@ export function buildAnonymizePayload(
     birthYear: null,
     birthMonth: null,
     ortsteilId: null,
+    homeRegionId: null,
+    residencyRegionId: null,
     verificationMethod: null,
     residencyVerifiedAt: null,
     residencyVerifiedUntil: null,

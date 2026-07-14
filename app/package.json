@@ -18,6 +18,7 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:seed:demo": "tsx scripts/seed-demo.ts",
     "db:seed:musterstadt": "tsx scripts/seed-musterstadt.ts",
+    "db:seed:regions": "tsx scripts/seed-regions.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
     "db:setup": "tsx scripts/migrate.ts && tsx scripts/seed.ts",
     "db:cleanup": "tsx scripts/cleanup-auth.ts",

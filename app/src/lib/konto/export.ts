@@ -37,6 +37,8 @@ export type ExportKonto = {
   birthYear: number | null;
   birthMonth: number | null;
   ortsteilId: string | null;
+  homeRegionId: string | null;
+  residencyRegionId: string | null;
   minAgeConfirmedAt: string | null;
   // Benachrichtigungs-Motor: Opt-in für E-Mails bei neuen Abstimmungen.
   notifyNewPolls: boolean;
@@ -126,6 +128,9 @@ export function buildExportDocument(input: {
       birthYear: input.user.birthYear ?? null,
       birthMonth: input.user.birthMonth ?? null,
       ortsteilId: input.user.ortsteilId ?? null,
+      // ADR-024: Gebiets-Zuordnungen gehören zur Art.-15-Auskunft (Standortdaten).
+      homeRegionId: input.user.homeRegionId ?? null,
+      residencyRegionId: input.user.residencyRegionId ?? null,
       minAgeConfirmedAt: iso(input.user.minAgeConfirmedAt),
       notifyNewPolls: input.user.notifyNewPolls,
       createdAt: iso(input.user.createdAt),

@@ -21,8 +21,26 @@ import {
   uniqueIndex,
   index,
   check,
+  customType,
+  primaryKey,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+// ---------------------------------------------------------------------------
+// ltree — PostgreSQL-Contrib-Typ für materialisierte Baum-Pfade (ADR-024,
+// GEBIETSMODELL §3.1). Drizzle kennt ltree nicht nativ → schlanker customType,
+// der die DDL-Spalte als `ltree` ausgibt. Werte sind Strings der Form
+// `de.hessen.rtk.taunusstein.wehen`. Die Extension + der GiST-Index + der
+// pfad-pflegende Trigger werden in der Migration (rohes SQL) angelegt — Drizzle
+// deckt Extension/GiST/Trigger nicht ab.
+// ---------------------------------------------------------------------------
+
+const ltree = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return "ltree";
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -65,6 +83,19 @@ export const scopeLevelEnum = pgEnum("scope_level", [
   "stadt",
   "kreis",
   "land",
+]);
+
+// ADR-024 / GEBIETSMODELL §3.1: Gebietsart des Baum-Knotens (NICHT der Scope).
+// Bewusst erweiterbar (z. B. `regierungsbezirk`, `verbandsgemeinde`) — die
+// Sicht-/Zuständigkeits-Logik hängt an parent_id/path, nicht an diesem Typ.
+// Neue Werte ans ENDE anhängen, damit die Migration ein reines
+// ALTER TYPE ... ADD VALUE bleibt.
+export const regionTypEnum = pgEnum("region_typ", [
+  "bund",
+  "land",
+  "kreis",
+  "gemeinde",
+  "ortsteil",
 ]);
 
 export const anliegenStatusEnum = pgEnum("anliegen_status", [
@@ -190,6 +221,114 @@ export const plzRegionen = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// regions — hierarchischer Gebietsbaum (ADR-024, GEBIETSMODELL §3.1)
+//
+// ETAPPE 1 (ADDITIV): Diese Tabelle ist das neue Fundament (Single Source of
+// Truth im Zielbild). Sie ändert NICHTS am Laufzeitverhalten — polls/roles/
+// qr_codes/verification_locations tragen weiterhin scope_level/scope_code, und
+// die App liest unverändert darüber. `regions` wird hier nur angelegt, befüllt
+// und rückwärtskompatibel aus den Bestandsdaten gespiegelt (Backfill im Seed
+// scripts/seed-regions.ts). Der Umbau der Leser (region_id-FKs, Enum-Contract)
+// ist Etappe 2.
+//
+// Tenant-FREI: Bund → Land → Kreis → Gemeinde existieren global genau einmal.
+// tenant_id ist nur operativer Betreuungs-Marker (Branding/Betrieb), NICHT die
+// Isolationsgrenze (die bleibt tenant_id-Gleichheit auf den Fachtabellen).
+//
+// path: materialisierter ltree-Pfad, per Trigger aus parent_id + path_label
+//   gepflegt (Migration 0023, rohes SQL). path_label ist das ltree-Label des
+//   Knotens (ltree-sicher: ^[a-z0-9_]+$) und dient zugleich als der in
+//   GEBIETSMODELL §9 geforderte stabile Ortsteil-Code (Ortsteile haben keinen
+//   amtlichen Schlüssel). NICHT von Hand setzen: der Trigger baut path.
+// ---------------------------------------------------------------------------
+
+export const regions = pgTable(
+  "regions",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    // Normalisierte Wahrheit der Baumkanten. RESTRICT: ein Elternknoten mit
+    // Kindern ist nicht löschbar. NULL nur bei der Wurzel (Bund) — via CHECK.
+    parentId: uuid("parent_id").references((): AnyPgColumn => regions.id, {
+      onDelete: "restrict",
+    }),
+    typ: regionTypEnum("typ").notNull(),
+    // Amtlicher 8-Steller (Gemeinde) bzw. Präfix (Kreis/Land); NULL für Bund/Ortsteil.
+    ags: text("ags"),
+    // 12-stelliger Amtlicher Regionalschlüssel (ARS) — kanonischer Baum-Anker.
+    // NULL für Bund/Ortsteil (kein amtlicher Schlüssel).
+    ars: text("ars"),
+    name: text("name").notNull(),
+    // ltree-Label dieses Knotens (Segment im Pfad) + stabiler synthetischer
+    // Code für Ortsteile. ltree-sicher; CHECK in der Migration.
+    pathLabel: text("path_label").notNull(),
+    // Materialisierter Pfad (ltree), Trigger-gepflegt. In Drizzle nullable, damit
+    // Inserts das Feld weglassen (der BEFORE-Trigger füllt es); die Migration
+    // setzt NOT NULL auf DB-Ebene.
+    path: ltree("path"),
+    // Operativer Betreuungs-Marker (NICHT Isolation). Kreis/Land/Bund: NULL.
+    tenantId: uuid("tenant_id").references(() => tenants.id, {
+      onDelete: "set null",
+    }),
+    lat: numeric("lat"),
+    lon: numeric("lon"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`).$onUpdate(() => new Date()),
+  },
+  (t) => [
+    // Natürlicher Schlüssel für idempotenten Import amtlicher Knoten.
+    uniqueIndex("regions_ars_unique").on(t.ars).where(sql`${t.ars} IS NOT NULL`),
+    // Geschwister eindeutig über den Namen (Ortsteile ohne amtlichen Schlüssel).
+    // NULLS NOT DISTINCT: die Wurzel (parent_id IS NULL) ist so über den Namen
+    // eindeutig und als ON-CONFLICT-Ziel für den idempotenten Seed nutzbar.
+    unique("regions_parent_name_unique").on(t.parentId, t.name).nullsNotDistinct(),
+    // Geschwister eindeutig über das ltree-Label (Pfad-Konsistenz + Seed-Anker).
+    unique("regions_parent_label_unique").on(t.parentId, t.pathLabel).nullsNotDistinct(),
+    index("idx_regions_parent_id").on(t.parentId),
+    index("idx_regions_tenant_id").on(t.tenantId),
+    // Genau eine Wurzel, beidseitig: Bund ⇔ Wurzel. (typ='bund') genau dann,
+    // wenn (parent_id IS NULL) — verhindert sowohl einen Bund mit Elternknoten
+    // als auch eine Nicht-Bund-Wurzel. Die Einzigkeit der Wurzel erzwingt
+    // zusätzlich ein partieller Unique-Index in der Migration.
+    check(
+      "regions_root_is_bund",
+      sql`(${t.typ} = 'bund') = (${t.parentId} IS NULL)`
+    ),
+  ]
+);
+
+// ---------------------------------------------------------------------------
+// plz_regions — PLZ ↔ Region als echtes n:m (ADR-024, GEBIETSMODELL §3.4)
+//
+// ADDITIV neben dem bestehenden plz_regionen (das in Nutzung bleibt). Eine PLZ
+// kann mehrere Gemeinden/Ortsteile überlappen und umgekehrt. weight/is_primary
+// steuern die Auflösung bei Splitlagen; source dokumentiert die Herkunft.
+// ---------------------------------------------------------------------------
+
+export const plzRegions = pgTable(
+  "plz_regions",
+  {
+    plz: text("plz").notNull(),
+    regionId: uuid("region_id")
+      .notNull()
+      .references(() => regions.id, { onDelete: "restrict" }),
+    // Flächen-/Einwohneranteil bei Splitlagen (Ranking). NULL = unbekannt.
+    weight: numeric("weight"),
+    // Default-Auflösung bei Mehrdeutigkeit.
+    isPrimary: boolean("is_primary").notNull().default(false),
+    // Herkunft (Destatis / OpenPLZ / OSM / manuell).
+    source: text("source"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`).$onUpdate(() => new Date()),
+  },
+  (t) => [
+    primaryKey({ columns: [t.plz, t.regionId] }),
+    index("idx_plz_regions_plz").on(t.plz),
+    index("idx_plz_regions_region_id").on(t.regionId),
+  ]
+);
+
+// ---------------------------------------------------------------------------
 // users
 //
 // E-Mail im Klartext: erforderlich für Magic-Link-Versand (Eigen-Auth, ADR-005).
@@ -211,6 +350,19 @@ export const users = pgTable(
     // birth_month: 1–12, NULL = unbekannt (konservativ → kein Alter)
     birthMonth: integer("birth_month"),
     ortsteilId: uuid("ortsteil_id").references(() => ortsteile.id, {
+      onDelete: "set null",
+    }),
+    // ADR-024 / GEBIETSMODELL §3.3 (ETAPPE 1, additiv, nullable):
+    //   home_region_id      — WEICH ermittelter Wohnort-Knoten (Gemeinde/Ortsteil),
+    //                         aus PLZ/Standort/Selbstwahl. Steuert SICHTBARKEIT.
+    //   residency_region_id — VERIFIZIERTER Wohnsitz (QR/Termin/später eID).
+    //                         Steuert ZUSTÄNDIGKEIT für verbindliche Abstimmungen.
+    // Die bestehende ortsteil_id bleibt in dieser Etappe die Wahrheit für die
+    // laufende App; der Backfill spiegelt ortsteil_id → home_region_id.
+    homeRegionId: uuid("home_region_id").references(() => regions.id, {
+      onDelete: "set null",
+    }),
+    residencyRegionId: uuid("residency_region_id").references(() => regions.id, {
       onDelete: "set null",
     }),
     verificationStatus: verificationStatusEnum("verification_status")

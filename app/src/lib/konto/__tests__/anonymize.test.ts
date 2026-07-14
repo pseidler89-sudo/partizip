@@ -31,6 +31,9 @@ describe("buildAnonymizePayload", () => {
     expect(p.birthYear).toBeNull();
     expect(p.birthMonth).toBeNull();
     expect(p.ortsteilId).toBeNull();
+    // ADR-024: Gebiets-Zuordnungen (Standort-PII) müssen ebenfalls geleert werden.
+    expect(p.homeRegionId).toBeNull();
+    expect(p.residencyRegionId).toBeNull();
     expect(p.verificationMethod).toBeNull();
     expect(p.residencyVerifiedAt).toBeNull();
     expect(p.minAgeConfirmedAt).toBeNull();
