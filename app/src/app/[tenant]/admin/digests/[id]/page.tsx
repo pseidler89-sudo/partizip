@@ -16,10 +16,10 @@ import { headers, cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
-import { digests, digestStatements, roles, sessions, risDocuments } from "@/db/schema";
+import { digests, digestStatements, sessions, risDocuments } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { canRedaktion, canFreigeben, beobachterDarfSehen } from "@/lib/auth/roles";
+import { canRedaktion, canFreigeben, beobachterDarfSehen, getUserRolesMitScope } from "@/lib/auth/roles";
 import { hatDigestRedigiert, isSelfApprovalAllowed } from "@/lib/digest/freigabe-core";
 import Link from "next/link";
 import { DigestActionButtons } from "./DigestActionButtons";
@@ -53,14 +53,9 @@ async function getDigestData(tenantSlug: string, digestId: string) {
     return { tenant, digest: null, isAdmin: false, canFreigeben: false };
   }
 
-  const roleRows = await db
-    .select({
-      roleType: roles.roleType,
-      scopeLevel: roles.scopeLevel,
-      scopeCode: roles.scopeCode,
-    })
-    .from(roles)
-    .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
+  // Rollen account-status-gefiltert laden (kein Direktzugriff auf `roles`): ein
+  // gesperrtes/gelöschtes Konto erhält [] und kann die Detailansicht nicht laden.
+  const roleRows = await getUserRolesMitScope(db, tenant.id, session.userId);
   const roleTypes = roleRows.map((r: { roleType: string }) => r.roleType);
 
   // H1: Redakteure dürfen die Detailansicht sehen + prüfen; Freigabe nur Admins.

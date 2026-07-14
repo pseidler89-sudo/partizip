@@ -7,11 +7,18 @@
  *
  * VIER-AUGEN-PRINZIP, serverseitig HART (Rollen-Governance):
  *   - Wer einen Digest redaktionell bearbeitet hat, darf ihn NICHT freigeben.
- *     Belastbare Spur: `digest_statements.geprueft_by` — die Prüf-Aktionen
- *     (setStatementGeprueft / setAlleStatementsGeprueft) halten fest, WER
- *     eine Aussage quellen-geprüft hat. Da die Freigabe ohnehin verlangt,
- *     dass JEDE Aussage geprüft ist, ist geprueft_by die vollständige
- *     Bearbeitungs-Spur des freigabe-relevanten Inhalts.
+ *     Belastbare Spuren: `digest_statements.geprueft_by` (Quellen-Prüfung, gesetzt
+ *     durch setStatementGeprueft / setAlleStatementsGeprueft) UND
+ *     `digest_statements.highlighted_by` (redaktionelle Gewichtung, gesetzt durch
+ *     setStatementHighlight). Beide zählen als Mitgestaltung: Da die Freigabe
+ *     ohnehin verlangt, dass JEDE Aussage geprüft ist, ist geprueft_by die
+ *     vollständige Prüf-Spur; highlighted_by ergänzt die Highlight-Spur, damit ein
+ *     Redakteur nicht „hervorheben und dann selbst freigeben" kann.
+ *   - HASH-KOMPAT (bewusst): istHighlight geht NICHT in computeStatementsHash ein.
+ *     Der SoD-Schutz kommt aus der highlighted_by-Spur, NICHT aus dem Content-Hash
+ *     — damit ändert sich der Hash-Algorithmus nicht und bereits freigegebene,
+ *     noch nicht veröffentlichte Digests (approved_content_hash gespeichert)
+ *     bleiben veröffentlichbar (kein Bruch am Hash-Vergleich).
  *   - ATOMAR (kein TOCTOU): Die Sperre steht als NOT-EXISTS-Bedingung in der
  *     WHERE-Klausel DESSELBEN UPDATEs, das den Statusübergang macht
  *     (bestehendes Muster „UPDATE ... WHERE status='entwurf' ... RETURNING").
@@ -44,10 +51,10 @@ export function isSelfApprovalAllowed(
 }
 
 /**
- * Hat dieser User den Digest redaktionell bearbeitet (mindestens eine Aussage
- * quellen-geprüft)? Tenant-scoped über den Digest-Join. Für die UI-Anzeige
- * („Freigabe durch eine zweite Person") — die Sperre selbst wirkt atomar im
- * UPDATE von freigebenCore, nie nur hier.
+ * Hat dieser User den Digest redaktionell mitgestaltet — mindestens eine Aussage
+ * quellen-geprüft (geprueft_by) ODER hervorgehoben (highlighted_by)? Tenant-scoped
+ * über den Digest-Join. Für die UI-Anzeige („Freigabe durch eine zweite Person") —
+ * die Sperre selbst wirkt atomar im UPDATE von freigebenCore, nie nur hier.
  */
 export async function hatDigestRedigiert(
   db: Db,
@@ -63,7 +70,10 @@ export async function hatDigestRedigiert(
       and(
         eq(digests.id, digestId),
         eq(digests.tenantId, tenantId),
-        eq(digestStatements.geprueftBy, userId),
+        or(
+          eq(digestStatements.geprueftBy, userId),
+          eq(digestStatements.highlightedBy, userId),
+        ),
       ),
     )
     .limit(1);
@@ -73,6 +83,13 @@ export async function hatDigestRedigiert(
 /**
  * N1: sha256-Hash über alle Statements eines Digests.
  * Deterministisch serialisiert: position|text|source_url, sortiert nach position.
+ *
+ * BEWUSST OHNE istHighlight: Der Hash sichert die INHALTLICHE Integrität nach
+ * Freigabe (Aussagetext + Quelle). Nähme man istHighlight auf, änderte sich der
+ * Algorithmus und bereits freigegebene, noch nicht veröffentlichte Digests
+ * (gespeicherter approved_content_hash) würden am Vergleich scheitern. Die
+ * Highlight-Separation-of-Duties wird deshalb über die highlighted_by-Spur
+ * gelöst (s. Datei-Kopf), NICHT über den Hash.
  */
 export function computeStatementsHash(
   stmts: Array<{ position: number; text: string; sourceUrl: string }>,
@@ -98,8 +115,9 @@ export interface FreigabeInput {
 export type FreigabeResult = { ok: boolean; error?: string };
 
 const SOD_FEHLER =
-  "Vier-Augen-Prinzip: Sie haben Aussagen dieses Digests selbst quellen-geprüft. " +
-  "Die Freigabe muss durch eine zweite Person erfolgen.";
+  "Vier-Augen-Prinzip: Sie haben an diesem Digest mitgewirkt (Aussagen selbst " +
+  "quellen-geprüft oder hervorgehoben). Die Freigabe muss durch eine zweite " +
+  "Person erfolgen.";
 
 /**
  * Digest freigeben: entwurf → freigegeben. Enthält ALLE serverseitigen Gates:
@@ -139,6 +157,7 @@ export async function freigebenCore(
       sourceUrl: digestStatements.sourceUrl,
       geprueftAt: digestStatements.geprueftAt,
       geprueftBy: digestStatements.geprueftBy,
+      highlightedBy: digestStatements.highlightedBy,
     })
     .from(digestStatements)
     .where(eq(digestStatements.digestId, digestId));
@@ -159,10 +178,12 @@ export async function freigebenCore(
   }
 
   // SoD-Vorprüfung (freundliche Fehlermeldung; atomarer Backstop im UPDATE unten).
-  const selbstGeprueft = stmts.some(
-    (s: { geprueftBy: string | null }) => s.geprueftBy === callerUserId,
+  // Mitgestaltung = selbst geprüft ODER selbst hervorgehoben (Highlight).
+  const selbstMitgewirkt = stmts.some(
+    (s: { geprueftBy: string | null; highlightedBy: string | null }) =>
+      s.geprueftBy === callerUserId || s.highlightedBy === callerUserId,
   );
-  if (!allowSelfApproval && selbstGeprueft) {
+  if (!allowSelfApproval && selbstMitgewirkt) {
     return { ok: false, error: SOD_FEHLER };
   }
 
@@ -177,8 +198,10 @@ export async function freigebenCore(
 
   if (vierAugenPflicht) {
     const selbstOderUngeprueft = stmts.some(
-      (s: { geprueftBy: string | null }) =>
-        s.geprueftBy === null || s.geprueftBy === callerUserId,
+      (s: { geprueftBy: string | null; highlightedBy: string | null }) =>
+        s.geprueftBy === null ||
+        s.geprueftBy === callerUserId ||
+        s.highlightedBy === callerUserId,
     );
     if (selbstOderUngeprueft) {
       return {
@@ -205,15 +228,20 @@ export async function freigebenCore(
       .where(
         and(
           eq(digestStatements.digestId, digestId),
-          eq(digestStatements.geprueftBy, callerUserId),
+          // Mitgestaltung: selbst geprüft ODER selbst hervorgehoben.
+          or(
+            eq(digestStatements.geprueftBy, callerUserId),
+            eq(digestStatements.highlightedBy, callerUserId),
+          ),
         ),
       )
       .limit(1);
     const selfEdited = selfEditedRows.length > 0;
 
     // SoD-Sperre (Rollen-Governance): Das UPDATE schlägt fehl, wenn die
-    // freigebende Person irgendeine Aussage selbst geprüft hat — außer die
-    // Pilot-Überbrückung ist EXPLIZIT aktiv (Default: Sperre an, fail-closed).
+    // freigebende Person an irgendeiner Aussage mitgewirkt hat — selbst geprüft
+    // ODER selbst hervorgehoben (Highlight) — außer die Pilot-Überbrückung ist
+    // EXPLIZIT aktiv (Default: Sperre an, fail-closed).
     const sodGuard = allowSelfApproval
       ? undefined
       : notExists(
@@ -223,7 +251,10 @@ export async function freigebenCore(
             .where(
               and(
                 eq(digestStatements.digestId, digestId),
-                eq(digestStatements.geprueftBy, callerUserId),
+                or(
+                  eq(digestStatements.geprueftBy, callerUserId),
+                  eq(digestStatements.highlightedBy, callerUserId),
+                ),
               ),
             ),
         );
@@ -241,6 +272,8 @@ export async function freigebenCore(
                 or(
                   isNull(digestStatements.geprueftBy),
                   eq(digestStatements.geprueftBy, callerUserId),
+                  // strenger + nicht überbrückbar: auch eigene Highlights sperren
+                  eq(digestStatements.highlightedBy, callerUserId),
                 ),
               ),
             ),

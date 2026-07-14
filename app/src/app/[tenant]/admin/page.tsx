@@ -12,10 +12,10 @@ import { headers, cookies } from "next/headers";
 import { and, eq, count } from "drizzle-orm";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
-import { digests, roles, sessions } from "@/db/schema";
+import { digests, sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { isAdmin as isAdminCheck, beobachterDarfSehen } from "@/lib/auth/roles";
+import { isAdmin as isAdminCheck, beobachterDarfSehen, getUserRolesMitScope } from "@/lib/auth/roles";
 import { getAdminKennzahlen, maskTeilnahme } from "@/lib/admin/kennzahlen";
 import Link from "next/link";
 
@@ -72,14 +72,10 @@ export default async function AdminDashboardPage({ params }: PageProps) {
     redirect(`/${slugFromPath}/anmelden`);
   }
 
-  const roleRows = await db
-    .select({
-      roleType: roles.roleType,
-      scopeLevel: roles.scopeLevel,
-      scopeCode: roles.scopeCode,
-    })
-    .from(roles)
-    .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
+  // Rollen über den account-status-filternden Weg laden: ein gesperrtes/gelöschtes
+  // Konto (accountStatus != 'active') erhält [] und kann diese Admin-Sicht nicht
+  // laden — konsistent mit getUserRoleTypes (kein Direktzugriff auf `roles`).
+  const roleRows = await getUserRolesMitScope(db, tenant.id, session.userId);
   const roleTypes = roleRows.map((r: { roleType: string }) => r.roleType);
 
   // Rollen-Governance: Admins sehen alles; `beobachter` bekommt eine reduzierte

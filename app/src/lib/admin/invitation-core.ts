@@ -35,7 +35,7 @@
 
 import { and, eq, desc, gt, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { invitations, roles, auditEvents } from "@/db/schema";
+import { invitations, roles, users, auditEvents } from "@/db/schema";
 import {
   canManageRole,
   isAdmin,
@@ -428,7 +428,14 @@ export async function getInvitationStatus(
 // einladungAnnehmen — ATOMARE Annahme + Rollenvergabe.
 // ---------------------------------------------------------------------------
 
-export type AnnehmenReason = "accepted" | "revoked" | "expired" | "unknown" | "email_mismatch" | "invalid";
+export type AnnehmenReason =
+  | "accepted"
+  | "revoked"
+  | "expired"
+  | "unknown"
+  | "email_mismatch"
+  | "account_inactive"
+  | "invalid";
 
 export interface AnnehmenResult {
   ok: boolean;
@@ -456,6 +463,9 @@ class AcceptRollback extends Error {
  *      (bereits per Magic-Link authentifizierten) Kontos entsprechen. Sonst
  *      Rollback der Flanke → reason 'email_mismatch'. Damit kann ein
  *      weitergereichter Link KEINER anderen Adresse die Rolle verschaffen.
+ *   2b. KONTO-STATUS: das annehmende Konto muss aktiv sein. Gesperrt/gelöscht →
+ *      Rollback → reason 'account_inactive' (Einladung bleibt pending).
+ *      Härtung, damit ein nicht-aktives Konto gar keine Rollenzeile erhält.
  *   3. Eskalationsgrenze zum ANNAHME-Zeitpunkt: die AKTUELLEN Rollen des
  *      Einladenden werden geladen (getUserRoleTypes → gesperrte/gelöschte Konten
  *      = []); nur wenn er die Rolle JETZT noch vergeben dürfte (isAdmin +
@@ -517,6 +527,20 @@ export async function einladungAnnehmenCore(
       // 2. E-Mail-Bindung.
       if (normalizeEmail(inv.email) !== accepterEmail) {
         throw new AcceptRollback("email_mismatch");
+      }
+
+      // 2b. Das ANNEHMENDE Konto muss aktiv sein. Ein gesperrtes/gelöschtes Konto
+      // (accountStatus != 'active') kann eine Einladung nicht annehmen — sonst
+      // erhielte es eine (zwar über getUserRoleTypes inerte, aber vorhandene)
+      // Rollenzeile. Härtung, kein neuer Vektor: Rollback der Flanke → Einladung
+      // bleibt pending. Tenant-scoped, aus der DB (nie aus Client-Eingaben).
+      const accepterRows = await tx
+        .select({ accountStatus: users.accountStatus })
+        .from(users)
+        .where(and(eq(users.id, accepter.id), eq(users.tenantId, tenantId)))
+        .limit(1);
+      if (accepterRows[0]?.accountStatus !== "active") {
+        throw new AcceptRollback("account_inactive");
       }
 
       // 3. Eskalationsgrenze zum Annahme-Zeitpunkt (aktuelle Rollen des Einladenden).
@@ -586,6 +610,8 @@ function reasonMessage(reason: AnnehmenReason): string {
       return "Diese Einladung ist abgelaufen.";
     case "email_mismatch":
       return "Diese Einladung ist an eine andere E-Mail-Adresse gebunden.";
+    case "account_inactive":
+      return "Ihr Konto ist derzeit nicht aktiv. Bitte wenden Sie sich an Ihre Kommune.";
     case "invalid":
     case "unknown":
     default:

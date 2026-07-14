@@ -20,10 +20,10 @@ import { headers, cookies } from "next/headers";
 import { and, eq, desc, inArray } from "drizzle-orm";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
-import { auditEvents, roles, sessions } from "@/db/schema";
+import { auditEvents, sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { isAdmin } from "@/lib/auth/roles";
+import { isAdmin, getUserRoleTypes } from "@/lib/auth/roles";
 import Link from "next/link";
 
 const LIMIT = 200;
@@ -94,11 +94,9 @@ export default async function AdminProtokollPage({ params, searchParams }: PageP
   const session = sessionRows[0];
   if (!session || session.revokedAt || session.expiresAt < now) redirect(`/${slugFromPath}/anmelden`);
 
-  const callerRoleRows = await db
-    .select({ roleType: roles.roleType })
-    .from(roles)
-    .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
-  const callerRoleTypes = callerRoleRows.map((r: { roleType: string }) => r.roleType);
+  // Caller-Rollen account-status-gefiltert laden (kein Direktzugriff auf `roles`):
+  // ein gesperrtes/gelöschtes Konto erhält [] und kann das Audit-Log nicht laden.
+  const callerRoleTypes = await getUserRoleTypes(db, tenant.id, session.userId);
   if (!isAdmin(callerRoleTypes)) redirect(`/${slugFromPath}/anmelden`);
 
   // Tenant-scoped + optional auf privilegierte Aktionen gefiltert.

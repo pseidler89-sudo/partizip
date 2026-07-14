@@ -1,0 +1,2 @@
+ALTER TABLE "digest_statements" ADD COLUMN "highlighted_by" uuid;--> statement-breakpoint
+ALTER TABLE "digest_statements" ADD CONSTRAINT "digest_statements_highlighted_by_users_id_fk" FOREIGN KEY ("highlighted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;

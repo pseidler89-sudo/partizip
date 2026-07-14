@@ -17,11 +17,11 @@ import {
   anliegenMatches,
   ortsteile,
   risDocuments,
-  roles,
   sessions,
 } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
+import { isAdmin, getUserRoleTypes } from "@/lib/auth/roles";
 import AdminAnliegenDetail from "./AdminAnliegenDetail";
 
 interface PageProps {
@@ -58,16 +58,11 @@ export default async function AdminAnliegenDetailPage({ params }: PageProps) {
     redirect(`/${slugFromPath}/anmelden`);
   }
 
-  const roleRows = await db
-    .select({ roleType: roles.roleType })
-    .from(roles)
-    .where(and(eq(roles.tenantId, tenant.id), eq(roles.userId, session.userId)));
-
-  const isAdmin = roleRows.some(
-    (r: { roleType: string }) => r.roleType === "kommune_admin" || r.roleType === "super_admin"
-  );
-
-  if (!isAdmin) redirect(`/${slugFromPath}/anmelden`);
+  // Rollen account-status-gefiltert laden (kein Direktzugriff auf `roles`): ein
+  // gesperrtes/gelöschtes Konto erhält [] und kann die Anliegen-Detailseite nicht
+  // laden.
+  const roleTypes = await getUserRoleTypes(db, tenant.id, session.userId);
+  if (!isAdmin(roleTypes)) redirect(`/${slugFromPath}/anmelden`);
 
   // Anliegen laden (tenant-scoped)
   const anliegenRows = await db

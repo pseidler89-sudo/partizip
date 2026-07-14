@@ -427,6 +427,39 @@ describe("Einladungs-Flow (Integration)", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Konto-Status: nur ein AKTIVES Konto kann annehmen (MINOR 2)
+  // -------------------------------------------------------------------------
+  it.skipIf(SKIP)("gesperrtes annehmendes Konto kann NICHT annehmen (account_inactive), bleibt pending", async () => {
+    const email = nextEmail("locked-accept");
+    const created = await einladenCore(db, tenantId, KOMMUNE, inviterId, { email, roleType: "redakteur" });
+    const token = created.rawToken!;
+
+    // Konto mit der eingeladenen Adresse, aber gesperrt.
+    const [locked] = await db
+      .insert(users)
+      .values({ tenantId, email, accountStatus: "locked" })
+      .returning();
+
+    const res = await einladungAnnehmenCore(db, tenantId, token, { id: locked.id, email });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe("account_inactive");
+
+    // Keine Rolle vergeben; Einladung bleibt pending (Rollback der Flanke).
+    expect(await getUserRoleTypes(db, tenantId, locked.id)).not.toContain("redakteur");
+    const [row] = await db
+      .select({ status: invitations.status })
+      .from(invitations)
+      .where(and(eq(invitations.tenantId, tenantId), eq(invitations.tokenHash, sha256Hex(token))));
+    expect(row.status).toBe("pending");
+
+    // Kontrast: nach Entsperren nimmt dasselbe Konto dieselbe Einladung an.
+    await db.update(users).set({ accountStatus: "active" }).where(eq(users.id, locked.id));
+    const res2 = await einladungAnnehmenCore(db, tenantId, token, { id: locked.id, email });
+    expect(res2.ok).toBe(true);
+    expect(await getUserRoleTypes(db, tenantId, locked.id)).toContain("redakteur");
+  });
+
+  // -------------------------------------------------------------------------
   // Audit PII-frei beim Einladen
   // -------------------------------------------------------------------------
   it.skipIf(SKIP)("invitation.created-Audit ist PII-frei (keine E-Mail in metadata)", async () => {
