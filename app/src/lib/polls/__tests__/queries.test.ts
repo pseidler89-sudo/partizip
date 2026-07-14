@@ -42,8 +42,10 @@ import {
   hatBereitsAbgestimmtBatch,
 } from "@/lib/polls/queries";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
+import { resolveOrtsteilRegionId } from "@/lib/region/scope";
+import { and, eq } from "drizzle-orm";
 
-const { tenants, polls, votes, users } = schema;
+const { tenants, polls, votes, users, regions } = schema;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(__dirname, "../../../../../db/migrations");
@@ -212,28 +214,61 @@ describe("polls/queries (Integration)", () => {
     expect(list.map((p) => p.id)).toEqual([neu.id, alt.id]); // neu→alt
   });
 
-  it.skipIf(SKIP)("getAktivePolls: Ortsteil-Polls nur bei passendem userOrtsteilCode; stadt/kreis/land immer", async () => {
+  it.skipIf(SKIP)("getAktivePolls: vertikale Scheibe (ADR-024) — eigener Ortsteil + Vorfahren + BUND, keine Nachbarorte", async () => {
     const [t] = await db
       .insert(tenants)
       .values({ slug: `sc-${Date.now()}`, name: "Scope" })
       .returning();
     const past = new Date(Date.now() - 60_000);
 
+    // Scope-Polls: der region_id-Trigger legt (via Sicherheitsnetz) Gemeinde/Kreis/
+    // Land-Vorfahren + die Ortsteil-Knoten OT-A/OT-B unter der Gemeinde an.
     await db.insert(polls).values([
       { tenantId: t.id, scopeLevel: "stadt", scopeCode: null, frage: "stadtweit", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
       { tenantId: t.id, scopeLevel: "kreis", scopeCode: null, frage: "kreisweit", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
+      { tenantId: t.id, scopeLevel: "land", scopeCode: null, frage: "landweit", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
       { tenantId: t.id, scopeLevel: "ortsteil", scopeCode: "OT-A", frage: "ortsteil A", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
       { tenantId: t.id, scopeLevel: "ortsteil", scopeCode: "OT-B", frage: "ortsteil B", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
     ]);
 
-    // Ohne Ortsteil: nur stadt + kreis (keine Ortsteil-Polls).
-    const anon = await getAktivePolls(db as never, t.id);
-    expect(anon.map((p) => p.frage).sort()).toEqual(["kreisweit", "stadtweit"]);
+    // BUND-Ebene aktivieren: Poll direkt auf den Wurzel-Knoten (region_id explizit).
+    const [bund] = await db.select({ id: regions.id }).from(regions).where(eq(regions.typ, "bund")).limit(1);
+    await db.insert(polls).values({
+      tenantId: t.id, scopeLevel: "land", scopeCode: null, regionId: bund.id,
+      frage: "bundesweit", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past,
+    });
 
-    // Mit Ortsteil OT-A: stadt + kreis + Ortsteil A (NICHT B).
-    const ota = await getAktivePolls(db as never, t.id, { userOrtsteilCode: "OT-A" });
-    expect(ota.map((p) => p.frage).sort()).toEqual(["kreisweit", "ortsteil A", "stadtweit"]);
+    // Nicht verortet (viewerRegionId null): obere Ebenen tenant-weit inkl. Bund,
+    // OHNE Ortsteil-Kinder — deckungsgleich mit dem alten Default „stadt/kreis/land".
+    const anon = await getAktivePolls(db as never, t.id);
+    expect(anon.map((p) => p.frage).sort()).toEqual(["bundesweit", "kreisweit", "landweit", "stadtweit"]);
+
+    // Verortet in OT-A: eigene Ortsteil-Frage + alle Vorfahren (Stadt/Kreis/Land/BUND),
+    // NICHT den Nachbarort OT-B.
+    const otaId = await resolveOrtsteilRegionId(db as never, t.id, "OT-A");
+    expect(otaId).not.toBeNull();
+    const ota = await getAktivePolls(db as never, t.id, { viewerRegionId: otaId });
+    expect(ota.map((p) => p.frage).sort()).toEqual(
+      ["bundesweit", "kreisweit", "landweit", "ortsteil A", "stadtweit"]
+    );
     expect(ota.map((p) => p.frage)).not.toContain("ortsteil B");
+
+    // Gate-B MAJOR: Wohnknoten = GEMEINDE (Nutzer OHNE gewählten Ortsteil). Trotz
+    // gesetzter viewerRegionId darf die Nachfahren-Scheibe NICHT greifen → obere
+    // Ebenen inkl. Bund, aber KEIN Ortsteil-Poll (weder eigener noch Nachbarort) —
+    // deckungsgleich mit der nicht-verorteten Sicht.
+    const [gem] = await db
+      .select({ id: regions.id })
+      .from(regions)
+      .where(and(eq(regions.typ, "gemeinde"), eq(regions.tenantId, t.id)))
+      .limit(1);
+    expect(gem).toBeTruthy();
+    const gemView = await getAktivePolls(db as never, t.id, { viewerRegionId: gem.id });
+    expect(gemView.map((p) => p.frage).sort()).toEqual(
+      ["bundesweit", "kreisweit", "landweit", "stadtweit"]
+    );
+    expect(gemView.map((p) => p.frage)).not.toContain("ortsteil A");
+    expect(gemView.map((p) => p.frage)).not.toContain("ortsteil B");
   });
 
   it.skipIf(SKIP)("getAktivePolls ist tenant-scoped (fremde Polls unsichtbar)", async () => {

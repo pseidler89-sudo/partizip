@@ -41,6 +41,7 @@ import {
   requireAdminCtx,
 } from "@/lib/auth/action-context";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { insertBelegCode } from "@/lib/polls/beleg";
 import { checkVoteRateLimit } from "@/lib/polls/rate-limit";
 import { isValidChoice } from "@/lib/polls/ergebnis";
@@ -275,6 +276,16 @@ export async function pollErstellen(
   }
   const { frage, scopeLevel, scopeCode, verbindlich, closesAt } = parsed.data;
 
+  // ADR-024 (ETAPPE 2) DUAL-WRITE: region_id aus der Scope-Eingabe via Baum ableiten
+  // und ZUSÄTZLICH zu scope_level/scope_code setzen (Composer-UI liefert weiter nur
+  // den Scope). Kein Gebiet hinterlegt → freundlicher Fehler statt DB-Exception.
+  let regionId: string;
+  try {
+    regionId = await resolveRegionIdForScope(ctx.db, ctx.tenant.id, scopeLevel, scopeCode ?? null);
+  } catch {
+    return { ok: false, error: "Für die gewählte Ebene ist noch kein Gebiet hinterlegt." };
+  }
+
   const pollId = await ctx.db.transaction(async (tx: Db) => {
     const [row] = await tx
       .insert(polls)
@@ -282,6 +293,7 @@ export async function pollErstellen(
         tenantId: ctx.tenant.id,
         scopeLevel,
         scopeCode: scopeCode ?? null,
+        regionId,
         frage,
         typ: "ja_nein_enthaltung",
         status: "entwurf",

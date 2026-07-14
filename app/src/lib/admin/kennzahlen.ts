@@ -35,7 +35,10 @@ export interface AdminKennzahlen {
 export async function getAdminKennzahlen(db: Db, tenantId: string): Promise<AdminKennzahlen> {
   const now = new Date();
 
-  // Aktive, offene Abstimmungen (gleiche Sichtbarkeitslogik wie getAktivePolls).
+  // Aktive, im Zeitfenster offene Abstimmungen des Tenants. BEWUSST OHNE Viewer-
+  // Scheibe (kein Gebietsbaum-Filter): die Admin-Kennzahl zählt ALLE aktiven
+  // Tenant-Polls, nicht die für einen einzelnen Wohnort sichtbare Teilmenge —
+  // anders als getAktivePolls (das über den Baum scheibt). Nur Status/Zeitfenster.
   const aktivePollRows = await db
     .select({ id: polls.id })
     .from(polls)

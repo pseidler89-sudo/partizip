@@ -23,6 +23,7 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { sessions, users, ortsteile } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
+import { resolveOrtsteilRegionId } from "@/lib/region/scope";
 import {
   getAktivePolls,
   getPollErgebnis,
@@ -157,6 +158,7 @@ export default async function TenantLandingPage({ params }: PageProps) {
   // Optionale Session → userId + Ortsteil (für Scope-Filter bei Eingeloggten).
   let userId: string | null = null;
   let userOrtsteilCode: string | null = null;
+  let userHomeRegionId: string | null = null;
   let verifiziert = false;
   if (tenant) {
     const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
@@ -174,6 +176,9 @@ export default async function TenantLandingPage({ params }: PageProps) {
           .select({
             id: users.id,
             ortsteilId: users.ortsteilId,
+            // ADR-024 (ETAPPE 2): weich ermittelter Wohnort-Knoten (viewer_path der
+            // Standard-Sicht). Fällt auf ortsteilId zurück, falls noch nicht gesetzt.
+            homeRegionId: users.homeRegionId,
             // Felder für getStufe (Stufe-2-Gate, P1 Stufen-Fortschritt) — datensparsam,
             // nur die Eligibility-Felder, keine PII wie E-Mail.
             verificationStatus: users.verificationStatus,
@@ -189,6 +194,7 @@ export default async function TenantLandingPage({ params }: PageProps) {
         if (user) {
           userId = user.id;
           verifiziert = getStufe(user) >= 2;
+          userHomeRegionId = user.homeRegionId ?? null;
           if (user.ortsteilId) {
             const otRows = await db
               .select({ code: ortsteile.code })
@@ -229,11 +235,21 @@ export default async function TenantLandingPage({ params }: PageProps) {
   }
 
   // ----- Region gemerkt ODER eingeloggt: Mitmach-Schleife + nach Ebene -------
-  // Eingeloggt: Konto-Ortsteil. Anonym (dann ist region != null): Cookie-Ortsteil.
-  const effectiveOrtsteilCode = eingeloggt ? userOrtsteilCode : region?.ortsteilCode ?? null;
+  // ADR-024 (ETAPPE 2): viewer_path der Standard-Sicht = Wohnort-Knoten.
+  //   Eingeloggt → home_region_id (Fallback: Ortsteil-Knoten aus dem Konto-Ortsteil,
+  //     falls home_region_id noch nicht gesetzt ist — bewahrt die alte Sicht).
+  //   Anonym    → Ortsteil-Knoten aus dem Region-Cookie; ohne Ortsteil null →
+  //     obere Ebenen tenant-weit (wie bisher).
+  const cookieOrtsteilCode = region?.ortsteilCode ?? null;
+  const viewerRegionId = eingeloggt
+    ? userHomeRegionId ??
+      (userOrtsteilCode ? await resolveOrtsteilRegionId(db, tenant.id, userOrtsteilCode) : null)
+    : cookieOrtsteilCode
+      ? await resolveOrtsteilRegionId(db, tenant.id, cookieOrtsteilCode)
+      : null;
 
-  // Alle aktiven Polls für mich (scope-gefiltert, neu→alt).
-  const aktive = await getAktivePolls(db, tenant.id, { userOrtsteilCode: effectiveOrtsteilCode });
+  // Alle aktiven Polls für mich (vertikale Scheibe, neu→alt).
+  const aktive = await getAktivePolls(db, tenant.id, { viewerRegionId });
   // Featured = neueste SICHTBARE Abstimmung (scope-konsistent — kein separater
   // ungescopter Query; Gate-B ADR-015). Verhindert, dass eine Ortsteil-Frage als
   // Hero erscheint, die in der gruppierten Sicht ausgeblendet wäre.

@@ -327,6 +327,14 @@ Bewusst **außerhalb** dieses Schritts, um den Piloten nicht zu gefährden:
   selbst ist eigener Scope.
 - **`regierungsbezirk` / `verbandsgemeinde` als reale Zwischenebenen.** Das Modell trägt sie
   (offener `typ`, `path`), sie werden erst mit Bedarf befüllt.
+- **Bund-Erstellpfad + Composer-Region-Picker.** Die **Bund-Ebene ist in Etappe 2 nur
+  lesend aktiv**: sie fällt als Wurzel jedes Pfads automatisch in die Standard-Sicht (§5),
+  aber `scopeLevelEnum` (`ortsteil | stadt | kreis | land`) kennt **kein `bund`** — der
+  Composer kann also keine Bund-Umfrage anlegen. Das ist eine **bewusste Scope-Grenze**:
+  Die Umfrage-**Erstellung** hängt weiter am alten Scope-Enum (Dual-Write). Erst wenn in der
+  contract-/Folge-Etappe `scope_level`/`scope_code` fallen und der **Region-Picker (Baum-
+  Auswahl)** das Scope-Dropdown ablöst (§9, „Poll-Erstellung UI"), wird das Anlegen auf
+  beliebigen Knoten — inkl. Bund — möglich (governt über `roles.region_id` + `path`).
 
 ---
 

@@ -14,7 +14,7 @@
 
 import { and, eq, or, isNull, lte, gt, desc, inArray, count, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { polls, votes, scopeLevelEnum, pollStatusEnum } from "@/db/schema";
+import { polls, votes, regions, scopeLevelEnum, pollStatusEnum } from "@/db/schema";
 import type { TenantRow } from "@/lib/tenant";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
 import {
@@ -138,6 +138,8 @@ export interface PollListItem {
   verbindlich: boolean;
   scopeLevel: (typeof scopeLevelEnum.enumValues)[number];
   scopeCode: string | null;
+  // ADR-024 (ETAPPE 2): Gebietsknoten der Umfrage (Dual-Write neben scope_*).
+  regionId: string;
   opensAt: Date | null;
   closesAt: Date | null;
   createdAt: Date;
@@ -148,32 +150,68 @@ export interface PollMitErgebnis extends PollListItem {
 }
 
 /**
- * Aktive, im Zeitfenster offene Umfragen des Tenants, neu→alt.
+ * Aktive, im Zeitfenster offene Umfragen des Tenants, neu→alt — Standard-Sicht als
+ * VERTIKALE SCHEIBE über den Gebietsbaum (ADR-024, GEBIETSMODELL §5; ETAPPE 2).
  *
- * Scope-Filter (Stufenmodell, geschachtelt): stadt/kreis/land werden im Pilot
- * wie stadtweit behandelt (alle sehen sie). Ortsteil-Umfragen NUR, wenn ihr
- * scopeCode dem userOrtsteilCode entspricht — ein Nutzer ohne Ortsteil (oder
- * nicht eingeloggt → userOrtsteilCode null/undefined) sieht keine Ortsteil-Polls.
+ * Sichtbar sind Umfragen auf Knoten, die auf dem Pfad des Wohnort-Knotens liegen:
+ *   - Vorfahren inkl. Selbst (`r.path @> viewer_path`): Gemeinde, Kreis, Land, BUND
+ *     — die obere Scheibe. Bund fällt automatisch mit rein (Wurzel jedes Pfads),
+ *     ohne Sonderfall pro Ebene → Bund-Ebene ist damit AKTIV.
+ *   - eigene Ortsteile (`r.path <@ viewer_path`): die Nachfahren des Wohnknotens —
+ *     ABER NUR, wenn der Wohnknoten selbst ein Ortsteil (Blatt) ist. Dann ist der
+ *     einzige Nachfahr er selbst → das ersetzt exakt das alte
+ *     `scope_code == userOrtsteilCode`, strukturell statt per String-Match.
+ * Geschwister (Nachbarorte) sind weder Vorfahr noch Nachfahr → NIE sichtbar.
  *
- * Zeitvergleiche IMMER über Drizzle-Operatoren (kein Roh-SQL-Date) — sonst
- * bricht der Treiber ab (siehe getAktiveFeaturedPoll).
+ * WICHTIG (Gate-B MAJOR): Der `<@`-Zweig (Nachfahren) gilt AUSSCHLIESSLICH für einen
+ * Ortsteil-Wohnknoten. Zeigt `viewerRegionId` auf den GEMEINDE-Knoten (eingeloggter
+ * Nutzer OHNE gewählten Ortsteil, home_region_id = Gemeinde), würde `<@` sonst ALLE
+ * Ortsteil-Polls der Gemeinde einschließen (auch fremde Nachbarorte) und die
+ * „keine Nachbarorte"-Invariante verletzen. Ein Gemeinde-(oder höherer) Wohnknoten
+ * bekommt daher NUR die Vorfahren-Scheibe (`@>`) — identisch zum nicht-verorteten
+ * Fallback.
+ *
+ * viewer_path:
+ *   - `viewerRegionId` gesetzt (users.home_region_id bzw. Cookie-Ortsteil-Knoten):
+ *     dessen Pfad. Bei Ortsteil-Wohnort = alte Semantik + Bund; bei Gemeinde-Wohnort
+ *     = obere Scheibe OHNE Ortsteile.
+ *   - `viewerRegionId` null (nicht verortet / kein home_region_id): Fallback auf den
+ *     Gemeinde-Knoten des Tenants, NUR Vorfahren (`@>`, OHNE Ortsteil-Kinder) —
+ *     entspricht dem heutigen Default „stadt/kreis/land tenant-weit" (+ Bund).
+ *
+ * Tenant-Isolation UNVERÄNDERT über `polls.tenant_id` (der Baum ist tenant-frei und
+ * steuert nur die Sicht). Zeitvergleiche über Drizzle-Operatoren (kein Roh-SQL-Date).
  */
 export async function getAktivePolls(
   db: Db,
   tenantId: string,
-  opts?: { userOrtsteilCode?: string | null }
+  opts?: { viewerRegionId?: string | null }
 ): Promise<PollListItem[]> {
   const now = new Date();
-  const userOrtsteilCode = opts?.userOrtsteilCode ?? null;
+  const viewerRegionId = opts?.viewerRegionId ?? null;
 
-  // Ortsteil-Polls nur, wenn der Code zum Nutzer-Ortsteil passt; alle anderen
-  // Ebenen (stadt/kreis/land) sind tenant-weit sichtbar.
-  const scopeFilter = userOrtsteilCode
-    ? or(
-        inArray(polls.scopeLevel, ["stadt", "kreis", "land"]),
-        and(eq(polls.scopeLevel, "ortsteil"), eq(polls.scopeCode, userOrtsteilCode))
-      )
-    : inArray(polls.scopeLevel, ["stadt", "kreis", "land"]);
+  // viewer_path als Skalar-Subquery (ltree). Ohne home_region_id → Gemeinde-Knoten
+  // des Tenants als Fallback-Anker.
+  const viewerPath = viewerRegionId
+    ? sql`(SELECT path FROM regions WHERE id = ${viewerRegionId}::uuid)`
+    : sql`(SELECT g.path FROM regions g WHERE g.typ = 'gemeinde' AND g.tenant_id = ${tenantId}::uuid ORDER BY g.created_at LIMIT 1)`;
+
+  // Vorfahren-Scheibe (`@>`): immer (Gemeinde/Kreis/Land/Bund + Selbst). Die
+  // Nachfahren-Scheibe (`<@`, eigene Ortsteile) kommt NUR hinzu, wenn der
+  // Wohnknoten selbst ein Ortsteil (Blatt) ist — sonst würde ein Gemeinde-
+  // Wohnknoten alle Ortsteil-Polls inkl. Nachbarorte sehen (Gate-B MAJOR).
+  const scheibe = viewerRegionId
+    ? sql`(
+        ${regions.path} @> ${viewerPath}
+        OR (
+          EXISTS (
+            SELECT 1 FROM regions v
+            WHERE v.id = ${viewerRegionId}::uuid AND v.typ = 'ortsteil'
+          )
+          AND ${regions.path} <@ ${viewerPath}
+        )
+      )`
+    : sql`(${regions.path} @> ${viewerPath})`;
 
   return db
     .select({
@@ -184,18 +222,22 @@ export async function getAktivePolls(
       verbindlich: polls.verbindlich,
       scopeLevel: polls.scopeLevel,
       scopeCode: polls.scopeCode,
+      regionId: polls.regionId,
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
       createdAt: polls.createdAt,
     })
     .from(polls)
+    .innerJoin(regions, eq(regions.id, polls.regionId))
     .where(
       and(
         eq(polls.tenantId, tenantId),
         eq(polls.status, "aktiv"),
         or(isNull(polls.opensAt), lte(polls.opensAt, now)),
         or(isNull(polls.closesAt), gt(polls.closesAt, now)),
-        scopeFilter
+        // viewer_path kann NULL sein (Tenant ohne Gemeinde-Knoten) → dann matcht
+        // weder @> noch <@ (ltree-Vergleich mit NULL = NULL) → leere, sichere Sicht.
+        scheibe
       )
     )
     .orderBy(desc(polls.createdAt));
@@ -243,6 +285,7 @@ export async function getMeineTeilnahmen(
       verbindlich: polls.verbindlich,
       scopeLevel: polls.scopeLevel,
       scopeCode: polls.scopeCode,
+      regionId: polls.regionId,
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
       createdAt: polls.createdAt,

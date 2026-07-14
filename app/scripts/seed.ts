@@ -42,6 +42,7 @@ function readSeed<T>(file: string): T {
 
 // Deterministische UUID v5: geteilter Helfer (scripts/seed-utils.ts).
 import { SEED_NAMESPACE, uuidV5 } from "./seed-utils.js";
+import { seedRegions } from "./seed-regions.js";
 
 // ---------------------------------------------------------------------------
 // Types matching seed JSONs
@@ -180,6 +181,14 @@ async function main() {
     ortsteilIdByCode.set(`${o.tenantSlug}:${o.code}`, row.id);
   }
   console.log(`ortsteile: ${ortsteilSeeds.length} upserted`);
+
+  // ----- 4b. Gebietsbaum (ADR-024, ETAPPE 2) -------------------------------
+  // VOR den Fachtabellen mit region_id (verification_locations/polls/roles/qr):
+  // der Pilot-Baum + Backfill muss stehen, damit der region_id-Trigger die echten
+  // Knoten trifft (statt via Sicherheitsnetz eine synthetische Gemeinde anzulegen).
+  // Idempotent; die PLZ↔Region-Spiegelung ergänzt später `npm run db:seed:regions`.
+  await seedRegions(db as never);
+  console.log("regions: Pilot-Baum geseedet (ADR-024)");
 
   // ----- 3. Verification Locations + Slots ---------------------------------
   const locationSeeds = readSeed<LocationSeed[]>("verification_locations.json");
