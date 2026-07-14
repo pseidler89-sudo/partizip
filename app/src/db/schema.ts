@@ -427,6 +427,13 @@ export const roles = pgTable(
     roleType: roleTypeEnum("role_type").notNull(),
     scopeLevel: scopeLevelEnum("scope_level").notNull(),
     scopeCode: text("scope_code"),
+    // ADR-024 / GEBIETSMODELL §3.2 (ETAPPE 2): Gebietsknoten dieser Rolle.
+    // Dual-write neben scope_level/scope_code (Schatten bis zur contract-Etappe);
+    // der Server leitet region_id aus der Scope-Eingabe via Baum ab (BEFORE-INSERT-
+    // Trigger als Sicherheitsnetz). RESTRICT: referenzierter Knoten nicht löschbar.
+    // In Drizzle NULLABLE (wie regions.path): Inserts dürfen es weglassen, der
+    // Trigger füllt es; die Migration setzt NOT NULL auf DB-Ebene.
+    regionId: uuid("region_id").references(() => regions.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
     // M6: $onUpdate
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`).$onUpdate(() => new Date()),
@@ -436,6 +443,7 @@ export const roles = pgTable(
     unique("roles_tenant_user_role_scope_unique")
       .on(t.tenantId, t.userId, t.roleType, t.scopeLevel, t.scopeCode)
       .nullsNotDistinct(),
+    index("idx_roles_region_id").on(t.regionId),
   ]
 );
 
@@ -456,6 +464,13 @@ export const verificationLocations = pgTable(
     hinweise: text("hinweise"),
     lat: numeric("lat"),
     lon: numeric("lon"),
+    // ADR-024 / GEBIETSMODELL §3.2 (ETAPPE 2): Gebietsknoten des Standorts.
+    // verification_locations trägt KEINEN scope_level — der Standort gehört zur
+    // Kommune, also leitet der Trigger region_id auf den Gemeinde-Knoten des
+    // Tenants ab. RESTRICT: referenzierter Knoten nicht löschbar.
+    // In Drizzle NULLABLE (wie regions.path): Inserts dürfen es weglassen, der
+    // Trigger füllt es; die Migration setzt NOT NULL auf DB-Ebene.
+    regionId: uuid("region_id").references(() => regions.id, { onDelete: "restrict" }),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
     // M6: $onUpdate
@@ -464,6 +479,7 @@ export const verificationLocations = pgTable(
   (t) => [
     // Natürlicher Key für Idempotenz beim Seeding: Standort-Name ist pro Tenant eindeutig
     unique("verification_locations_tenant_name_unique").on(t.tenantId, t.name),
+    index("idx_verification_locations_region_id").on(t.regionId),
   ]
 );
 
@@ -1049,6 +1065,13 @@ export const polls = pgTable(
     scopeLevel: scopeLevelEnum("scope_level").notNull(),
     // Optionaler Scope-Code (z. B. Ortsteil-Code) — analog roles.scope_code
     scopeCode: text("scope_code"),
+    // ADR-024 / GEBIETSMODELL §3.2 (ETAPPE 2): Gebietsknoten dieser Umfrage.
+    // Dual-write neben scope_level/scope_code (Schatten bis zur contract-Etappe);
+    // der Server leitet region_id aus der Scope-Eingabe via Baum ab (BEFORE-INSERT-
+    // Trigger als Sicherheitsnetz). RESTRICT: referenzierter Knoten nicht löschbar.
+    // In Drizzle NULLABLE (wie regions.path): Inserts dürfen es weglassen, der
+    // Trigger füllt es; die Migration setzt NOT NULL auf DB-Ebene.
+    regionId: uuid("region_id").references(() => regions.id, { onDelete: "restrict" }),
     frage: text("frage").notNull(),
     typ: pollTypeEnum("typ").notNull().default("ja_nein_enthaltung"),
     status: pollStatusEnum("status").notNull().default("entwurf"),
@@ -1065,6 +1088,7 @@ export const polls = pgTable(
   },
   (t) => [
     index("idx_polls_tenant_status").on(t.tenantId, t.status),
+    index("idx_polls_region_id").on(t.regionId),
   ]
 );
 
@@ -1183,6 +1207,13 @@ export const qrCodes = pgTable(
     scopeLevel: scopeLevelEnum("scope_level").notNull(),
     // Optionaler Scope-Code (z. B. Ortsteil-Code) — analog roles.scope_code
     scopeCode: text("scope_code"),
+    // ADR-024 / GEBIETSMODELL §3.2 (ETAPPE 2): Gebietsknoten dieses QR-Codes.
+    // Dual-write neben scope_level/scope_code (Schatten bis zur contract-Etappe);
+    // der Server leitet region_id aus der Scope-Eingabe via Baum ab (BEFORE-INSERT-
+    // Trigger als Sicherheitsnetz). RESTRICT: referenzierter Knoten nicht löschbar.
+    // In Drizzle NULLABLE (wie regions.path): Inserts dürfen es weglassen, der
+    // Trigger füllt es; die Migration setzt NOT NULL auf DB-Ebene.
+    regionId: uuid("region_id").references(() => regions.id, { onDelete: "restrict" }),
     // SHA-256-Hex des Roh-Tokens — Roh-Token verlässt nie Server-Gedächtnis,
     // steht NUR im QR-URL. UNIQUE für O(1)-Lookup beim Einlösen.
     tokenHash: text("token_hash").notNull().unique(),
@@ -1203,6 +1234,7 @@ export const qrCodes = pgTable(
   },
   (t) => [
     index("idx_qr_codes_tenant_id").on(t.tenantId),
+    index("idx_qr_codes_region_id").on(t.regionId),
     // max_redemptions >= 1 — ein QR mit 0 wäre sinnlos und würde Cap-Logik brechen
     check("qr_codes_max_redemptions_check", sql`${t.maxRedemptions} >= 1`),
     // redemption_count darf das Limit nie überschreiten (DB-Sicherheitsnetz zur

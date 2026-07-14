@@ -10,8 +10,12 @@
 "use server";
 
 import { cookies, headers } from "next/headers";
-import { createDb } from "@/db/client";
+import { and, eq } from "drizzle-orm";
+import { createDb, type Db } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
+import { sessions, users } from "@/db/schema";
+import { sha256Hex } from "@/lib/auth/crypto";
+import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import {
   REGION_COOKIE_NAME,
   REGION_COOKIE_MAX_AGE,
@@ -24,6 +28,10 @@ import {
   resolveRegionByCoords,
   ortsteilCodeGehoertZuTenant,
 } from "@/lib/region/queries";
+import {
+  resolveOrtsteilRegionId,
+  resolveGemeindeRegionId,
+} from "@/lib/region/scope";
 
 function databaseUrl(): string {
   return (
@@ -59,6 +67,42 @@ async function setRegionCookie(ortsteilCode: string | null): Promise<void> {
   });
 }
 
+/**
+ * ADR-024 (ETAPPE 2, ZIEL 4): Für einen EINGELOGGTEN Nutzer den weichen Wohnort-
+ * Knoten (users.home_region_id) aus der PLZ-/Standort-/Ortsteil-Wahl mitschreiben —
+ * er steuert die Standard-Sicht (viewer_path). Für Anonyme bleibt es beim Cookie
+ * (kein Konto, kein home_region_id). Best-effort und minimal: kein Session-Cookie
+ * oder kein Gemeinde-Knoten → still übersprungen. Der Ortsteil-Knoten wird bevorzugt,
+ * sonst der Gemeinde-Knoten (Stadt-Ebene).
+ */
+async function setHomeRegionIfLoggedIn(
+  db: Db,
+  tenantId: string,
+  ortsteilCode: string | null
+): Promise<void> {
+  const c = await cookies();
+  const rawToken = c.get(SESSION_COOKIE_NAME)?.value;
+  if (!rawToken) return;
+  const tokenHash = sha256Hex(rawToken);
+  const rows = await db
+    .select({ userId: sessions.userId, revokedAt: sessions.revokedAt, expiresAt: sessions.expiresAt })
+    .from(sessions)
+    .where(and(eq(sessions.tokenHash, tokenHash), eq(sessions.tenantId, tenantId)))
+    .limit(1);
+  const s = rows[0];
+  if (!s || s.revokedAt || s.expiresAt < new Date()) return;
+
+  const regionId =
+    (ortsteilCode ? await resolveOrtsteilRegionId(db, tenantId, ortsteilCode) : null) ??
+    (await resolveGemeindeRegionId(db, tenantId));
+  if (!regionId) return;
+
+  await db
+    .update(users)
+    .set({ homeRegionId: regionId })
+    .where(and(eq(users.id, s.userId), eq(users.tenantId, tenantId)));
+}
+
 /** Region per PLZ-Eingabe bestätigen. */
 export async function regionAusPlz(plzInput: string): Promise<RegionResult> {
   const tenantId = await currentTenantId();
@@ -83,6 +127,7 @@ export async function regionAusPlz(plzInput: string): Promise<RegionResult> {
   }
 
   await setRegionCookie(treffer.ortsteilCode);
+  await setHomeRegionIfLoggedIn(db, tenantId, treffer.ortsteilCode);
   return { ok: true };
 }
 
@@ -115,6 +160,7 @@ export async function regionAusKoordinaten(
   }
 
   await setRegionCookie(treffer.ortsteilCode);
+  await setHomeRegionIfLoggedIn(db, tenantId, treffer.ortsteilCode);
   return { ok: true };
 }
 
@@ -126,6 +172,7 @@ export async function regionUebernehmen(): Promise<RegionResult> {
   const tenantId = await currentTenantId();
   if (!tenantId) return { ok: false, error: "Diese Seite ist nicht erreichbar." };
   await setRegionCookie(null);
+  await setHomeRegionIfLoggedIn(createDb(databaseUrl()), tenantId, null);
   return { ok: true };
 }
 
@@ -136,6 +183,7 @@ export async function ortsteilSetzen(code: string | null): Promise<RegionResult>
 
   if (code == null || code === "") {
     await setRegionCookie(null);
+    await setHomeRegionIfLoggedIn(createDb(databaseUrl()), tenantId, null);
     return { ok: true };
   }
 
@@ -144,6 +192,7 @@ export async function ortsteilSetzen(code: string | null): Promise<RegionResult>
   if (!gehoert) return { ok: false, error: "Unbekannter Ortsteil." };
 
   await setRegionCookie(code);
+  await setHomeRegionIfLoggedIn(db, tenantId, code);
   return { ok: true };
 }
 

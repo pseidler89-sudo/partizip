@@ -37,6 +37,7 @@ import {
   scopeLevelEnum,
 } from "@/db/schema";
 import { generateRawToken, sha256Hex } from "@/lib/auth/crypto";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 
 export type ScopeLevel = (typeof scopeLevelEnum.enumValues)[number];
 
@@ -131,6 +132,15 @@ export async function qrErstellenCore(
   // Parameter); nur in Roh-`sql`-Templates wäre ein JS-Date verboten.
   const expiresAt = new Date(Date.now() + input.gueltigkeitStunden * 60 * 60 * 1000);
 
+  // ADR-024 (ETAPPE 2) DUAL-WRITE: region_id aus dem Scope via Baum ableiten und
+  // ZUSÄTZLICH zu scope_level/scope_code setzen.
+  const regionId = await resolveRegionIdForScope(
+    db,
+    tenantId,
+    input.scopeLevel,
+    input.scopeCode ?? null
+  );
+
   return db.transaction(async (tx: Db) => {
     const [row] = await tx
       .insert(qrCodes)
@@ -138,6 +148,7 @@ export async function qrErstellenCore(
         tenantId,
         scopeLevel: input.scopeLevel,
         scopeCode: input.scopeCode ?? null,
+        regionId,
         tokenHash,
         label: input.label ?? null,
         maxRedemptions: input.maxRedemptions,

@@ -31,6 +31,7 @@ import {
   isAdmin,
   type RoleType,
 } from "@/lib/auth/roles";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 
 type ScopeLevel = "ortsteil" | "stadt" | "kreis" | "land";
 
@@ -102,6 +103,15 @@ export async function assignRoleCore(
     return { ok: false, error: "Es existiert kein Konto mit dieser E-Mail in dieser Kommune." };
   }
 
+  // ADR-024 (ETAPPE 2) DUAL-WRITE: region_id aus dem Scope via Baum ableiten und
+  // ZUSÄTZLICH zu scope_level/scope_code setzen.
+  let regionId: string;
+  try {
+    regionId = await resolveRegionIdForScope(db, tenantId, scopeLevel, scopeCode);
+  } catch {
+    return { ok: false, error: "Für die gewählte Ebene ist noch kein Gebiet hinterlegt." };
+  }
+
   // 4.+5. Rolle einfügen + Audit in EINER Transaktion (F1: keine Mutation ohne
   //        Audit — die Invariante, die Achse B gerade herstellen soll).
   //        onConflictDoNothing greift den UNIQUE(tenant,user,role,scope,scopeCode)
@@ -115,6 +125,7 @@ export async function assignRoleCore(
         roleType: roleType as RoleType,
         scopeLevel,
         scopeCode,
+        regionId,
       })
       .onConflictDoNothing()
       .returning({ id: roles.id });

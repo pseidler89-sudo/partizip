@@ -169,6 +169,13 @@
       "when": 1784063409741,
       "tag": "0023_lying_korvac",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784069322626,
+      "tag": "0024_gebiet_region_fk",
+      "breakpoints": true
     }
   ]
 }

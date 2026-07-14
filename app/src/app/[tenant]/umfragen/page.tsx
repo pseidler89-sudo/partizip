@@ -32,6 +32,7 @@ import { gruppiereNachEbene, SCOPE_LABEL } from "@/lib/polls/gruppierung";
 import type { PollErgebnis } from "@/lib/polls/ergebnis";
 import { REGION_COOKIE_NAME, parseRegionCookie } from "@/lib/region/core";
 import { getOrtsteileForTenant } from "@/lib/region/queries";
+import { resolveOrtsteilRegionId } from "@/lib/region/scope";
 import { RegionBanner } from "../RegionBanner";
 import { PollTypBadge } from "../PollTypBadge";
 
@@ -162,9 +163,10 @@ export default async function UmfragenListePage({ params }: PageProps) {
   const cookieStore = await cookies();
   const region = parseRegionCookie(cookieStore.get(REGION_COOKIE_NAME)?.value);
 
-  // Optionale Session → userId + Ortsteil-Code (für Scope-Filter).
+  // Optionale Session → userId + Wohnort-Knoten (viewer_path der Standard-Sicht).
   let userId: string | null = null;
   let userOrtsteilCode: string | null = null;
+  let userHomeRegionId: string | null = null;
   const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (rawToken) {
     const tokenHash = sha256Hex(rawToken);
@@ -177,13 +179,14 @@ export default async function UmfragenListePage({ params }: PageProps) {
     const session = sessionRows[0];
     if (session && !session.revokedAt && session.expiresAt >= now) {
       const userRows = await db
-        .select({ id: users.id, ortsteilId: users.ortsteilId })
+        .select({ id: users.id, ortsteilId: users.ortsteilId, homeRegionId: users.homeRegionId })
         .from(users)
         .where(and(eq(users.id, session.userId), eq(users.tenantId, tenant.id)))
         .limit(1);
       const user = userRows[0];
       if (user) {
         userId = user.id;
+        userHomeRegionId = user.homeRegionId ?? null;
         if (user.ortsteilId) {
           const otRows = await db
             .select({ code: ortsteile.code })
@@ -197,11 +200,18 @@ export default async function UmfragenListePage({ params }: PageProps) {
   }
 
   const eingeloggt = userId != null;
-  // Anonym: Ortsteil aus dem Region-Cookie; eingeloggt: echter Account-Ortsteil.
-  const effectiveOrtsteilCode = eingeloggt ? userOrtsteilCode : region?.ortsteilCode ?? null;
+  // ADR-024 (ETAPPE 2): viewer_path = Wohnort-Knoten. Eingeloggt → home_region_id
+  // (Fallback: Ortsteil-Knoten aus dem Konto-Ortsteil). Anonym → Cookie-Ortsteil.
+  const cookieOrtsteilCode = region?.ortsteilCode ?? null;
+  const viewerRegionId = eingeloggt
+    ? userHomeRegionId ??
+      (userOrtsteilCode ? await resolveOrtsteilRegionId(db, tenant.id, userOrtsteilCode) : null)
+    : cookieOrtsteilCode
+      ? await resolveOrtsteilRegionId(db, tenant.id, cookieOrtsteilCode)
+      : null;
 
-  // Aktive Polls (scope-gefiltert), Ergebnis je Poll.
-  const aktive = await getAktivePolls(db, tenant.id, { userOrtsteilCode: effectiveOrtsteilCode });
+  // Aktive Polls (vertikale Scheibe), Ergebnis je Poll.
+  const aktive = await getAktivePolls(db, tenant.id, { viewerRegionId });
   const aktiveMitErgebnis: PollMitErgebnis[] = await Promise.all(
     aktive.map(async (p) => ({
       ...p,

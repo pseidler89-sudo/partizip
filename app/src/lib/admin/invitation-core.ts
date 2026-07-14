@@ -43,6 +43,7 @@ import {
   type RoleType,
 } from "@/lib/auth/roles";
 import { generateRawToken, sha256Hex } from "@/lib/auth/crypto";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 
 type ScopeLevel = "ortsteil" | "stadt" | "kreis" | "land";
 const VALID_SCOPE_LEVELS: readonly string[] = ["ortsteil", "stadt", "kreis", "land"];
@@ -551,6 +552,8 @@ export async function einladungAnnehmenCore(
       }
 
       // 4. Rolle an das authentifizierte Konto vergeben (idempotent) + Audit.
+      // ADR-024 (ETAPPE 2) DUAL-WRITE: region_id aus dem Scope via Baum ableiten.
+      const regionId = await resolveRegionIdForScope(tx, tenantId, inv.scopeLevel, inv.scopeCode);
       const inserted = await tx
         .insert(roles)
         .values({
@@ -559,6 +562,7 @@ export async function einladungAnnehmenCore(
           roleType: inv.roleType as RoleType,
           scopeLevel: inv.scopeLevel,
           scopeCode: inv.scopeCode,
+          regionId,
         })
         .onConflictDoNothing()
         .returning({ id: roles.id });

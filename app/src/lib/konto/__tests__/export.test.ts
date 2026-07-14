@@ -47,6 +47,7 @@ const rolle: RoleRow = {
   roleType: "user",
   scopeLevel: "stadt",
   scopeCode: null,
+  regionId: "region-1",
   createdAt: T0,
   updatedAt: T0,
 };
