@@ -171,7 +171,8 @@ unverändert weiter, `region_id` ist reine Zusatzinfo); Schritt 4 ist der Contra
 
 - **Jetzt (Pilot):** Nur den **Pilot-Teilbaum** amtlich seeden — Bund-Wurzel (synthetisch,
   `de`) → Land Hessen (`06`) → Kreis Rheingau-Taunus (`06439`) → Gemeinde Taunusstein
-  (`06439009`) → deren Ortsteile (aus der bestehenden `ortsteile`-Tabelle). Das sind wenige
+  (AGS `06439015`, ARS `064390015015`) → deren Ortsteile (aus der bestehenden
+  `ortsteile`-Tabelle). Das sind wenige
   Knoten, sofort verifizierbar.
 - **Später (optional, reiner Datenlauf):** Bundesweiter Import aus **Destatis GV-ISys /
   Gemeindeverzeichnis GV100** (~11.000 Gemeinden + Kreise + Länder, wenige MB, quartalsweise,
