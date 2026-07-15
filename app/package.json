@@ -19,6 +19,8 @@
     "db:seed:demo": "tsx scripts/seed-demo.ts",
     "db:seed:musterstadt": "tsx scripts/seed-musterstadt.ts",
     "db:seed:regions": "tsx scripts/seed-regions.ts",
+    "db:upgrade": "npm run db:seed:regions && npm run db:migrate",
+    "test:upgrade": "tsx scripts/test-upgrade-path.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
     "db:setup": "tsx scripts/migrate.ts && tsx scripts/seed.ts",
     "db:cleanup": "tsx scripts/cleanup-auth.ts",

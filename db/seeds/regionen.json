@@ -1,0 +1,21 @@
+[
+  {
+    "tenantSlug": "taunusstein",
+    "fiktiv": false,
+    "zweig": [
+      { "typ": "land",     "pathLabel": "hessen",      "name": "Hessen",                "ags": "06",       "ars": "060000000000" },
+      { "typ": "kreis",    "pathLabel": "rtk",         "name": "Rheingau-Taunus-Kreis", "ags": "06439",    "ars": "064390000000" },
+      { "typ": "gemeinde", "pathLabel": "taunusstein", "name": "Taunusstein",           "ags": "06439015", "ars": "064390015015", "lat": "50.1466", "lon": "8.1505" }
+    ]
+  },
+  {
+    "tenantSlug": "demo",
+    "slugEnv": "DEMO_TENANT_SLUG",
+    "fiktiv": true,
+    "zweig": [
+      { "typ": "land",     "pathLabel": "musterland",  "name": "Musterland (Demo)"  },
+      { "typ": "kreis",    "pathLabel": "musterkreis", "name": "Musterkreis (Demo)" },
+      { "typ": "gemeinde", "pathLabel": "musterstadt", "name": "Musterstadt (Demo)" }
+    ]
+  }
+]

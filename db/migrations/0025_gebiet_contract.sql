@@ -48,6 +48,33 @@ ALTER TABLE "invitations" ALTER COLUMN "region_id" SET NOT NULL;--> statement-br
 -- 2) roles-UNIQUE auf region_id umstellen (erst neu, dann alt droppen).
 --    region_id ist NOT NULL (0024) → kein nullsNotDistinct mehr nötig.
 -- ---------------------------------------------------------------------------
+
+-- Pre-Flight-Gate (analog zum invitations-Backfill-Gate oben): der alte UNIQUE war
+-- (tenant,user,role_type,scope_level,scope_code). Zwei Bestands-roles-Zeilen, die
+-- sich NUR im nun ignorierten scope_code unterschieden (oder deren Ortsteil-Codes
+-- via regions_ltree_label auf DASSELBE path_label normalisieren), lösen auf DENSELBEN
+-- region_id auf und würden das neue UNIQUE mit einer generischen Postgres-
+-- Unique-Violation abbrechen. Wir erkennen solche Kollisionen HIER und brechen mit
+-- einer sprechenden Meldung ab (fail-loud, transaktionaler Rollback der Migration).
+-- Deterministisches Zusammenführen bewusst NICHT ohne Not — der Betreiber muss die
+-- Duplikate sehen und gezielt deduplizieren.
+DO $$
+DECLARE
+  v_row record;
+BEGIN
+  SELECT tenant_id, user_id, role_type, region_id, count(*) AS n
+    INTO v_row
+    FROM roles
+    GROUP BY tenant_id, user_id, role_type, region_id
+    HAVING count(*) > 1
+    ORDER BY count(*) DESC, tenant_id, user_id
+    LIMIT 1;
+  IF FOUND THEN
+    RAISE EXCEPTION 'roles-UNIQUE-Wechsel abgebrochen: % Zeilen kollidieren auf (tenant_id=%, user_id=%, role_type=%, region_id=%) — sie lösen (nach Wegfall von scope_code) auf DENSELBEN Gebietsknoten auf. Vor der Migration deduplizieren: die neue Eindeutigkeit ist (tenant_id, user_id, role_type, region_id).',
+      v_row.n, v_row.tenant_id, v_row.user_id, v_row.role_type, v_row.region_id;
+  END IF;
+END $$;--> statement-breakpoint
+
 ALTER TABLE "roles" ADD CONSTRAINT "roles_tenant_user_role_region_unique" UNIQUE("tenant_id","user_id","role_type","region_id");--> statement-breakpoint
 ALTER TABLE "roles" DROP CONSTRAINT "roles_tenant_user_role_scope_unique";--> statement-breakpoint
 
