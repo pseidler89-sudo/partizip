@@ -15,6 +15,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "node:path";
@@ -101,9 +102,10 @@ describe("Beleg-Code Persistenz (Integration)", () => {
   });
 
   async function createPoll(tid: string, status: "aktiv" | "geschlossen" = "aktiv") {
+    const regionId = await resolveRegionIdForScope(db as never, tid, "stadt", null);
     const [p] = await db
       .insert(polls)
-      .values({ tenantId: tid, scopeLevel: "stadt", frage: "Beleg-Frage?", status })
+      .values({ tenantId: tid, regionId, frage: "Beleg-Frage?", status })
       .returning();
     return p;
   }
@@ -190,7 +192,7 @@ describe("Beleg-Code Persistenz (Integration)", () => {
       .insert(polls)
       .values({
         tenantId,
-        scopeLevel: "stadt",
+        regionId: await resolveRegionIdForScope(db as never, tenantId, "stadt", null),
         frage: "Abgelaufen, aber noch aktiv?",
         status: "aktiv",
         closesAt: new Date(Date.now() - 60 * 60 * 1000),

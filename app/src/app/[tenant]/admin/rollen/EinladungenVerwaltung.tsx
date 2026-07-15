@@ -15,6 +15,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { regionTypLabel } from "@/lib/region/ebenen";
 import {
   einladen,
   einladungZurueckziehen,
@@ -47,8 +48,9 @@ interface Einladung {
   id: string;
   email: string;
   roleType: string;
-  scopeLevel: string;
-  scopeCode: string | null;
+  // ADR-024: Gebietsart + Name des Rollen-Knotens (statt scope_level/scope_code).
+  regionTyp: string;
+  regionName: string;
   status: string;
   resendCount: number;
   expiresAt: string;
@@ -244,8 +246,8 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
                       <p className="mt-0.5 text-sm text-zinc-500">
                         <span className="font-medium">{ROLE_LABELS[e.roleType] ?? e.roleType}</span>
                         <span className="text-zinc-400">
-                          {" "}· {e.scopeLevel}
-                          {e.scopeCode ? ` (${e.scopeCode})` : ""}
+                          {" "}· {regionTypLabel(e.regionTyp)}
+                          {e.regionTyp === "ortsteil" ? ` (${e.regionName})` : ""}
                         </span>
                       </p>
                     </div>

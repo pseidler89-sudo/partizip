@@ -103,8 +103,9 @@ export async function assignRoleCore(
     return { ok: false, error: "Es existiert kein Konto mit dieser E-Mail in dieser Kommune." };
   }
 
-  // ADR-024 (ETAPPE 2) DUAL-WRITE: region_id aus dem Scope via Baum ableiten und
-  // ZUSÄTZLICH zu scope_level/scope_code setzen.
+  // ADR-024 contract: die Scope-Eingabe (TS-Ebene + optionaler Code) wird via Baum
+  // zu region_id aufgelöst — der EINZIGE geschriebene Gebietsbezug (scope_level/
+  // scope_code sind entfernt). Kein Gebiet hinterlegt → freundlicher Fehler.
   let regionId: string;
   try {
     regionId = await resolveRegionIdForScope(db, tenantId, scopeLevel, scopeCode);
@@ -114,8 +115,8 @@ export async function assignRoleCore(
 
   // 4.+5. Rolle einfügen + Audit in EINER Transaktion (F1: keine Mutation ohne
   //        Audit — die Invariante, die Achse B gerade herstellen soll).
-  //        onConflictDoNothing greift den UNIQUE(tenant,user,role,scope,scopeCode)
-  //        mit nullsNotDistinct ab; returning() ist leer, wenn nichts eingefügt wurde.
+  //        onConflictDoNothing greift den UNIQUE(tenant,user,role_type,region_id)
+  //        ab; returning() ist leer, wenn nichts eingefügt wurde.
   return await db.transaction(async (tx: Db) => {
     const inserted = await tx
       .insert(roles)
@@ -123,8 +124,6 @@ export async function assignRoleCore(
         tenantId,
         userId: target.id,
         roleType: roleType as RoleType,
-        scopeLevel,
-        scopeCode,
         regionId,
       })
       .onConflictDoNothing()

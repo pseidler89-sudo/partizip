@@ -12,15 +12,15 @@
 
 import { and, eq, desc } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { qrCodes, scopeLevelEnum } from "@/db/schema";
-
-export type ScopeLevel = (typeof scopeLevelEnum.enumValues)[number];
+import { qrCodes, regions } from "@/db/schema";
+import type { RegionTyp } from "@/lib/region/ebenen";
 
 export interface QrCodeListItem {
   id: string;
   label: string | null;
-  scopeLevel: ScopeLevel;
-  scopeCode: string | null;
+  // ADR-024 contract: Gebietsart + Name des QR-Knotens statt scope_level/scope_code.
+  regionTyp: RegionTyp;
+  regionName: string;
   redemptionCount: number;
   maxRedemptions: number;
   expiresAt: Date;
@@ -40,8 +40,8 @@ export async function qrCodesListe(
     .select({
       id: qrCodes.id,
       label: qrCodes.label,
-      scopeLevel: qrCodes.scopeLevel,
-      scopeCode: qrCodes.scopeCode,
+      regionTyp: regions.typ,
+      regionName: regions.name,
       redemptionCount: qrCodes.redemptionCount,
       maxRedemptions: qrCodes.maxRedemptions,
       expiresAt: qrCodes.expiresAt,
@@ -49,13 +49,15 @@ export async function qrCodesListe(
       createdAt: qrCodes.createdAt,
     })
     .from(qrCodes)
+    .innerJoin(regions, eq(regions.id, qrCodes.regionId))
     .where(eq(qrCodes.tenantId, tenantId))
     .orderBy(desc(qrCodes.createdAt));
 }
 
 export interface QrTokenMeta {
-  scopeLevel: ScopeLevel;
-  scopeCode: string | null;
+  // ADR-024 contract: Gebietsart + Name des QR-Knotens statt scope_level/scope_code.
+  regionTyp: RegionTyp;
+  regionName: string;
   label: string | null;
   /** Aggregierter Gültigkeits-Status für die Einlöse-Seite. */
   status: "gueltig" | "abgelaufen" | "widerrufen" | "aufgebraucht";
@@ -81,8 +83,8 @@ export async function qrTokenMeta(
 
   const rows = await db
     .select({
-      scopeLevel: qrCodes.scopeLevel,
-      scopeCode: qrCodes.scopeCode,
+      regionTyp: regions.typ,
+      regionName: regions.name,
       label: qrCodes.label,
       expiresAt: qrCodes.expiresAt,
       revokedAt: qrCodes.revokedAt,
@@ -90,6 +92,7 @@ export async function qrTokenMeta(
       maxRedemptions: qrCodes.maxRedemptions,
     })
     .from(qrCodes)
+    .innerJoin(regions, eq(regions.id, qrCodes.regionId))
     .where(and(eq(qrCodes.tokenHash, tokenHash), eq(qrCodes.tenantId, tenantId)))
     .limit(1);
 
@@ -102,8 +105,8 @@ export async function qrTokenMeta(
   else if (qr.redemptionCount >= qr.maxRedemptions) status = "aufgebraucht";
 
   return {
-    scopeLevel: qr.scopeLevel,
-    scopeCode: qr.scopeCode,
+    regionTyp: qr.regionTyp,
+    regionName: qr.regionName,
     label: qr.label,
     status,
   };

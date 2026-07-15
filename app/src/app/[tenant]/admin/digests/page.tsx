@@ -14,7 +14,7 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { digests, risMeetings, sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { canRedaktion, beobachterDarfSehen, getUserRolesMitScope } from "@/lib/auth/roles";
+import { canRedaktion, beobachterDarfTenantweitSehen, getUserRolesMitScope } from "@/lib/auth/roles";
 import Link from "next/link";
 
 async function getAdminDigests(tenantSlug: string) {
@@ -53,7 +53,7 @@ async function getAdminDigests(tenantSlug: string) {
   // H1: Redakteure dürfen die Liste sehen (prüfen); Freigabe nur Admins (Detailseite).
   // Rollen-Governance: `beobachter` mit stadtweitem Scope (Digests sind stadtweit)
   // sieht die Liste READ-ONLY — Mutationen bleiben serverseitig gesperrt.
-  if (!canRedaktion(roleTypes) && !beobachterDarfSehen(roleRows, "stadt", null)) {
+  if (!canRedaktion(roleTypes) && !beobachterDarfTenantweitSehen(roleRows)) {
     return { tenant, digests: null, isAdmin: false };
   }
 

@@ -14,7 +14,8 @@
 
 import { and, eq, or, isNull, lte, gt, desc, inArray, count, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { polls, votes, regions, scopeLevelEnum, pollStatusEnum } from "@/db/schema";
+import { polls, votes, regions, pollStatusEnum } from "@/db/schema";
+import type { RegionTyp } from "@/lib/region/ebenen";
 import type { TenantRow } from "@/lib/tenant";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
 import {
@@ -136,10 +137,13 @@ export interface PollListItem {
   typ: "ja_nein_enthaltung";
   status: (typeof pollStatusEnum.enumValues)[number];
   verbindlich: boolean;
-  scopeLevel: (typeof scopeLevelEnum.enumValues)[number];
-  scopeCode: string | null;
-  // ADR-024 (ETAPPE 2): Gebietsknoten der Umfrage (Dual-Write neben scope_*).
+  // ADR-024 contract: Gebietsknoten der Umfrage + abgeleitete Anzeigefelder.
+  // Die geografische Ebene ergibt sich aus regionTyp (regions.typ); scope_* sind weg.
   regionId: string;
+  regionTyp: RegionTyp;
+  regionName: string;
+  /** ltree-Pfad des Knotens (für Sicht-/Beobachter-Prüfungen). */
+  regionPath: string;
   opensAt: Date | null;
   closesAt: Date | null;
   createdAt: Date;
@@ -220,9 +224,10 @@ export async function getAktivePolls(
       typ: polls.typ,
       status: polls.status,
       verbindlich: polls.verbindlich,
-      scopeLevel: polls.scopeLevel,
-      scopeCode: polls.scopeCode,
       regionId: polls.regionId,
+      regionTyp: regions.typ,
+      regionName: regions.name,
+      regionPath: sql<string>`${regions.path}::text`,
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
       createdAt: polls.createdAt,
@@ -283,14 +288,16 @@ export async function getMeineTeilnahmen(
       typ: polls.typ,
       status: polls.status,
       verbindlich: polls.verbindlich,
-      scopeLevel: polls.scopeLevel,
-      scopeCode: polls.scopeCode,
       regionId: polls.regionId,
+      regionTyp: regions.typ,
+      regionName: regions.name,
+      regionPath: sql<string>`${regions.path}::text`,
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
       createdAt: polls.createdAt,
     })
     .from(polls)
+    .innerJoin(regions, eq(regions.id, polls.regionId))
     .where(and(eq(polls.tenantId, tenantId), inArray(polls.id, pollIds)))
     .orderBy(desc(polls.createdAt));
 
@@ -321,8 +328,12 @@ export async function getMeineTeilnahmen(
 export interface PollAdminItem {
   id: string;
   frage: string;
-  scopeLevel: (typeof scopeLevelEnum.enumValues)[number];
-  scopeCode: string | null;
+  // ADR-024 contract: Gebietsknoten + Anzeigefelder statt scope_level/scope_code.
+  regionId: string;
+  regionTyp: RegionTyp;
+  regionName: string;
+  /** ltree-Pfad des Knotens (für die Beobachter-Sichtprüfung). */
+  regionPath: string;
   status: (typeof pollStatusEnum.enumValues)[number];
   verbindlich: boolean;
   opensAt: Date | null;
@@ -351,8 +362,10 @@ export async function getAllPollsForAdmin(
     .select({
       id: polls.id,
       frage: polls.frage,
-      scopeLevel: polls.scopeLevel,
-      scopeCode: polls.scopeCode,
+      regionId: polls.regionId,
+      regionTyp: regions.typ,
+      regionName: regions.name,
+      regionPath: sql<string>`${regions.path}::text`,
       status: polls.status,
       verbindlich: polls.verbindlich,
       opensAt: polls.opensAt,
@@ -360,6 +373,7 @@ export async function getAllPollsForAdmin(
       createdAt: polls.createdAt,
     })
     .from(polls)
+    .innerJoin(regions, eq(regions.id, polls.regionId))
     .where(eq(polls.tenantId, tenantId))
     .orderBy(desc(polls.createdAt));
 

@@ -40,7 +40,7 @@ import {
   auditEvents,
 } from "../src/db/schema.js";
 import { generateReadableCode } from "../src/lib/readable-code.js";
-import { SEED_NAMESPACE, uuidV5 } from "./seed-utils.js";
+import { SEED_NAMESPACE, uuidV5, resolveRegionId } from "./seed-utils.js";
 
 const databaseUrl =
   process.env.DATABASE_URL ??
@@ -92,6 +92,10 @@ async function main() {
   if (!tenant) throw new Error(`Tenant '${TENANT_SLUG}' nicht gefunden — erst db:seed.`);
   const tenantId = tenant.id;
   console.log(`Demo-Seed für Tenant '${TENANT_SLUG}' (${tenantId})`);
+
+  // ADR-024 contract: alle Demo-Rollen/-Umfragen sind stadtweit (Gemeinde-Knoten).
+  // Scope-Eingabe → region_id (der Dual-Write-Trigger ist im contract entfernt).
+  const stadtRegionId = await resolveRegionId(db, tenantId, "stadt", null);
 
   // ----- 1. Personas -------------------------------------------------------
   const userIdByKey = new Map<string, string>();
@@ -152,8 +156,7 @@ async function main() {
           tenantId,
           userId: id,
           roleType: p.role,
-          scopeLevel: "stadt",
-          scopeCode: null,
+          regionId: stadtRegionId,
         })
         .onConflictDoNothing();
     }
@@ -171,8 +174,7 @@ async function main() {
     .values({
       id: offenId,
       tenantId,
-      scopeLevel: "stadt",
-      scopeCode: null,
+      regionId: stadtRegionId,
       frage: "Soll der Wochenmarkt auf dem Rathausplatz künftig auch samstags stattfinden?",
       typ: "ja_nein_enthaltung",
       status: "aktiv",
@@ -192,8 +194,7 @@ async function main() {
     .values({
       id: verbindlichId,
       tenantId,
-      scopeLevel: "stadt",
-      scopeCode: null,
+      regionId: stadtRegionId,
       frage: verbindlichFrage,
       typ: "ja_nein_enthaltung",
       status: "aktiv",
@@ -209,8 +210,7 @@ async function main() {
     .values({
       id: geschlossenId,
       tenantId,
-      scopeLevel: "stadt",
-      scopeCode: null,
+      regionId: stadtRegionId,
       frage: "Soll die Stadt eine dauerhafte Tempo-30-Zone in der Innenstadt einrichten?",
       typ: "ja_nein_enthaltung",
       status: "geschlossen",

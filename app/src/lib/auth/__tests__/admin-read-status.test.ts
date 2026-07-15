@@ -19,6 +19,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "node:path";
@@ -32,7 +33,7 @@ import {
   isAdmin,
   canRedaktion,
   canBeobachten,
-  beobachterDarfSehen,
+  beobachterDarfTenantweitSehen,
 } from "../roles";
 
 const { tenants, users, roles } = schema;
@@ -52,14 +53,14 @@ const SKIP = !TEST_DB_URL;
 /** Bildet die Zugriffs-Entscheidung der Admin-Lese-Seiten nach (aus den echten Prädikaten). */
 function darfAdminLeseSicht(
   roleTypes: string[],
-  roleRows: { roleType: string; scopeLevel: string; scopeCode: string | null }[],
+  roleRows: { roleType: string; regionTyp: string; regionPath: string }[],
 ): { dashboard: boolean; digests: boolean; rollen: boolean; protokoll: boolean; anliegen: boolean } {
   const admin = isAdmin(roleTypes);
   return {
     // admin/page.tsx + admin/abstimmungen: Admin ODER (stadtweiter) Beobachter.
-    dashboard: admin || beobachterDarfSehen(roleRows, "stadt", null),
+    dashboard: admin || beobachterDarfTenantweitSehen(roleRows),
     // admin/digests + admin/digests/[id]: Redaktion ODER (stadtweiter) Beobachter.
-    digests: canRedaktion(roleTypes) || beobachterDarfSehen(roleRows, "stadt", null),
+    digests: canRedaktion(roleTypes) || beobachterDarfTenantweitSehen(roleRows),
     // admin/rollen: strikt Admin.
     rollen: admin,
     // admin/protokoll (Audit-Log): strikt Admin.
@@ -107,9 +108,10 @@ describe("Admin-Lese-Sichten — account-status-gefiltert (Integration)", () => 
       .returning();
     redakteurId = red.id;
 
+    const stadtRegion = await resolveRegionIdForScope(db as never, tenantId, "stadt", null);
     await db.insert(roles).values([
-      { tenantId, userId: adminId, roleType: "kommune_admin", scopeLevel: "stadt" },
-      { tenantId, userId: redakteurId, roleType: "redakteur", scopeLevel: "stadt" },
+      { tenantId, userId: adminId, roleType: "kommune_admin", regionId: stadtRegion },
+      { tenantId, userId: redakteurId, roleType: "redakteur", regionId: stadtRegion },
     ]);
   });
 

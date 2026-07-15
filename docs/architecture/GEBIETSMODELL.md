@@ -294,6 +294,47 @@ keine Migration, keine neuen Enum-Werte, kein Deploy.** Eine neue **Ebene** (z. 
 `regierungsbezirk`) ist ein weiterer Knoten-Typ-Wert bzw. schlicht eine Zwischenebene im
 `path` — keine Query-Änderung.
 
+### 6.1 Konkret: der Zweig kommt aus `db/seeds/regionen.json` (Config, kein Code)
+
+Der Seed `scripts/seed-regions.ts` ist **config-getrieben**: er liest die versionierte Datei
+`db/seeds/regionen.json` und upsertet pro Eintrag genau einen Tenant-Zweig `land → kreis →
+gemeinde` unter der geteilten Bund-Wurzel `de`. Der Gemeinde-Knoten trägt die `tenant_id`
+(operativer Marker **und** der Anker, den der region-Backfill in Migration 0024/0025 braucht).
+Die Zweige für Taunusstein (amtlich) und Musterstadt (Demo, `"fiktiv": true`) sind damit
+**Daten, nicht Code**. Warum eine Config-Datei statt einer Tenant-Spalte/Migration: kein
+Schema-Change (kein Drift gegen `drizzle-kit generate`, CI-Drift-Check bleibt grün), kein
+Backfill, portabel/export-freundlich, deckungsgleich mit `tenants.json`/`ortsteile.json`.
+
+**So fügen Sie eine neue Kommune hinzu:**
+
+1. Tenant anlegen (`db/seeds/tenants.json` + `npm run db:seed`, oder Tenant-Import).
+2. In `db/seeds/regionen.json` einen Eintrag ergänzen:
+   ```json
+   {
+     "tenantSlug": "<slug wie in tenants.json>",
+     "fiktiv": false,
+     "zweig": [
+       { "typ": "land",     "pathLabel": "…", "name": "…", "ags": "…", "ars": "…" },
+       { "typ": "kreis",    "pathLabel": "…", "name": "…", "ags": "…", "ars": "…" },
+       { "typ": "gemeinde", "pathLabel": "…", "name": "…", "ags": "…", "ars": "…" }
+     ]
+   }
+   ```
+   Der letzte Knoten muss `typ=gemeinde` sein. AGS/ARS gegen Destatis-nahe Quellen prüfen
+   (openplzapi/gemeindeverzeichnis.de) — nicht raten. Demo/Beispiel-Kommunen: `"fiktiv": true`
+   und **ohne** `ags`/`ars` (der Seed lehnt amtliche Schlüssel bei `fiktiv` ab, und umgekehrt
+   fehlende ARS bei `fiktiv:false`).
+3. Ortsteile **nicht** hier pflegen — sie werden generisch aus der `ortsteile`-Tabelle des
+   Tenants unter dessen Gemeinde-Knoten gespiegelt (Ortsteil-Quelle = `ortsteile(tenant_id)`).
+4. `npm run db:seed:regions` — idempotent.
+
+**Betriebs-Sicherung:** Läuft der Seed und findet einen Tenant mit Fachzeilen
+(`polls`/`roles`/`qr_codes`/`verification_locations`), aber ohne Gebietszweig, gibt er eine
+deutliche `WARN`-Zeile aus (kein Abbruch). Genau dieser Tenant würde sonst den strengen
+region-Backfill der Migration hart abbrechen lassen — die Warnung macht den fehlenden
+Config-Eintrag **vor** dem Deploy sichtbar. Ein Config-Eintrag, dessen Tenant (noch) nicht
+existiert, wird sauber übersprungen.
+
 ---
 
 ## 7. Bewusste Trade-offs

@@ -1,59 +1,78 @@
 /**
- * seed-regions.ts — Pilot-Gebietsbaum (ADR-024, GEBIETSMODELL §0/§2/§3) +
- * rückwärtskompatibler Backfill. EIGENES, idempotentes Skript (bewusst NICHT in
- * scripts/seed.ts hineingezwängt).
+ * seed-regions.ts — CONFIG-GETRIEBENER Gebietsbaum-Seed (ADR-024, GEBIETSMODELL
+ * §0/§2/§3/§6) + rückwärtskompatibler Backfill. EIGENES, idempotentes Skript
+ * (bewusst NICHT in scripts/seed.ts hineingezwängt).
  *
- * Was es tut (rein ADDITIV — es ändert NICHTS an scope_level/scope_code/
- * ortsteile/plz_regionen; die laufende App bleibt unverändert):
+ * WARUM CONFIG-GETRIEBEN (statt hartkodierter Zweige):
+ *   Jeder Tenant mit Fachzeilen (polls/roles/qr_codes/verification_locations/
+ *   invitations) braucht VOR der region-Migration (0024/0025-Backfill) einen
+ *   Gebietsbaum-Zweig mit EINEM Gemeinde-Knoten, der seine tenant_id trägt —
+ *   sonst findet der strenge Backfill (provision=false) keinen Anker und bricht
+ *   hart ab (genau der Prod-Ausfall, den dieses Skript verhindert). Früher waren
+ *   Taunusstein (amtlich) + Musterstadt (Demo) HIER im Code hartkodiert; ein neuer
+ *   Tenant ⇒ Code-Change. Jetzt sind die Zweige DATEN: db/seeds/regionen.json.
+ *   ⇒ „neue Kommune = Config-Eintrag, kein Code" (§6).
  *
- *   1. Amtlicher Pilot-Teilbaum, parent per ARS-Präfix, path per Trigger:
- *        Deutschland (bund)
- *          └─ Hessen (land,     AGS 06,        ARS 060000000000)
- *              └─ Rheingau-Taunus-Kreis (kreis, AGS 06439, ARS 064390000000)
- *                  └─ Taunusstein (gemeinde,   AGS 06439015, ARS 064390015015)
- *      Amtliche Schlüssel per WebSearch gegen Destatis-nahe Quellen verifiziert
- *      (openplzapi, gemeindeverzeichnis.de, factfish) — NICHT geraten.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * SO FÜGEN SIE EINE NEUE KOMMUNE HINZU (kein Code, kein Deploy-Sonderfall):
+ *   1. Tenant anlegen (db/seeds/tenants.json + `npm run db:seed`, oder Import).
+ *   2. In db/seeds/regionen.json EINEN Eintrag ergänzen:
+ *        {
+ *          "tenantSlug": "<slug wie in tenants.json>",
+ *          "fiktiv": false,                       // true = Demo/Beispiel, KEINE
+ *                                                 //        amtlichen Schlüssel
+ *          "zweig": [                             // Kette land → kreis → gemeinde
+ *            { "typ":"land",     "pathLabel":"…","name":"…","ags":"…","ars":"…" },
+ *            { "typ":"kreis",    "pathLabel":"…","name":"…","ags":"…","ars":"…" },
+ *            { "typ":"gemeinde", "pathLabel":"…","name":"…","ags":"…","ars":"…",
+ *              "lat":"…","lon":"…" }              // lat/lon optional
+ *          ]
+ *        }
+ *      Die Bund-Wurzel „Deutschland" (de) ist geteilt und wird automatisch
+ *      sichergestellt — NICHT in den Zweig aufnehmen. Der letzte Knoten MUSS
+ *      typ=gemeinde sein; er bekommt die tenant_id des Tenants (operativer Marker
+ *      + Backfill-Anker). Amtliche AGS/ARS gegen Destatis-nahe Quellen prüfen
+ *      (openplzapi/gemeindeverzeichnis.de) — NICHT raten. Für fiktiv=true: ags/ars
+ *      WEGLASSEN (bleibt NULL; mehrere NULL-ars sind unter dem partiellen
+ *      ars-Unique-Index erlaubt).
+ *   3. Ortsteile NICHT hier pflegen: sie werden generisch aus der `ortsteile`-
+ *      Tabelle des Tenants unter dessen Gemeinde-Knoten gespiegelt (§2 unten).
+ *      Ortsteil-Quelle = ortsteile(tenant_id) → das reicht.
+ *   4. `npm run db:seed:regions` — idempotent, legt/aktualisiert den Zweig an.
+ * ─────────────────────────────────────────────────────────────────────────────
  *
- *   1b. Fiktiver Demo-Teilbaum für den Demo-Tenant (Slug via DEMO_TENANT_SLUG,
- *       Default "demo"), aufgehängt an DERSELBEN Wurzel „Deutschland":
- *         Deutschland (bund)
- *           └─ Musterland  (land,     KEINE amtl. Schlüssel — bewusst NULL)
- *               └─ Musterkreis (kreis, KEINE amtl. Schlüssel)
- *                   └─ Musterstadt (gemeinde, tenant_id = Demo-Tenant)
- *       Alles klar als Beispiel markiert; synthetische path_labels, KEINE echten
- *       AGS/ARS (Musterland/-kreis/-stadt sind erfunden). Der Musterstadt-Knoten
- *       trägt tenant_id = Demo-Tenant → das ist der Anker, den Migration 0024 für
- *       die (scope='stadt') Demo-Polls bindet. Existiert der Demo-Tenant nicht
- *       (frische DB), wird der Zweig sauber übersprungen (kein Fehler).
+ * WARUM CONFIG-DATEI statt Tenant-Spalte (Migration): kein Schema-Change (kein
+ * Drift gegen drizzle-kit generate — der CI-Schema-Drift-Check bleibt grün), kein
+ * Backfill, portabel/export-freundlich, und deckungsgleich mit der bestehenden
+ * Seed-JSON-Konvention (tenants.json / ortsteile.json). Ein JSON-Eintrag ist die
+ * kleinste, wartbarste Einheit für „neue Kommune".
  *
- *   GENERISCHES PRINZIP: JEDER Tenant mit Fachzeilen (polls/roles/qr_codes/
- *   verification_locations) braucht VOR Migration 0024 einen Gebietsbaum-Zweig mit
- *   einem Gemeinde-Knoten, der seine tenant_id trägt — sonst findet der 0024-
- *   Backfill keinen Anker und bricht hart ab. Hier explizit gepflegt: Taunusstein
- *   (amtlich) + Musterstadt (Demo). Weitere Tenants ⇒ hier je einen Zweig ergänzen
- *   (volle Generik/tenant-getriebene Ableitung ist spätere Etappe).
+ * Was das Skript tut (rein ADDITIV — es ändert NICHTS am Verhalten der App):
+ *   1. Bund-Wurzel „Deutschland" (de) sicherstellen (von ALLEN Zweigen geteilt).
+ *   1a. Pro Config-Eintrag den Zweig (land→kreis→gemeinde) idempotent upserten;
+ *       Gemeinde-Knoten trägt tenant_id. Eintrag, dessen Tenant (noch) nicht
+ *       existiert (frische DB) ⇒ KLAR geloggt übersprungen, KEIN Fehler.
+ *   1b. Diagnose: Tenants MIT Fachzeilen, aber OHNE Gemeinde-Knoten (= ohne
+ *       Config-Zweig) ⇒ deutliche WARN-Zeile. Das ist genau der Tenant, an dem der
+ *       strenge region-Backfill sonst hart abbräche — hier früh & klar sichtbar.
+ *   2. Ortsteile spiegeln (generisch, tenant-getrieben): jede `ortsteile`-Zeile →
+ *      Ortsteil-Knoten unter dem Gemeinde-Knoten ihres Tenants. path_label =
+ *      ltree-normalisierter ortsteile.code (§9). Ein set-basiertes INSERT.
+ *   3. Backfill plz_regionen (alt) → plz_regions (neu, n:m).
+ *   4. Backfill users.ortsteil_id → users.home_region_id über die Spiegelknoten.
  *
- *   2. Ortsteile spiegeln (Seed + Backfill in einem): jede Zeile aus `ortsteile`
- *      des Taunusstein-Tenants wird als regions-Ortsteil-Knoten unter Taunusstein
- *      angelegt. path_label = ortsteile.code (der in §9 geforderte stabile,
- *      synthetische Ortsteil-Code; Ortsteile haben keinen amtlichen Schlüssel).
+ * Idempotenz: Knoten über ON CONFLICT (parent_id, path_label) (NULLS NOT DISTINCT
+ * → auch die Wurzel), zusätzlich UNIQUE(ars). plz-Backfill über PRIMARY KEY
+ * (plz, region_id) DO NOTHING. user-Backfill über WHERE home_region_id IS NULL.
+ * Zweimal ausführen ⇒ identischer Zustand (Tests decken das ab).
  *
- *   3. Backfill plz_regionen (alt) → plz_regions (neu, n:m): jede PLZ-Zeile wird
- *      auf ihren Ortsteil-Knoten (falls ortsteil_code gesetzt) bzw. sonst den
- *      Gemeinde-Knoten des Tenants abgebildet.
- *
- *   4. Backfill users.ortsteil_id → users.home_region_id über die gespiegelten
- *      Ortsteil-Knoten. Setzt NUR, wo home_region_id noch NULL ist.
- *
- * Idempotenz: amtliche/Ortsteil-Knoten über ON CONFLICT (parent_id, path_label)
- * (NULLS NOT DISTINCT → auch die Wurzel), zusätzlich UNIQUE(ars). plz-Backfill
- * über PRIMARY KEY (plz, region_id) DO NOTHING. user-Backfill über WHERE
- * home_region_id IS NULL. Schritte 3+4 sind einzelne SET-Statements → race-frei.
- * Zweimal ausführen ⇒ identischer Zustand (Test deckt das ab).
- *
- * Verwendung: npm run db:seed:regions   (Env: DATABASE_URL)
+ * Verwendung: npm run db:seed:regions   (Env: DATABASE_URL; DEMO_TENANT_SLUG
+ *   überschreibt den Slug eines Config-Eintrags mit "slugEnv":"DEMO_TENANT_SLUG").
  */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { and, eq, isNull, sql } from "drizzle-orm";
@@ -63,25 +82,21 @@ const databaseUrl =
   process.env.DATABASE_URL ??
   "postgres://partizip:partizip@127.0.0.1:5433/partizip";
 
-// Slug des Pilot-Tenants, dessen Gemeinde-Knoten den Ortsteil-Teilbaum + den
-// operativen tenant_id-Marker trägt.
-const PILOT_TENANT_SLUG = "taunusstein";
-
-// Slug des Demo-Tenants („Musterstadt", scripts/seed-musterstadt.ts). Über die
-// SELBE Env aufgelöst wie der Demo-Seed (nicht hardcoden), Default "demo".
-const DEMO_TENANT_SLUG =
-  process.env.DEMO_TENANT_SLUG?.trim().toLowerCase() || "demo";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// db/seeds liegt auf Repo-Ebene (../../db/seeds relativ zu app/scripts) — dieselbe
+// Auflösung wie scripts/seed.ts.
+const seedsDir = path.resolve(__dirname, "../../db/seeds");
 
 /**
  * SQL-Ausdruck, der einen (beliebigen) Ortsteil-Code ltree-sicher zu einem
- * path_label normalisiert: lowercase, Umlaute/ß transliterieren, alles außrige
- * außerhalb [a-z0-9_] → '_'. So hält der CHECK `^[a-z0-9_]+$` IMMER, auch für
- * künftige Codes mit Großbuchstaben/Hyphen/Umlaut — sonst bräche der Format-CHECK
- * das gesamte set-basierte INSERT ab. `col` ist ein von uns kontrollierter
- * Spaltenname (kein User-Input) → sichere Interpolation via sql.raw.
+ * path_label normalisiert: lowercase, Umlaute/ß transliterieren, alles außerhalb
+ * [a-z0-9_] → '_'. So hält der CHECK `^[a-z0-9_]+$` IMMER, auch für künftige Codes
+ * mit Großbuchstaben/Hyphen/Umlaut — sonst bräche der Format-CHECK das gesamte
+ * set-basierte INSERT ab. `col` ist ein von uns kontrollierter Spaltenname (kein
+ * User-Input) → sichere Interpolation via sql.raw.
  *
  * WICHTIG: identisch in ALLEN Statements (Ortsteil-Insert + die beiden Backfill-
- * Joins), sonst brechen die Joins auseinander.
+ * Joins) UND deckungsgleich mit regions_ltree_label() in db/migrations/0024.
  */
 function ltreeLabelExpr(col: string): string {
   return (
@@ -102,14 +117,107 @@ interface Gebietsknoten {
   tenantId?: string | null;
 }
 
+/** Ein Zweig-Knoten wie in db/seeds/regionen.json (Bund-Wurzel NICHT enthalten). */
+interface RegionZweigKnoten {
+  typ: "land" | "kreis" | "gemeinde";
+  pathLabel: string;
+  name: string;
+  ags?: string | null;
+  ars?: string | null;
+  lat?: string | null;
+  lon?: string | null;
+}
+
+/** Ein Config-Eintrag = ein Tenant-Gebietszweig. */
+interface RegionConfigEintrag {
+  tenantSlug: string;
+  /** Optionaler ENV-Name, dessen Wert den Slug überschreibt (z. B. DEMO_TENANT_SLUG). */
+  slugEnv?: string;
+  /** true = Demo/Beispiel-Kommune ohne amtliche Schlüssel. */
+  fiktiv: boolean;
+  /** Kette land → kreis → gemeinde (Bund-Wurzel implizit). */
+  zweig: RegionZweigKnoten[];
+}
+
 export interface SeedRegionsResult {
-  /** Gemeinde-Knoten des Pilot-Tenants (Taunusstein). */
-  gemeindeId: string | null;
-  /** Gemeinde-Knoten des Demo-Tenants (Musterstadt) bzw. null wenn kein Demo-Tenant. */
-  demoGemeindeId: string | null;
+  /** Angelegte/aktualisierte Gemeinde-Knoten je verarbeitetem Tenant-Slug. */
+  gemeindeIdBySlug: Record<string, string>;
+  /** Config-Einträge, deren Tenant (noch) nicht existiert (klar übersprungen). */
+  uebersprungeneSlugs: string[];
+  /** Tenants mit Fachzeilen, aber ohne Gebietszweig (WARN, kein Fehler). */
+  fachOhneZweigTenantIds: string[];
   ortsteile: number;
   plzRegions: number;
   usersBackfilled: number;
+}
+
+/** Effektiver Slug eines Eintrags: slugEnv-Override (getrimmt/lowercase) ODER tenantSlug. */
+function effektiverSlug(e: RegionConfigEintrag): string {
+  const override = e.slugEnv ? process.env[e.slugEnv]?.trim().toLowerCase() : undefined;
+  return override || e.tenantSlug.trim().toLowerCase();
+}
+
+/**
+ * Lädt + validiert die Gebiets-Config. Wirft bei struktureller Fehlkonfiguration
+ * (früh & klar, nicht erst mitten im INSERT).
+ */
+export function ladeRegionConfig(): RegionConfigEintrag[] {
+  const raw = readFileSync(path.join(seedsDir, "regionen.json"), "utf-8");
+  const data = JSON.parse(raw) as unknown;
+  if (!Array.isArray(data)) {
+    throw new Error("regionen.json: erwartet ein Array von Config-Einträgen");
+  }
+  return data.map((e, i) => validiereEintrag(e, i));
+}
+
+function validiereEintrag(e: unknown, i: number): RegionConfigEintrag {
+  const c = e as Partial<RegionConfigEintrag>;
+  const wo = `regionen.json[${i}]`;
+  if (typeof c.tenantSlug !== "string" || !c.tenantSlug.trim()) {
+    throw new Error(`${wo}: tenantSlug fehlt`);
+  }
+  if (typeof c.fiktiv !== "boolean") {
+    throw new Error(`${wo} (${c.tenantSlug}): fiktiv (boolean) fehlt`);
+  }
+  if (!Array.isArray(c.zweig) || c.zweig.length === 0) {
+    throw new Error(`${wo} (${c.tenantSlug}): zweig fehlt/leer`);
+  }
+  const gemeinden = c.zweig.filter((k) => k.typ === "gemeinde");
+  if (gemeinden.length !== 1) {
+    throw new Error(
+      `${wo} (${c.tenantSlug}): genau EIN gemeinde-Knoten erwartet, gefunden ${gemeinden.length}`
+    );
+  }
+  if (c.zweig[c.zweig.length - 1].typ !== "gemeinde") {
+    throw new Error(`${wo} (${c.tenantSlug}): letzter Knoten muss typ=gemeinde sein`);
+  }
+  for (const k of c.zweig) {
+    if (!k.typ || !k.pathLabel || !k.name) {
+      throw new Error(`${wo} (${c.tenantSlug}): jeder Knoten braucht typ/pathLabel/name`);
+    }
+    // pathLabel MUSS ein gültiges ltree-Label sein (deckungsgleich mit dem DB-CHECK
+    // `^[a-z0-9_]+$` auf regions.path_label). Sonst bräche eine Fehlkonfiguration
+    // (Großbuchstabe/Hyphen/Umlaut) erst spät am DB-CHECK ab statt hier früh & klar.
+    if (!/^[a-z0-9_]+$/.test(k.pathLabel)) {
+      throw new Error(
+        `${wo} (${c.tenantSlug}): pathLabel '${k.pathLabel}' ist kein gültiges ltree-Label — ` +
+          `nur [a-z0-9_] erlaubt (kein Großbuchstabe/Hyphen/Umlaut; Umlaute transliterieren, z. B. ö→oe)`
+      );
+    }
+    if (c.fiktiv && (k.ags || k.ars)) {
+      throw new Error(
+        `${wo} (${c.tenantSlug}): fiktiv=true, aber Knoten '${k.pathLabel}' trägt ags/ars — ` +
+          `fiktive Kommunen dürfen KEINE amtlichen Schlüssel tragen`
+      );
+    }
+    if (!c.fiktiv && !k.ars) {
+      throw new Error(
+        `${wo} (${c.tenantSlug}): fiktiv=false, aber Knoten '${k.pathLabel}' ohne ars — ` +
+          `amtliche Knoten brauchen einen ARS (Destatis-verifiziert)`
+      );
+    }
+  }
+  return c as RegionConfigEintrag;
 }
 
 /**
@@ -156,30 +264,19 @@ async function upsertKnoten(
 }
 
 /**
- * Idempotenter Pilot-Baum-Seed + Backfill (siehe Kopfkommentar). Nimmt eine
- * offene Drizzle-Verbindung entgegen, damit Tests dieselbe Logik gegen ihre
- * Test-DB ausführen können. Öffnet/schließt selbst KEINE Verbindung.
+ * Idempotenter, CONFIG-GETRIEBENER Baum-Seed + Backfill (siehe Kopfkommentar).
+ * Nimmt eine offene Drizzle-Verbindung entgegen, damit Tests dieselbe Logik gegen
+ * ihre Test-DB ausführen können. Öffnet/schließt selbst KEINE Verbindung.
+ *
+ * `config` überschreibt optional die geladene db/seeds/regionen.json (für Tests
+ * mit synthetischen Tenants).
  */
 export async function seedRegions(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: PostgresJsDatabase<any>
+  db: PostgresJsDatabase<any>,
+  config?: RegionConfigEintrag[]
 ): Promise<SeedRegionsResult> {
-  // Pilot- und Demo-Tenant (operative Marker auf dem jeweiligen Gemeinde-Knoten).
-  // Fehlt einer (z. B. frische Test-DB), bleibt sein Zweig-Anker ungesetzt bzw. der
-  // Demo-Zweig wird übersprungen — der amtliche Baum wird trotzdem gesetzt.
-  const [pilotTenant] = await db
-    .select({ id: tenants.id })
-    .from(tenants)
-    .where(eq(tenants.slug, PILOT_TENANT_SLUG))
-    .limit(1);
-  const pilotTenantId = pilotTenant?.id ?? null;
-
-  const [demoTenant] = await db
-    .select({ id: tenants.id })
-    .from(tenants)
-    .where(eq(tenants.slug, DEMO_TENANT_SLUG))
-    .limit(1);
-  const demoTenantId = demoTenant?.id ?? null;
+  const eintraege = config ?? ladeRegionConfig();
 
   // ----- 1. Wurzel „Deutschland" (bund) — von ALLEN Zweigen geteilt. --------
   const bundId = await upsertKnoten(
@@ -189,78 +286,89 @@ export async function seedRegions(
   );
   console.log(`region: bund      Deutschland → ${bundId}`);
 
-  // ----- 1a. Amtlicher Pilot-Zweig (verifizierte ARS/AGS) ------------------
-  const pilotZweig: Gebietsknoten[] = [
-    { pathLabel: "hessen", name: "Hessen", typ: "land", ags: "06", ars: "060000000000" },
-    {
-      pathLabel: "rtk",
-      name: "Rheingau-Taunus-Kreis",
-      typ: "kreis",
-      ags: "06439",
-      ars: "064390000000",
-    },
-    {
-      pathLabel: "taunusstein",
-      name: "Taunusstein",
-      typ: "gemeinde",
-      ags: "06439015",
-      ars: "064390015015",
-      // Ungefähres Zentrum (aus dem plz_regionen-Seed, Haversine-Auflösung).
-      lat: "50.1466",
-      lon: "8.1505",
-      tenantId: pilotTenantId,
-    },
-  ];
+  // ----- 1a. Pro Config-Eintrag den Zweig upserten (tenant-getrieben). ------
+  const gemeindeIdBySlug: Record<string, string> = {};
+  const uebersprungeneSlugs: string[] = [];
 
-  let parentId = bundId;
-  let gemeindeId: string | null = null;
-  for (const k of pilotZweig) {
-    const nodeId = await upsertKnoten(db, k, parentId);
-    parentId = nodeId;
-    if (k.typ === "gemeinde") gemeindeId = nodeId;
-    console.log(`region: ${k.typ.padEnd(9)} ${k.name} → ${nodeId}`);
+  for (const eintrag of eintraege) {
+    const slug = effektiverSlug(eintrag);
+    const [tenant] = await db
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.slug, slug))
+      .limit(1);
+
+    if (!tenant) {
+      // Config-Eintrag ohne (noch) existierenden Tenant → klar überspringen.
+      uebersprungeneSlugs.push(slug);
+      console.log(
+        `region: Zweig '${slug}' übersprungen — Tenant nicht vorhanden (Config ohne Tenant; kein Fehler).`
+      );
+      continue;
+    }
+
+    let parentId = bundId;
+    let gemeindeId: string | null = null;
+    for (const k of eintrag.zweig) {
+      const nodeId = await upsertKnoten(
+        db,
+        {
+          pathLabel: k.pathLabel,
+          name: k.name,
+          typ: k.typ,
+          ags: k.ags ?? null,
+          ars: k.ars ?? null,
+          lat: k.lat ?? null,
+          lon: k.lon ?? null,
+          // Nur der Gemeinde-Knoten trägt den operativen tenant_id-Marker/Anker.
+          tenantId: k.typ === "gemeinde" ? tenant.id : null,
+        },
+        parentId
+      );
+      parentId = nodeId;
+      if (k.typ === "gemeinde") gemeindeId = nodeId;
+      console.log(
+        `region: ${k.typ.padEnd(9)} ${k.name}${eintrag.fiktiv ? " [fiktiv]" : ""} → ${nodeId}`
+      );
+    }
+    // Validierung garantiert genau einen gemeinde-Knoten je Zweig.
+    gemeindeIdBySlug[slug] = gemeindeId!;
   }
 
-  // ----- 1b. Fiktiver Demo-Zweig (Musterstadt) — an DERSELBEN Wurzel. -------
-  // Nur wenn der Demo-Tenant existiert (sonst sauber überspringen). Der Guard
-  // demoTenantId !== pilotTenantId verhindert bei Fehlkonfiguration (DEMO_TENANT_SLUG
-  // == PILOT_TENANT_SLUG) einen ZWEITEN Gemeinde-Knoten für denselben Tenant — der
-  // würde den EINDEUTIGEN Gemeinde-Anker von Migration 0024 mehrdeutig machen.
-  // KEINE echten AGS/ARS: Musterland/-kreis/-stadt sind erfundene Beispiele (ars NULL;
-  // mehrere NULL-ars sind unter dem partiellen ars-Unique-Index erlaubt).
-  let demoGemeindeId: string | null = null;
-  if (demoTenantId && demoTenantId !== pilotTenantId) {
-    const demoZweig: Gebietsknoten[] = [
-      { pathLabel: "musterland", name: "Musterland (Demo)", typ: "land", ags: null, ars: null },
-      { pathLabel: "musterkreis", name: "Musterkreis (Demo)", typ: "kreis", ags: null, ars: null },
-      {
-        pathLabel: "musterstadt",
-        name: "Musterstadt (Demo)",
-        typ: "gemeinde",
-        ags: null,
-        ars: null,
-        tenantId: demoTenantId,
-      },
-    ];
-    let demoParent = bundId;
-    for (const k of demoZweig) {
-      const nodeId = await upsertKnoten(db, k, demoParent);
-      demoParent = nodeId;
-      if (k.typ === "gemeinde") demoGemeindeId = nodeId;
-      console.log(`region: ${k.typ.padEnd(9)} ${k.name} → ${nodeId}`);
-    }
-  } else {
-    console.log(
-      `Demo-Zweig übersprungen (Demo-Tenant '${DEMO_TENANT_SLUG}' ${
-        demoTenantId ? "== Pilot-Tenant" : "nicht vorhanden"
-      }).`
+  // ----- 1b. Diagnose: Fachzeilen ohne Gebietszweig (WARN, kein Fehler) -----
+  // Genau die Tenants, an denen der strenge region-Backfill (0024/0025,
+  // provision=false) sonst HART abbräche — hier früh & deutlich sichtbar, damit
+  // ein fehlender Config-Eintrag VOR dem Deploy auffällt (der Prod-Ausfall, den
+  // dieses Skript adressiert).
+  const fachOhneZweig = await db.execute(sql`
+    SELECT t.id, t.slug FROM tenants t
+    WHERE EXISTS (
+      SELECT 1 FROM (
+        SELECT tenant_id FROM polls
+        UNION SELECT tenant_id FROM roles
+        UNION SELECT tenant_id FROM qr_codes
+        UNION SELECT tenant_id FROM verification_locations
+      ) f WHERE f.tenant_id = t.id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM regions g WHERE g.typ = 'gemeinde' AND g.tenant_id = t.id
+    )
+    ORDER BY t.slug
+  `);
+  const fachOhneZweigTenantIds: string[] = [];
+  for (const row of fachOhneZweig as unknown as { id: string; slug: string }[]) {
+    fachOhneZweigTenantIds.push(row.id);
+    console.warn(
+      `region: WARN Tenant '${row.slug}' (${row.id}) hat Fachzeilen, aber KEINEN ` +
+        `Gebietszweig — Config-Eintrag in db/seeds/regionen.json ergänzen, sonst ` +
+        `bricht der region-Backfill (Migration 0024/0025) für diesen Tenant ab.`
     );
   }
 
-  // ----- 2. Ortsteile spiegeln (Seed + Backfill) ---------------------------
-  // Jede ortsteile-Zeile des Pilot-Tenants als Ortsteil-Knoten unter Taunusstein.
-  // path_label = ortsteile.code (stabiler synthetischer Code, §9). Ein einzelnes
-  // INSERT ... SELECT ... ON CONFLICT → idempotent & race-frei.
+  // ----- 2. Ortsteile spiegeln (Seed + Backfill), tenant-getrieben ----------
+  // Jede ortsteile-Zeile → Ortsteil-Knoten unter dem Gemeinde-Knoten ihres Tenants.
+  // path_label = ltree-normalisierter ortsteile.code (stabiler synthetischer Code,
+  // §9). Ein einzelnes INSERT ... SELECT ... ON CONFLICT → idempotent & race-frei.
   const ortsteilRes = await db.execute(sql`
     INSERT INTO regions (parent_id, typ, name, path_label, tenant_id)
     SELECT g.id, 'ortsteil', o.name, ${sql.raw(ltreeLabelExpr("o.code"))}, o.tenant_id
@@ -269,7 +377,7 @@ export async function seedRegions(
     ON CONFLICT (parent_id, path_label)
       DO UPDATE SET name = EXCLUDED.name, updated_at = now()
   `);
-  console.log(`ortsteil-knoten gespiegelt: ${ortsteilRes.count ?? 0} (Gemeinde ${gemeindeId ?? "—"})`);
+  console.log(`ortsteil-knoten gespiegelt: ${ortsteilRes.count ?? 0}`);
 
   // ----- 3. Backfill plz_regionen (alt) → plz_regions (n:m) -----------------
   // ortsteil_code gesetzt → Ortsteil-Knoten, sonst Gemeinde-Knoten des Tenants.
@@ -306,8 +414,9 @@ export async function seedRegions(
   if (roots !== 1) throw new Error(`Erwartet genau 1 Wurzel, gefunden: ${roots}`);
 
   return {
-    gemeindeId,
-    demoGemeindeId,
+    gemeindeIdBySlug,
+    uebersprungeneSlugs,
+    fachOhneZweigTenantIds,
     ortsteile: ortsteilRes.count ?? 0,
     plzRegions: plzRes.count ?? 0,
     usersBackfilled: userRes.count ?? 0,
@@ -315,12 +424,22 @@ export async function seedRegions(
 }
 
 async function main() {
+  // FAIL-FAST-Runner: default strict=an. Ein Tenant MIT Fachzeilen ohne
+  // Gebietszweig-Config ist der GENAUE Fehler, an dem der strenge region-Backfill
+  // (0024/0025) später hart abbräche. In einer verketteten Pipeline (db:upgrade =
+  // seed:regions && migrate) muss deshalb schon der Seed-Schritt scheitern, sonst
+  // kommt der harte Abbruch erst bei der Migration (das war der reale Prod-Ausfall).
+  // Die exportierte seedRegions()-Funktion bleibt bewusst nicht-exitend (für Tests);
+  // NUR dieser Runner erzwingt den Exit. `--no-strict` schaltet die Härte ab.
+  const strict = !process.argv.includes("--no-strict");
   const client = postgres(databaseUrl, { max: 1 });
   const db = drizzle(client);
+  let fachOhneZweigTenantIds: string[] = [];
   try {
-    await seedRegions(db);
+    const result = await seedRegions(db);
+    fachOhneZweigTenantIds = result.fachOhneZweigTenantIds;
 
-    // Verifikations-Ausgabe: kompletter Pilot-Baum mit Pfad.
+    // Verifikations-Ausgabe: kompletter Baum mit Pfad.
     const baum = await db
       .select({ typ: regions.typ, name: regions.name, path: regions.path })
       .from(regions)
@@ -331,10 +450,20 @@ async function main() {
   } finally {
     await client.end();
   }
+
+  if (strict && fachOhneZweigTenantIds.length > 0) {
+    console.error(
+      `seed-regions FEHLER (--strict): ${fachOhneZweigTenantIds.length} Tenant(s) mit Fachzeilen, ` +
+        `aber OHNE Gebietszweig — Config-Eintrag in db/seeds/regionen.json ergänzen. ` +
+        `Tenant-IDs: ${fachOhneZweigTenantIds.join(", ")}. ` +
+        `Die Pipeline stoppt HIER (Seed), damit der harte Abbruch nicht erst bei db:migrate ` +
+        `auftritt. (--no-strict überspringt diese Prüfung.)`
+    );
+    process.exit(1);
+  }
 }
 
 // Nur als Skript ausführen, nicht beim Import aus Tests.
-import { fileURLToPath } from "node:url";
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main().catch((err) => {
     console.error("seed-regions failed:", err);

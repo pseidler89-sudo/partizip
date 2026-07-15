@@ -32,6 +32,7 @@ import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getStufe } from "@/lib/eligibility/stufe";
 import { qrTokenMeta, type QrTokenMeta } from "@/lib/verification/queries";
+import { regionTypLabel } from "@/lib/region/ebenen";
 import { getMeinOffenerTermin } from "@/lib/verification/booking-queries";
 import { formatSlotLabel, formatDay } from "@/lib/verification/slot-format";
 import VerifizierenBestaetigen from "./VerifizierenBestaetigen";
@@ -44,13 +45,6 @@ interface PageProps {
   searchParams: Promise<{ code?: string }>;
 }
 
-const SCOPE_LABELS: Record<string, string> = {
-  ortsteil: "Ortsteil",
-  stadt: "Kommune",
-  kreis: "Kreis",
-  land: "Land",
-};
-
 function databaseUrl(): string {
   return (
     process.env.DATABASE_URL ?? "postgres://partizip:partizip@127.0.0.1:5433/partizip"
@@ -59,9 +53,10 @@ function databaseUrl(): string {
 
 function scopeBezeichnung(meta: QrTokenMeta, tenantName: string): string {
   if (meta.label) return meta.label;
-  if (meta.scopeLevel === "stadt") return tenantName;
-  const lvl = SCOPE_LABELS[meta.scopeLevel] ?? meta.scopeLevel;
-  return meta.scopeCode ? `${lvl} ${meta.scopeCode}` : lvl;
+  // ADR-024: Gemeinde-Knoten → Tenant-Name; sonst Ebenen-Label + Gebietsname.
+  if (meta.regionTyp === "gemeinde") return tenantName;
+  const lvl = regionTypLabel(meta.regionTyp);
+  return meta.regionTyp === "ortsteil" ? `${lvl} ${meta.regionName}` : lvl;
 }
 
 function Schale({ children }: { children: React.ReactNode }) {

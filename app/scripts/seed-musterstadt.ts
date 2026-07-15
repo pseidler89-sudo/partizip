@@ -40,7 +40,7 @@ import {
   auditEvents,
 } from "../src/db/schema.js";
 import { generateReadableCode } from "../src/lib/readable-code.js";
-import { SEED_NAMESPACE, uuidV5 } from "./seed-utils.js";
+import { SEED_NAMESPACE, uuidV5, resolveRegionId } from "./seed-utils.js";
 
 const databaseUrl =
   process.env.DATABASE_URL ??
@@ -144,14 +144,16 @@ async function main() {
       createdAt: addDays(now, -30),
     },
   ];
+  // ADR-024 contract: alle Musterstadt-Umfragen sind stadtweit (Gemeinde-Knoten).
+  // Scope-Eingabe → region_id (der Dual-Write-Trigger ist im contract entfernt).
+  const stadtRegionId = await resolveRegionId(db, tenantId, "stadt", null);
   for (const p of POLLS) {
     await db
       .insert(polls)
       .values({
         id: p.id,
         tenantId,
-        scopeLevel: "stadt",
-        scopeCode: null,
+        regionId: stadtRegionId,
         frage: p.frage,
         typ: "ja_nein_enthaltung",
         status: p.status,

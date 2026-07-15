@@ -39,6 +39,7 @@ import {
   notifyNewPoll,
   type NotifyPoll,
 } from "@/lib/polls/notify";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import type { TenantRow } from "@/lib/tenant";
 import { buildTombstoneEmail } from "@/lib/konto/anonymize";
 
@@ -144,7 +145,8 @@ describe("polls/notify (Integration)", () => {
         .insert(users)
         .values({ tenantId: t.id, email: `locked-${counter}@t.de`, accountStatus: "locked", notifyNewPolls: true });
 
-      const poll: NotifyPoll = { id: "p", frage: "F?", scopeLevel: "stadt", scopeCode: null };
+      const regionId = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+      const poll: NotifyPoll = { id: "p", frage: "F?", regionId };
       const emails = await getPollNotifyEmpfaenger(db as never, tenant, poll);
 
       expect(emails.sort()).toEqual([u1.email, u2.email].sort());
@@ -182,7 +184,8 @@ describe("polls/notify (Integration)", () => {
         .insert(users)
         .values({ tenantId: t.id, email: `none-${counter}@t.de`, accountStatus: "active", notifyNewPolls: true, ortsteilId: null });
 
-      const poll: NotifyPoll = { id: "p", frage: "F?", scopeLevel: "ortsteil", scopeCode: "OT-A" };
+      const regionId = await resolveRegionIdForScope(db as never, t.id, "ortsteil", "OT-A");
+      const poll: NotifyPoll = { id: "p", frage: "F?", regionId };
       const emails = await getPollNotifyEmpfaenger(db as never, tenant, poll);
       expect(emails).toEqual([inA.email]);
     },
@@ -200,7 +203,8 @@ describe("polls/notify (Integration)", () => {
         .insert(users)
         .values({ tenantId: t.id, email: `x-${counter}@t.de`, accountStatus: "active", notifyNewPolls: true });
 
-      const poll: NotifyPoll = { id: "p", frage: "F?", scopeLevel: "ortsteil", scopeCode: "OT-UNKNOWN" };
+      const regionId = await resolveRegionIdForScope(db as never, t.id, "ortsteil", "OT-UNKNOWN");
+      const poll: NotifyPoll = { id: "p", frage: "F?", regionId };
       const emails = await getPollNotifyEmpfaenger(db as never, tenant, poll);
       expect(emails).toEqual([]);
     },
@@ -220,7 +224,8 @@ describe("polls/notify (Integration)", () => {
       .insert(users)
       .values({ tenantId: tB.id, email: `iso-b-${counter}@t.de`, accountStatus: "active", notifyNewPolls: true });
 
-    const poll: NotifyPoll = { id: "p", frage: "F?", scopeLevel: "stadt", scopeCode: null };
+    const regionId = await resolveRegionIdForScope(db as never, tA.id, "stadt", null);
+    const poll: NotifyPoll = { id: "p", frage: "F?", regionId };
     const emails = await getPollNotifyEmpfaenger(db as never, tenantA, poll);
     expect(emails).toEqual([inA.email]);
   });
@@ -240,7 +245,8 @@ describe("polls/notify (Integration)", () => {
     const calls: Array<Record<string, unknown>> = [];
     const transport = { sendMail: async (opts: Record<string, unknown>) => { calls.push(opts); return {}; } };
 
-    const poll: NotifyPoll = { id: "11111111-1111-1111-1111-111111111111", frage: "Mehr Bänke?", scopeLevel: "stadt", scopeCode: null };
+    const regionId = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+    const poll: NotifyPoll = { id: "11111111-1111-1111-1111-111111111111", frage: "Mehr Bänke?", regionId };
     const res = await notifyNewPoll({ db: db as never, tenant, poll, host: `${t.slug}.partizip.online`, transport });
 
     expect(res).toEqual({ sent: 2, errors: 0 });
@@ -269,7 +275,8 @@ describe("polls/notify (Integration)", () => {
       },
     };
 
-    const poll: NotifyPoll = { id: "22222222-2222-2222-2222-222222222222", frage: "F?", scopeLevel: "stadt", scopeCode: null };
+    const regionId = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+    const poll: NotifyPoll = { id: "22222222-2222-2222-2222-222222222222", frage: "F?", regionId };
     const res = await notifyNewPoll({ db: db as never, tenant, poll, host: "localhost", transport });
     // 3 Empfänger: 1 Fehler, 2 Erfolge — der Fehler bricht die Schleife nicht ab.
     expect(res).toEqual({ sent: 2, errors: 1 });
@@ -283,7 +290,8 @@ describe("polls/notify (Integration)", () => {
 
     let called = 0;
     const transport = { sendMail: async () => { called++; return {}; } };
-    const poll: NotifyPoll = { id: "p", frage: "F?", scopeLevel: "stadt", scopeCode: null };
+    const regionId = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+    const poll: NotifyPoll = { id: "p", frage: "F?", regionId };
     const res = await notifyNewPoll({ db: db as never, tenant, poll, host: "localhost", transport });
 
     expect(res).toEqual({ sent: 0, errors: 0 });
@@ -297,7 +305,8 @@ describe("polls/notify (Integration)", () => {
 
     const calls: Array<Record<string, unknown>> = [];
     const transport = { sendMail: async (opts: Record<string, unknown>) => { calls.push(opts); return {}; } };
-    const poll: NotifyPoll = { id: "33333333-3333-3333-3333-333333333333", frage: "F?", scopeLevel: "stadt", scopeCode: null };
+    const regionId = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+    const poll: NotifyPoll = { id: "33333333-3333-3333-3333-333333333333", frage: "F?", regionId };
     // qr-actions-Regel: host.startsWith("localhost") || host.includes("127.0.0.1")
     // → http. Ein blanker localhost-Host (z. B. Test-Default) ergibt also http.
     await notifyNewPoll({ db: db as never, tenant, poll, host: "localhost", transport });

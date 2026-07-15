@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "node:path";
@@ -80,17 +81,20 @@ describe("getAdminKennzahlen (Integration)", () => {
     const [tB] = await db.insert(tenants).values({ slug: `kz-b-${Date.now()}`, name: "KZ-B" }).returning();
     const past = new Date(Date.now() - 3_600_000);
     const future = new Date(Date.now() + 3_600_000);
+    // ADR-024 contract: Fach-Inserts setzen region_id explizit (Trigger entfernt).
+    const regA = await resolveRegionIdForScope(db as never, tA.id, "stadt", null);
+    const regB = await resolveRegionIdForScope(db as never, tB.id, "stadt", null);
 
     // Polls in Tenant A: 2 aktiv-offen, sonst nicht sichtbar (entwurf/zu/künftig).
-    const [a1] = await db.insert(polls).values({ tenantId: tA.id, scopeLevel: "stadt", frage: "a1", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past }).returning();
-    const [a2] = await db.insert(polls).values({ tenantId: tA.id, scopeLevel: "stadt", frage: "a2", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past }).returning();
+    const [a1] = await db.insert(polls).values({ tenantId: tA.id, regionId: regA, frage: "a1", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past }).returning();
+    const [a2] = await db.insert(polls).values({ tenantId: tA.id, regionId: regA, frage: "a2", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past }).returning();
     await db.insert(polls).values([
-      { tenantId: tA.id, scopeLevel: "stadt", frage: "entwurf", typ: "ja_nein_enthaltung", status: "entwurf" },
-      { tenantId: tA.id, scopeLevel: "stadt", frage: "zu", typ: "ja_nein_enthaltung", status: "aktiv", closesAt: past },
-      { tenantId: tA.id, scopeLevel: "stadt", frage: "künftig", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: future },
+      { tenantId: tA.id, regionId: regA, frage: "entwurf", typ: "ja_nein_enthaltung", status: "entwurf" },
+      { tenantId: tA.id, regionId: regA, frage: "zu", typ: "ja_nein_enthaltung", status: "aktiv", closesAt: past },
+      { tenantId: tA.id, regionId: regA, frage: "künftig", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: future },
     ]);
     // Fremd-Tenant: aktiver Poll (darf NICHT in A zählen).
-    const [b1] = await db.insert(polls).values({ tenantId: tB.id, scopeLevel: "stadt", frage: "b1", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past }).returning();
+    const [b1] = await db.insert(polls).values({ tenantId: tB.id, regionId: regB, frage: "b1", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past }).returning();
 
     // Stimmen: 3 auf a1, 4 auf a2 (= 7 laufend). Eine im Fremd-Tenant (zählt nicht).
     await db.insert(votes).values([
@@ -101,13 +105,13 @@ describe("getAdminKennzahlen (Integration)", () => {
 
     // QR-Codes in A: 1 aktiv + 3 inaktiv (abgelaufen / widerrufen / aufgebraucht).
     await db.insert(qrCodes).values([
-      { tenantId: tA.id, scopeLevel: "stadt", tokenHash: `h-aktiv-${Date.now()}`, maxRedemptions: 10, expiresAt: future },
-      { tenantId: tA.id, scopeLevel: "stadt", tokenHash: `h-abgelaufen-${Date.now()}`, maxRedemptions: 10, expiresAt: past },
-      { tenantId: tA.id, scopeLevel: "stadt", tokenHash: `h-widerrufen-${Date.now()}`, maxRedemptions: 10, expiresAt: future, revokedAt: past },
-      { tenantId: tA.id, scopeLevel: "stadt", tokenHash: `h-aufgebraucht-${Date.now()}`, maxRedemptions: 3, redemptionCount: 3, expiresAt: future },
+      { tenantId: tA.id, regionId: regA, tokenHash: `h-aktiv-${Date.now()}`, maxRedemptions: 10, expiresAt: future },
+      { tenantId: tA.id, regionId: regA, tokenHash: `h-abgelaufen-${Date.now()}`, maxRedemptions: 10, expiresAt: past },
+      { tenantId: tA.id, regionId: regA, tokenHash: `h-widerrufen-${Date.now()}`, maxRedemptions: 10, expiresAt: future, revokedAt: past },
+      { tenantId: tA.id, regionId: regA, tokenHash: `h-aufgebraucht-${Date.now()}`, maxRedemptions: 3, redemptionCount: 3, expiresAt: future },
     ]);
     // Fremd-Tenant: aktiver QR (zählt nicht in A).
-    await db.insert(qrCodes).values({ tenantId: tB.id, scopeLevel: "stadt", tokenHash: `h-fremd-${Date.now()}`, maxRedemptions: 10, expiresAt: future });
+    await db.insert(qrCodes).values({ tenantId: tB.id, regionId: regB, tokenHash: `h-fremd-${Date.now()}`, maxRedemptions: 10, expiresAt: future });
 
     // Anliegen in A: 2 offen (eingegangen default + in_pruefung), 1 abgeschlossen (beantwortet).
     await db.insert(anliegen).values([

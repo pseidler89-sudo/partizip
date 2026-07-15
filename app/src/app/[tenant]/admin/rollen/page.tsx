@@ -18,7 +18,7 @@ import { headers, cookies } from "next/headers";
 import { and, eq, asc } from "drizzle-orm";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
-import { users, roles, sessions } from "@/db/schema";
+import { users, roles, sessions, regions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin, manageableRoleTypes, getUserRoleTypes } from "@/lib/auth/roles";
@@ -74,16 +74,18 @@ export default async function AdminRollenPage({ params }: PageProps) {
       accountStatus: users.accountStatus,
       roleId: roles.id,
       roleType: roles.roleType,
-      scopeLevel: roles.scopeLevel,
-      scopeCode: roles.scopeCode,
+      // ADR-024: Gebietsart + Name des Rollen-Knotens (statt scope_level/scope_code).
+      regionTyp: regions.typ,
+      regionName: regions.name,
     })
     .from(users)
     .leftJoin(roles, and(eq(roles.userId, users.id), eq(roles.tenantId, tenant.id)))
+    .leftJoin(regions, eq(regions.id, roles.regionId))
     .where(eq(users.tenantId, tenant.id))
     .orderBy(asc(users.email));
 
   // Nach User gruppieren.
-  type RoleEntry = { roleId: string; roleType: string; scopeLevel: string; scopeCode: string | null };
+  type RoleEntry = { roleId: string; roleType: string; regionTyp: string; regionName: string };
   const userMap = new Map<
     string,
     { userId: string; email: string; accountStatus: string; roles: RoleEntry[] }
@@ -99,12 +101,12 @@ export default async function AdminRollenPage({ params }: PageProps) {
       };
       userMap.set(row.userId, entry);
     }
-    if (row.roleId && row.roleType && row.scopeLevel) {
+    if (row.roleId && row.roleType && row.regionTyp) {
       entry.roles.push({
         roleId: row.roleId,
         roleType: row.roleType,
-        scopeLevel: row.scopeLevel,
-        scopeCode: row.scopeCode,
+        regionTyp: row.regionTyp,
+        regionName: row.regionName ?? "",
       });
     }
   }
@@ -118,8 +120,8 @@ export default async function AdminRollenPage({ params }: PageProps) {
     id: e.id,
     email: e.email,
     roleType: e.roleType,
-    scopeLevel: e.scopeLevel,
-    scopeCode: e.scopeCode,
+    regionTyp: e.regionTyp,
+    regionName: e.regionName,
     status: e.status,
     resendCount: e.resendCount,
     expiresAt: e.expiresAt.toISOString(),

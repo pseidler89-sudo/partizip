@@ -31,15 +31,17 @@ import type { Db } from "@/db/client";
 import {
   qrCodes,
   qrRedemptions,
+  regions,
   users,
   ortsteile,
   auditEvents,
-  scopeLevelEnum,
 } from "@/db/schema";
 import { generateRawToken, sha256Hex } from "@/lib/auth/crypto";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
+import type { ScopeInputLevel } from "@/lib/region/ebenen";
 
-export type ScopeLevel = (typeof scopeLevelEnum.enumValues)[number];
+/** Composer-Eingabe-Ebene für die QR-Erstellung (TS-Union, kein DB-Enum mehr). */
+export type ScopeLevel = ScopeInputLevel;
 
 /** Wohnsitz-Verifizierung gilt nach Einlösung standardmäßig 24 Monate. */
 export const QR_VERIFICATION_MONTHS = 24;
@@ -132,8 +134,8 @@ export async function qrErstellenCore(
   // Parameter); nur in Roh-`sql`-Templates wäre ein JS-Date verboten.
   const expiresAt = new Date(Date.now() + input.gueltigkeitStunden * 60 * 60 * 1000);
 
-  // ADR-024 (ETAPPE 2) DUAL-WRITE: region_id aus dem Scope via Baum ableiten und
-  // ZUSÄTZLICH zu scope_level/scope_code setzen.
+  // ADR-024 contract: die Scope-Eingabe wird via Baum zu region_id aufgelöst — der
+  // EINZIGE geschriebene Gebietsbezug (scope_level/scope_code sind entfernt).
   const regionId = await resolveRegionIdForScope(
     db,
     tenantId,
@@ -146,8 +148,6 @@ export async function qrErstellenCore(
       .insert(qrCodes)
       .values({
         tenantId,
-        scopeLevel: input.scopeLevel,
-        scopeCode: input.scopeCode ?? null,
         regionId,
         tokenHash,
         label: input.label ?? null,
@@ -256,16 +256,19 @@ export async function qrEinloesenCore(
   const tokenHash = sha256Hex(rawToken);
 
   // Vorab-Lookup (tenant-scoped) — nur für freundliche Fehlermeldungen. Die
-  // verbindliche Prüfung erfolgt atomar im bedingten UPDATE.
+  // verbindliche Prüfung erfolgt atomar im bedingten UPDATE. Die Gebietsart des
+  // QR-Knotens (regions.typ) + sein path_label ersetzen das alte scope_level/
+  // scope_code für die Ortsteil-Zuordnung beim Einlösen (ADR-024 contract).
   const found = await db
     .select({
       id: qrCodes.id,
-      scopeLevel: qrCodes.scopeLevel,
-      scopeCode: qrCodes.scopeCode,
+      regionTyp: regions.typ,
+      regionPathLabel: regions.pathLabel,
       expiresAt: qrCodes.expiresAt,
       revokedAt: qrCodes.revokedAt,
     })
     .from(qrCodes)
+    .innerJoin(regions, eq(regions.id, qrCodes.regionId))
     .where(and(eq(qrCodes.tokenHash, tokenHash), eq(qrCodes.tenantId, tenantId)))
     .limit(1);
 
@@ -318,14 +321,20 @@ export async function qrEinloesenCore(
       }
 
       // 3. User verifizieren (tenant-scoped) über den gemeinsamen Stufe-2-Grant.
-      // Optionalen Ortsteil setzen, wenn scope='ortsteil' + scopeCode passt.
+      // Optionalen Ortsteil setzen, wenn der QR-Knoten ein Ortsteil ist: der
+      // passende ortsteile-Datensatz wird über sein normalisiertes Label
+      // (regions_ltree_label(code) = regions.path_label) tenant-scoped aufgelöst —
+      // identisch zur Baum-Spiegelung (ADR-024), ersetzt das alte code-Matching.
       let ortsteilId: string | undefined;
-      if (qr.scopeLevel === "ortsteil" && qr.scopeCode) {
+      if (qr.regionTyp === "ortsteil") {
         const ot = await tx
           .select({ id: ortsteile.id })
           .from(ortsteile)
           .where(
-            and(eq(ortsteile.tenantId, tenantId), eq(ortsteile.code, qr.scopeCode)),
+            and(
+              eq(ortsteile.tenantId, tenantId),
+              sql`regions_ltree_label(${ortsteile.code}) = ${qr.regionPathLabel}`,
+            ),
           )
           .limit(1);
         if (ot[0]) ortsteilId = ot[0].id;
@@ -336,7 +345,7 @@ export async function qrEinloesenCore(
       });
 
       // 4. Audit (PII-frei: actorRef=userId ist eine UUID, kein Personenbezug
-      //    ohne DB; metadata nur qrId + scopeLevel — kein tokenHash, keine E-Mail).
+      //    ohne DB; metadata nur qrId + Gebietsart — kein tokenHash, keine E-Mail).
       await tx.insert(auditEvents).values({
         tenantId,
         actorType: "user",
@@ -344,7 +353,7 @@ export async function qrEinloesenCore(
         action: "qr.redeemed",
         targetType: "qr_code",
         targetId: qr.id,
-        metadata: { qrId: qr.id, scopeLevel: qr.scopeLevel },
+        metadata: { qrId: qr.id, regionTyp: qr.regionTyp },
       });
 
       return { ok: true, alreadyRedeemed: false, verifiedUntil };

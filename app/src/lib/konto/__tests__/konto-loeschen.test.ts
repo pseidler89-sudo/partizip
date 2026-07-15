@@ -15,6 +15,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "node:path";
@@ -104,7 +105,7 @@ describe("Konto-Löschung (Integration)", () => {
       tenantId,
       userId: user.id,
       roleType: opts?.roleType ?? "user",
-      scopeLevel: "stadt",
+      regionId: await resolveRegionIdForScope(db as never, tenantId, "stadt", null),
     });
 
     await db.insert(sessions).values({
@@ -284,7 +285,7 @@ describe("Konto-Löschung (Integration)", () => {
         tenantId: t2.id, email, accountStatus: "active",
       }).returning();
       await db.insert(roles).values({
-        tenantId: t2.id, userId: u.id, roleType: role, scopeLevel: "stadt",
+        tenantId: t2.id, userId: u.id, roleType: role, regionId: await resolveRegionIdForScope(db as never, t2.id, "stadt", null),
       });
       return u;
     }

@@ -45,8 +45,6 @@ const rolle: RoleRow = {
   tenantId: "tenant-1",
   userId: "user-1",
   roleType: "user",
-  scopeLevel: "stadt",
-  scopeCode: null,
   regionId: "region-1",
   createdAt: T0,
   updatedAt: T0,
@@ -141,7 +139,7 @@ describe("buildExportDocument", () => {
       events: [],
     });
     expect(doc.rollen).toEqual([
-      { roleType: "user", scopeLevel: "stadt", scopeCode: null, createdAt: T0.toISOString() },
+      { roleType: "user", regionId: "region-1", createdAt: T0.toISOString() },
     ]);
     expect(doc.gefolgteAnliegen).toEqual([
       { anliegenId: "anliegen-1", createdAt: T0.toISOString() },

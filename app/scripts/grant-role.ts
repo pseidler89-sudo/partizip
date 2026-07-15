@@ -28,6 +28,7 @@ import {
   roles,
   auditEvents,
 } from "../src/db/schema.js";
+import { resolveRegionId } from "./seed-utils.js";
 
 // ---------------------------------------------------------------------------
 // CLI-Argumente
@@ -110,6 +111,9 @@ async function main() {
 
   const userId = userRows[0].id;
 
+  // ADR-024 contract: Scope-Eingabe → region_id (Dual-Write-Trigger ist entfernt).
+  const regionId = await resolveRegionId(db, tenant.id, scopeLevel, null);
+
   // Rolle vergeben (idempotent)
   await db
     .insert(roles)
@@ -118,9 +122,7 @@ async function main() {
       userId,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       roleType: roleType as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      scopeLevel: scopeLevel as any,
-      scopeCode: null,
+      regionId,
     })
     .onConflictDoNothing();
 

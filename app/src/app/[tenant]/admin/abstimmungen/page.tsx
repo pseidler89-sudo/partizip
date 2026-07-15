@@ -25,6 +25,7 @@ import { ortsteile as ortsteileTable, sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin, beobachterDarfSehen, getUserRolesMitScope } from "@/lib/auth/roles";
+import { regionTypLabel } from "@/lib/region/ebenen";
 import { getAllPollsForAdmin, type PollAdminItem } from "@/lib/polls/queries";
 import PollComposerForm from "./PollComposerForm";
 import PollAdminActions from "./PollAdminActions";
@@ -35,12 +36,6 @@ interface PageProps {
   params: Promise<{ tenant: string }>;
 }
 
-const SCOPE_LABELS: Record<string, string> = {
-  ortsteil: "Ortsteil",
-  stadt: "Kommune",
-  kreis: "Kreis",
-  land: "Land",
-};
 
 const STATUS_TITLES: { key: "entwurf" | "aktiv" | "geschlossen"; titel: string; hint: string }[] = [
   { key: "entwurf", titel: "Entwürfe", hint: "Noch nicht veröffentlicht — aktivieren oder löschen." },
@@ -66,8 +61,9 @@ function fmtDate(d: Date | null): string | null {
 }
 
 function scopeLabel(p: PollAdminItem): string {
-  const base = SCOPE_LABELS[p.scopeLevel] ?? p.scopeLevel;
-  return p.scopeLevel === "ortsteil" && p.scopeCode ? `${base}: ${p.scopeCode}` : base;
+  // ADR-024: Ebenen-Label aus der Gebietsart; bei Ortsteil zusätzlich der Name.
+  const base = regionTypLabel(p.regionTyp);
+  return p.regionTyp === "ortsteil" ? `${base}: ${p.regionName}` : base;
 }
 
 export default async function AdminAbstimmungenPage({ params }: PageProps) {
@@ -123,7 +119,7 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
   const allPolls = admin
     ? allPollsUnfiltered
     : allPollsUnfiltered.filter((p) =>
-        beobachterDarfSehen(roleRows, p.scopeLevel, p.scopeCode),
+        beobachterDarfSehen(roleRows, p.regionPath),
       );
   const byStatus = (s: string) => allPolls.filter((p) => p.status === s);
 

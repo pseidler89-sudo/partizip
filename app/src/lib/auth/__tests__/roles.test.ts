@@ -13,6 +13,7 @@ import {
   canVerify,
   canBeobachten,
   beobachterDarfSehen,
+  beobachterDarfTenantweitSehen,
   hasAnyRole,
   canManageRole,
   manageableRoleTypes,
@@ -224,51 +225,69 @@ describe("beobachter — View-Only-Rolle: JEDER Mutations-Guard sagt NEIN", () =
   });
 });
 
-describe("beobachterDarfSehen — Scope-Sichtbarkeit (fail-closed)", () => {
+describe("beobachterDarfSehen — Gebiets-Sichtbarkeit über den Baum (fail-closed)", () => {
+  // ADR-024 contract: Sichtbarkeit über ltree-Pfade (Vorfahr-oder-Selbst deckt ab)
+  // statt scope_level/scope_code. Pilot-Pfade:
+  const GEMEINDE = "de.hessen.rtk.taunusstein";
+  const OT_NORD = "de.hessen.rtk.taunusstein.nord";
+  const OT_SUED = "de.hessen.rtk.taunusstein.sued";
+  const KREIS = "de.hessen.rtk";
+  const LAND = "de.hessen";
+
   const stadtBeobachter = [
-    { roleType: "beobachter", scopeLevel: "stadt", scopeCode: null },
+    { roleType: "beobachter", regionTyp: "gemeinde", regionPath: GEMEINDE },
   ];
   const nordBeobachter = [
-    { roleType: "beobachter", scopeLevel: "ortsteil", scopeCode: "nord" },
+    { roleType: "beobachter", regionTyp: "ortsteil", regionPath: OT_NORD },
   ];
 
-  it("stadt-Beobachter sieht stadtweite UND Ortsteil-Objekte", () => {
-    expect(beobachterDarfSehen(stadtBeobachter, "stadt", null)).toBe(true);
-    expect(beobachterDarfSehen(stadtBeobachter, "ortsteil", "nord")).toBe(true);
-    expect(beobachterDarfSehen(stadtBeobachter, "ortsteil", "sued")).toBe(true);
+  it("Gemeinde-Beobachter sieht stadtweite UND (eigene) Ortsteil-Objekte", () => {
+    expect(beobachterDarfSehen(stadtBeobachter, GEMEINDE)).toBe(true);
+    expect(beobachterDarfSehen(stadtBeobachter, OT_NORD)).toBe(true);
+    expect(beobachterDarfSehen(stadtBeobachter, OT_SUED)).toBe(true);
   });
 
-  it("stadt-Beobachter sieht NICHTS auf höherer Ebene (kreis/land)", () => {
-    expect(beobachterDarfSehen(stadtBeobachter, "kreis", null)).toBe(false);
-    expect(beobachterDarfSehen(stadtBeobachter, "land", null)).toBe(false);
+  it("Gemeinde-Beobachter sieht NICHTS auf höherer Ebene (kreis/land)", () => {
+    expect(beobachterDarfSehen(stadtBeobachter, KREIS)).toBe(false);
+    expect(beobachterDarfSehen(stadtBeobachter, LAND)).toBe(false);
   });
 
-  it("ortsteil-Beobachter sieht NUR den eigenen Ortsteil-Code", () => {
-    expect(beobachterDarfSehen(nordBeobachter, "ortsteil", "nord")).toBe(true);
-    expect(beobachterDarfSehen(nordBeobachter, "ortsteil", "sued")).toBe(false);
-    expect(beobachterDarfSehen(nordBeobachter, "stadt", null)).toBe(false);
+  it("Ortsteil-Beobachter sieht NUR den eigenen Ortsteil-Knoten", () => {
+    expect(beobachterDarfSehen(nordBeobachter, OT_NORD)).toBe(true);
+    expect(beobachterDarfSehen(nordBeobachter, OT_SUED)).toBe(false);
+    expect(beobachterDarfSehen(nordBeobachter, GEMEINDE)).toBe(false);
   });
 
-  it("scopeCode NULL auf gleicher Ebene deckt die ganze Ebene ab", () => {
-    const ohneCode = [
-      { roleType: "beobachter", scopeLevel: "ortsteil", scopeCode: null },
+  it("höherer Knoten deckt den ganzen Teilbaum ab (Kreis sieht Gemeinde + Ortsteile)", () => {
+    const kreisBeobachter = [
+      { roleType: "beobachter", regionTyp: "kreis", regionPath: KREIS },
     ];
-    expect(beobachterDarfSehen(ohneCode, "ortsteil", "nord")).toBe(true);
-    expect(beobachterDarfSehen(ohneCode, "ortsteil", "sued")).toBe(true);
+    expect(beobachterDarfSehen(kreisBeobachter, KREIS)).toBe(true);
+    expect(beobachterDarfSehen(kreisBeobachter, GEMEINDE)).toBe(true);
+    expect(beobachterDarfSehen(kreisBeobachter, OT_NORD)).toBe(true);
+    expect(beobachterDarfSehen(kreisBeobachter, LAND)).toBe(false);
   });
 
   it("NUR beobachter-Rollen zählen — Admin-/Redaktions-Rollen laufen über eigene Achsen", () => {
     const nurAdmin = [
-      { roleType: "kommune_admin", scopeLevel: "stadt", scopeCode: null },
-      { roleType: "redakteur", scopeLevel: "stadt", scopeCode: null },
+      { roleType: "kommune_admin", regionTyp: "gemeinde", regionPath: GEMEINDE },
+      { roleType: "redakteur", regionTyp: "gemeinde", regionPath: GEMEINDE },
     ];
-    expect(beobachterDarfSehen(nurAdmin, "stadt", null)).toBe(false);
+    expect(beobachterDarfSehen(nurAdmin, GEMEINDE)).toBe(false);
+    expect(beobachterDarfTenantweitSehen(nurAdmin)).toBe(false);
   });
 
-  it("unbekannte Scope-Ebenen → false (fail-closed)", () => {
-    const kaputt = [{ roleType: "beobachter", scopeLevel: "galaxie", scopeCode: null }];
-    expect(beobachterDarfSehen(kaputt, "stadt", null)).toBe(false);
-    expect(beobachterDarfSehen(stadtBeobachter, "galaxie", null)).toBe(false);
-    expect(beobachterDarfSehen([], "stadt", null)).toBe(false);
+  it("leere Rollen → false (fail-closed)", () => {
+    expect(beobachterDarfSehen([], GEMEINDE)).toBe(false);
+    expect(beobachterDarfTenantweitSehen([])).toBe(false);
+  });
+
+  it("beobachterDarfTenantweitSehen: ab Gemeinde-Ebene aufwärts ja, reiner Ortsteil nein", () => {
+    expect(beobachterDarfTenantweitSehen(stadtBeobachter)).toBe(true);
+    expect(beobachterDarfTenantweitSehen(nordBeobachter)).toBe(false);
+    const kreisBeobachter = [
+      { roleType: "beobachter", regionTyp: "kreis", regionPath: KREIS },
+    ];
+    expect(beobachterDarfTenantweitSehen(kreisBeobachter)).toBe(true);
   });
 });

@@ -28,7 +28,8 @@ import {
   type PollListItem,
   type PollMitErgebnis,
 } from "@/lib/polls/queries";
-import { gruppiereNachEbene, SCOPE_LABEL } from "@/lib/polls/gruppierung";
+import { gruppiereNachEbene } from "@/lib/polls/gruppierung";
+import { REGION_TYP_LABEL } from "@/lib/region/ebenen";
 import type { PollErgebnis } from "@/lib/polls/ergebnis";
 import { REGION_COOKIE_NAME, parseRegionCookie } from "@/lib/region/core";
 import { getOrtsteileForTenant } from "@/lib/region/queries";
@@ -104,7 +105,7 @@ function PollKarte({
     >
       <PollTypBadge
         verbindlich={poll.verbindlich}
-        scope={SCOPE_LABEL[poll.scopeLevel] ?? poll.scopeLevel}
+        scope={REGION_TYP_LABEL[poll.regionTyp]}
       />
       <h3 className="mt-3 text-base font-semibold" style={{ color: "var(--pz-ink)" }}>
         {poll.frage}
@@ -131,7 +132,7 @@ function GruppierteListe({
   return (
     <div className="space-y-7">
       {gruppen.map((g) => (
-        <div key={g.level}>
+        <div key={g.typ}>
           <h3
             className="mb-2.5 text-xs font-semibold uppercase tracking-wide"
             style={{ color: "var(--pz-muted)" }}

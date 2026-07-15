@@ -25,6 +25,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 process.env.ANLIEGEN_REF_SALT ??= "test-lifecycle-salt-aaaaaaaaaaaaaaaaaaaa";
 
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "node:path";
@@ -108,11 +109,13 @@ describe("polls/lifecycle (Integration, echte Actions)", () => {
     status?: "entwurf" | "aktiv" | "geschlossen";
     verbindlich?: boolean;
   }) {
+    const tId = opts.tenantId ?? tenantId;
+    const regionId = await resolveRegionIdForScope(db as never, tId, "stadt", null);
     const [p] = await db
       .insert(polls)
       .values({
-        tenantId: opts.tenantId ?? tenantId,
-        scopeLevel: "stadt",
+        tenantId: tId,
+        regionId,
         frage: `Frage ${++counter}?`,
         typ: "ja_nein_enthaltung",
         status: opts.status ?? "entwurf",
@@ -163,7 +166,7 @@ describe("polls/lifecycle (Integration, echte Actions)", () => {
       tenantId,
       userId: adminUserId,
       roleType: "kommune_admin",
-      scopeLevel: "stadt",
+      regionId: await resolveRegionIdForScope(db as never, tenantId, "stadt", null),
     });
 
     // Echte Module erst NACH gesetzten Mocks importieren.
@@ -354,7 +357,7 @@ describe("polls/lifecycle (Integration, echte Actions)", () => {
       .insert(users)
       .values({ tenantId, email: `plain-${Date.now()}@lc.de`, minAgeConfirmedAt: new Date() })
       .returning();
-    await db.insert(roles).values({ tenantId, userId: plain.id, roleType: "user", scopeLevel: "stadt" });
+    await db.insert(roles).values({ tenantId, userId: plain.id, roleType: "user", regionId: await resolveRegionIdForScope(db as never, tenantId, "stadt", null) });
     const rawToken = `tok-plain-${Date.now()}`;
     await db.insert(sessions).values({
       tenantId,
@@ -380,18 +383,20 @@ describe("polls/lifecycle (Integration, echte Actions)", () => {
   it.skipIf(SKIP)("getAllPollsForAdmin: liefert alle Status neu→alt, Zähler korrekt", async () => {
     // Eigener Tenant für saubere Isolation der Zähler.
     const [t] = await db.insert(tenants).values({ slug: nextSlug("ga"), name: "GA" }).returning();
+    const rStadt = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+    const rOt1 = await resolveRegionIdForScope(db as never, t.id, "ortsteil", "OT-1");
 
     const [pEntwurf] = await db
       .insert(polls)
-      .values({ tenantId: t.id, scopeLevel: "stadt", frage: "Entwurf?", typ: "ja_nein_enthaltung", status: "entwurf", createdAt: new Date(Date.now() - 30_000) })
+      .values({ tenantId: t.id, regionId: rStadt, frage: "Entwurf?", typ: "ja_nein_enthaltung", status: "entwurf", createdAt: new Date(Date.now() - 30_000) })
       .returning();
     const [pAktiv] = await db
       .insert(polls)
-      .values({ tenantId: t.id, scopeLevel: "ortsteil", scopeCode: "OT-1", frage: "Aktiv?", typ: "ja_nein_enthaltung", status: "aktiv", verbindlich: true, createdAt: new Date(Date.now() - 20_000) })
+      .values({ tenantId: t.id, regionId: rOt1, frage: "Aktiv?", typ: "ja_nein_enthaltung", status: "aktiv", verbindlich: true, createdAt: new Date(Date.now() - 20_000) })
       .returning();
     const [pZu] = await db
       .insert(polls)
-      .values({ tenantId: t.id, scopeLevel: "stadt", frage: "Zu?", typ: "ja_nein_enthaltung", status: "geschlossen", createdAt: new Date(Date.now() - 10_000) })
+      .values({ tenantId: t.id, regionId: rStadt, frage: "Zu?", typ: "ja_nein_enthaltung", status: "geschlossen", createdAt: new Date(Date.now() - 10_000) })
       .returning();
 
     // Stimmen: pAktiv 3 (2 verifiziert), pZu 1 (0 verifiziert), pEntwurf 0.
@@ -409,8 +414,10 @@ describe("polls/lifecycle (Integration, echte Actions)", () => {
     expect(aktiv.stimmenGesamt).toBe(3);
     expect(aktiv.stimmenVerifiziert).toBe(2);
     expect(aktiv.verbindlich).toBe(true);
-    expect(aktiv.scopeLevel).toBe("ortsteil");
-    expect(aktiv.scopeCode).toBe("OT-1");
+    // ADR-024 contract: Ebene aus der Gebietsart; Ortsteil-Name aus dem Baum-Knoten
+    // (regions_ltree_label("OT-1") → path_label "ot_1"; Name = übergebener Code).
+    expect(aktiv.regionTyp).toBe("ortsteil");
+    expect(aktiv.regionName).toBe("OT-1");
 
     const zu = list.find((p) => p.id === pZu.id)!;
     expect(zu.stimmenGesamt).toBe(1);
@@ -426,7 +433,7 @@ describe("polls/lifecycle (Integration, echte Actions)", () => {
     const [tB] = await db.insert(tenants).values({ slug: nextSlug("ib"), name: "IB" }).returning();
     const [pB] = await db
       .insert(polls)
-      .values({ tenantId: tB.id, scopeLevel: "stadt", frage: "fremd?", typ: "ja_nein_enthaltung", status: "aktiv" })
+      .values({ tenantId: tB.id, regionId: await resolveRegionIdForScope(db as never, tB.id, "stadt", null), frage: "fremd?", typ: "ja_nein_enthaltung", status: "aktiv" })
       .returning();
     await db.insert(votes).values({ pollId: pB.id, tenantId: tB.id, voterRef: "b1", choice: "ja", warVerifiziert: true });
 

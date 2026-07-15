@@ -20,6 +20,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "node:path";
@@ -108,7 +109,7 @@ describe("Digest-Freigabe-Gate (Integration)", () => {
       tenantId,
       userId: adminUserId,
       roleType: "kommune_admin",
-      scopeLevel: "stadt",
+      regionId: await resolveRegionIdForScope(db as never, tenantId, "stadt", null),
     });
 
     // RIS-Body

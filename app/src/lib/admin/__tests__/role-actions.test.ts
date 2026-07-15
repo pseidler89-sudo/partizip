@@ -18,6 +18,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "node:path";
@@ -336,7 +337,7 @@ describe("Rollen-Verwaltung (Integration)", () => {
       .returning();
     const [adminRole] = await db
       .insert(roles)
-      .values({ tenantId: t.id, userId: onlyAdmin.id, roleType: "kommune_admin", scopeLevel: "stadt" })
+      .values({ tenantId: t.id, userId: onlyAdmin.id, roleType: "kommune_admin", regionId: await resolveRegionIdForScope(db, t.id, "stadt", null) })
       .returning();
 
     const res = await revokeRoleCore(db, t.id, SUPER, callerAdminId, {
@@ -363,13 +364,14 @@ describe("Rollen-Verwaltung (Integration)", () => {
       .insert(users)
       .values({ tenantId: t.id, email: nextEmail("admin-b") })
       .returning();
+    const zweiAdminRegion = await resolveRegionIdForScope(db, t.id, "stadt", null);
     const [roleA] = await db
       .insert(roles)
-      .values({ tenantId: t.id, userId: adminA.id, roleType: "kommune_admin", scopeLevel: "stadt" })
+      .values({ tenantId: t.id, userId: adminA.id, roleType: "kommune_admin", regionId: zweiAdminRegion })
       .returning();
     await db
       .insert(roles)
-      .values({ tenantId: t.id, userId: adminB.id, roleType: "kommune_admin", scopeLevel: "stadt" });
+      .values({ tenantId: t.id, userId: adminB.id, roleType: "kommune_admin", regionId: zweiAdminRegion });
 
     const res = await revokeRoleCore(db, t.id, SUPER, callerAdminId, { roleId: roleA.id });
     expect(res.ok).toBe(true);

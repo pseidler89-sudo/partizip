@@ -99,3 +99,49 @@ jobs:
           # Build braucht keine echte DB, aber Next.js erwartet die Variable
           DATABASE_URL: postgres://partizip:partizip@localhost:5433/partizip_test
         run: npm run build
+
+  # Eigenständiger Job: beweist die ZWINGENDE Prod-Reihenfolge db:seed:regions VOR
+  # db:migrate für ein UPGRADE einer Bestands-DB (der reale Prod-Ausfall-Pfad). Der
+  # ci-Job oben deckt nur den Fresh-Pfad ab. Getrennter Job + eigene DB → bricht den
+  # bestehenden Job nicht und läuft parallel. Logik in scripts/test-upgrade-path.ts.
+  upgrade-path:
+    name: Upgrade-Pfad (seed vor migrate)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: partizip
+          POSTGRES_PASSWORD: partizip
+          POSTGRES_DB: partizip_upgrade_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U partizip -d partizip_upgrade_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      # Migrationen bis 0023 → Bestands-Fachzeilen → db:seed:regions → 0024/0025.
+      # Muss grün durchlaufen (0 NULL region_id auf allen Fachtabellen).
+      - name: Upgrade-Pfad-Test
+        working-directory: app
+        env:
+          DATABASE_URL: postgres://partizip:partizip@localhost:5433/partizip_upgrade_test
+        run: npm run test:upgrade

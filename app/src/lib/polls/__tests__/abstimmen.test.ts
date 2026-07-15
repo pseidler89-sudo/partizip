@@ -22,6 +22,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "node:path";
@@ -172,11 +173,12 @@ describe("Abstimmen (Integration)", () => {
     verbindlich?: boolean;
     status?: "entwurf" | "aktiv" | "geschlossen";
   }) {
+    const regionId = await resolveRegionIdForScope(db as never, opts.tenantId, "stadt", null);
     const [poll] = await db
       .insert(polls)
       .values({
         tenantId: opts.tenantId,
-        scopeLevel: "stadt",
+        regionId,
         frage: `Testfrage ${nextId()}?`,
         verbindlich: opts.verbindlich ?? false,
         status: opts.status ?? "aktiv",

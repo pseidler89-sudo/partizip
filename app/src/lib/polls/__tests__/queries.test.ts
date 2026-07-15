@@ -42,7 +42,7 @@ import {
   hatBereitsAbgestimmtBatch,
 } from "@/lib/polls/queries";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
-import { resolveOrtsteilRegionId } from "@/lib/region/scope";
+import { resolveOrtsteilRegionId, resolveRegionIdForScope } from "@/lib/region/scope";
 import { and, eq } from "drizzle-orm";
 
 const { tenants, polls, votes, users, regions } = schema;
@@ -65,6 +65,9 @@ describe("polls/queries (Integration)", () => {
   let sql_: postgres.Sql;
   let db: DbType;
   let tenantId: string;
+  // ADR-024 contract: Fach-Inserts setzen region_id explizit (Trigger entfernt).
+  // Der Gemeinde-Knoten des Test-Tenants, via Scope→region_id (provisioniert im Test).
+  let stadtRegion: string;
 
   beforeAll(async () => {
     if (SKIP) return;
@@ -83,6 +86,7 @@ describe("polls/queries (Integration)", () => {
       .values({ slug: `q-${Date.now()}`, name: "Query-Test" })
       .returning();
     tenantId = t.id;
+    stadtRegion = await resolveRegionIdForScope(db as never, tenantId, "stadt", null);
   });
 
   afterAll(async () => {
@@ -93,7 +97,7 @@ describe("polls/queries (Integration)", () => {
   it.skipIf(SKIP)("getPollErgebnis (LAUFEND): Poll-Ebene korrekt, aber KEINE Options-Zahlen im Payload (ADR-022)", async () => {
     const [p] = await db
       .insert(polls)
-      .values({ tenantId, scopeLevel: "stadt", frage: "Ergebnis?", typ: "ja_nein_enthaltung", status: "aktiv" })
+      .values({ tenantId, regionId: stadtRegion, frage: "Ergebnis?", typ: "ja_nein_enthaltung", status: "aktiv" })
       .returning();
     await db.insert(votes).values([
       { pollId: p.id, tenantId, voterRef: "r1", choice: "ja", warVerifiziert: true },
@@ -119,7 +123,7 @@ describe("polls/queries (Integration)", () => {
   it.skipIf(SKIP)("getPollErgebnis (BEENDET via status='geschlossen'): volle Aufschlüsselung", async () => {
     const [p] = await db
       .insert(polls)
-      .values({ tenantId, scopeLevel: "stadt", frage: "Zu?", typ: "ja_nein_enthaltung", status: "geschlossen" })
+      .values({ tenantId, regionId: stadtRegion, frage: "Zu?", typ: "ja_nein_enthaltung", status: "geschlossen" })
       .returning();
     // ja=5 (≥ k), nein/enthaltung=0 → nichts maskiert, alles sichtbar.
     await db.insert(votes).values(
@@ -143,7 +147,7 @@ describe("polls/queries (Integration)", () => {
     const [p] = await db
       .insert(polls)
       .values({
-        tenantId, scopeLevel: "stadt", frage: "Abgelaufen?", typ: "ja_nein_enthaltung",
+        tenantId, regionId: stadtRegion, frage: "Abgelaufen?", typ: "ja_nein_enthaltung",
         status: "aktiv", closesAt: new Date(Date.now() - 60_000),
       })
       .returning();
@@ -185,12 +189,13 @@ describe("polls/queries (Integration)", () => {
       .returning();
     const past = new Date(Date.now() - 3_600_000);
     const future = new Date(Date.now() + 3_600_000);
+    const stadtT = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
 
     // Zwei offene Polls (unterschiedliche createdAt für Reihenfolge).
     const [alt] = await db
       .insert(polls)
       .values({
-        tenantId: t.id, scopeLevel: "stadt", frage: "alt offen?",
+        tenantId: t.id, regionId: stadtT, frage: "alt offen?",
         typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past,
         createdAt: new Date(Date.now() - 10_000),
       })
@@ -198,16 +203,16 @@ describe("polls/queries (Integration)", () => {
     const [neu] = await db
       .insert(polls)
       .values({
-        tenantId: t.id, scopeLevel: "stadt", frage: "neu offen?",
+        tenantId: t.id, regionId: stadtT, frage: "neu offen?",
         typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past,
         createdAt: new Date(),
       })
       .returning();
     // Nicht sichtbar: entwurf, schon geschlossen, noch nicht begonnen.
     await db.insert(polls).values([
-      { tenantId: t.id, scopeLevel: "stadt", frage: "entwurf", typ: "ja_nein_enthaltung", status: "entwurf" },
-      { tenantId: t.id, scopeLevel: "stadt", frage: "vorbei", typ: "ja_nein_enthaltung", status: "aktiv", closesAt: past },
-      { tenantId: t.id, scopeLevel: "stadt", frage: "kommt erst", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: future },
+      { tenantId: t.id, regionId: stadtT, frage: "entwurf", typ: "ja_nein_enthaltung", status: "entwurf" },
+      { tenantId: t.id, regionId: stadtT, frage: "vorbei", typ: "ja_nein_enthaltung", status: "aktiv", closesAt: past },
+      { tenantId: t.id, regionId: stadtT, frage: "kommt erst", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: future },
     ]);
 
     const list = await getAktivePolls(db as never, t.id);
@@ -221,20 +226,26 @@ describe("polls/queries (Integration)", () => {
       .returning();
     const past = new Date(Date.now() - 60_000);
 
-    // Scope-Polls: der region_id-Trigger legt (via Sicherheitsnetz) Gemeinde/Kreis/
-    // Land-Vorfahren + die Ortsteil-Knoten OT-A/OT-B unter der Gemeinde an.
+    // ADR-024 contract: Scope→region_id explizit auflösen (Trigger entfernt). Die
+    // Auflösung provisioniert im Test Gemeinde/Kreis/Land-Vorfahren + die Ortsteil-
+    // Knoten OT-A/OT-B unter der Gemeinde (dieselbe SQL-Funktion wie früher der Trigger).
+    const rStadt = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+    const rKreis = await resolveRegionIdForScope(db as never, t.id, "kreis", null);
+    const rLand = await resolveRegionIdForScope(db as never, t.id, "land", null);
+    const rOtA = await resolveRegionIdForScope(db as never, t.id, "ortsteil", "OT-A");
+    const rOtB = await resolveRegionIdForScope(db as never, t.id, "ortsteil", "OT-B");
     await db.insert(polls).values([
-      { tenantId: t.id, scopeLevel: "stadt", scopeCode: null, frage: "stadtweit", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
-      { tenantId: t.id, scopeLevel: "kreis", scopeCode: null, frage: "kreisweit", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
-      { tenantId: t.id, scopeLevel: "land", scopeCode: null, frage: "landweit", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
-      { tenantId: t.id, scopeLevel: "ortsteil", scopeCode: "OT-A", frage: "ortsteil A", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
-      { tenantId: t.id, scopeLevel: "ortsteil", scopeCode: "OT-B", frage: "ortsteil B", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
+      { tenantId: t.id, regionId: rStadt, frage: "stadtweit", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
+      { tenantId: t.id, regionId: rKreis, frage: "kreisweit", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
+      { tenantId: t.id, regionId: rLand, frage: "landweit", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
+      { tenantId: t.id, regionId: rOtA, frage: "ortsteil A", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
+      { tenantId: t.id, regionId: rOtB, frage: "ortsteil B", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past },
     ]);
 
     // BUND-Ebene aktivieren: Poll direkt auf den Wurzel-Knoten (region_id explizit).
     const [bund] = await db.select({ id: regions.id }).from(regions).where(eq(regions.typ, "bund")).limit(1);
     await db.insert(polls).values({
-      tenantId: t.id, scopeLevel: "land", scopeCode: null, regionId: bund.id,
+      tenantId: t.id, regionId: bund.id,
       frage: "bundesweit", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past,
     });
 
@@ -275,7 +286,8 @@ describe("polls/queries (Integration)", () => {
     const [tA] = await db.insert(tenants).values({ slug: `ti-a-${Date.now()}`, name: "TI-A" }).returning();
     const [tB] = await db.insert(tenants).values({ slug: `ti-b-${Date.now()}`, name: "TI-B" }).returning();
     const past = new Date(Date.now() - 60_000);
-    await db.insert(polls).values({ tenantId: tB.id, scopeLevel: "stadt", frage: "fremd", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past });
+    const stadtB = await resolveRegionIdForScope(db as never, tB.id, "stadt", null);
+    await db.insert(polls).values({ tenantId: tB.id, regionId: stadtB, frage: "fremd", typ: "ja_nein_enthaltung", status: "aktiv", opensAt: past });
     const list = await getAktivePolls(db as never, tA.id);
     expect(list).toHaveLength(0);
   });
@@ -298,21 +310,22 @@ describe("polls/queries (Integration)", () => {
 
     const myRef = computeVoterRefForUser(u.id);
     const otherRef = computeVoterRefForUser(other.id);
+    const stadtT = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
 
     // Poll A (älter, geschlossen) — User hat abgestimmt.
     const [pA] = await db
       .insert(polls)
-      .values({ tenantId: t.id, scopeLevel: "stadt", frage: "A?", typ: "ja_nein_enthaltung", status: "geschlossen", createdAt: new Date(Date.now() - 20_000) })
+      .values({ tenantId: t.id, regionId: stadtT, frage: "A?", typ: "ja_nein_enthaltung", status: "geschlossen", createdAt: new Date(Date.now() - 20_000) })
       .returning();
     // Poll B (neuer, aktiv) — User hat abgestimmt.
     const [pB] = await db
       .insert(polls)
-      .values({ tenantId: t.id, scopeLevel: "stadt", frage: "B?", typ: "ja_nein_enthaltung", status: "aktiv", createdAt: new Date() })
+      .values({ tenantId: t.id, regionId: stadtT, frage: "B?", typ: "ja_nein_enthaltung", status: "aktiv", createdAt: new Date() })
       .returning();
     // Poll C — NUR ein anderer User hat abgestimmt.
     const [pC] = await db
       .insert(polls)
-      .values({ tenantId: t.id, scopeLevel: "stadt", frage: "C?", typ: "ja_nein_enthaltung", status: "aktiv" })
+      .values({ tenantId: t.id, regionId: stadtT, frage: "C?", typ: "ja_nein_enthaltung", status: "aktiv" })
       .returning();
 
     await db.insert(votes).values([
@@ -351,10 +364,11 @@ describe("polls/queries (Integration)", () => {
       .values({ tenantId: tA.id, email: `mti-${Date.now()}@t.de`, minAgeConfirmedAt: new Date() })
       .returning();
     const ref = computeVoterRefForUser(u.id);
+    const stadtB = await resolveRegionIdForScope(db as never, tB.id, "stadt", null);
 
     const [pB] = await db
       .insert(polls)
-      .values({ tenantId: tB.id, scopeLevel: "stadt", frage: "fremd?", typ: "ja_nein_enthaltung", status: "aktiv" })
+      .values({ tenantId: tB.id, regionId: stadtB, frage: "fremd?", typ: "ja_nein_enthaltung", status: "aktiv" })
       .returning();
     // Stimme im Fremd-Tenant (sollte über tenant-scope nie in tA auftauchen).
     await db.insert(votes).values({ pollId: pB.id, tenantId: tB.id, voterRef: ref, choice: "ja", warVerifiziert: false });
@@ -374,10 +388,11 @@ describe("polls/queries (Integration)", () => {
     const [other] = await db.insert(users).values({ tenantId: t.id, email: `bb-o-${Date.now()}@t.de`, minAgeConfirmedAt: new Date() }).returning();
     const myRef = computeVoterRefForUser(u.id);
     const otherRef = computeVoterRefForUser(other.id);
+    const stadtT = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
 
-    const [p1] = await db.insert(polls).values({ tenantId: t.id, scopeLevel: "stadt", frage: "p1", typ: "ja_nein_enthaltung", status: "aktiv" }).returning();
-    const [p2] = await db.insert(polls).values({ tenantId: t.id, scopeLevel: "stadt", frage: "p2", typ: "ja_nein_enthaltung", status: "aktiv" }).returning();
-    const [p3] = await db.insert(polls).values({ tenantId: t.id, scopeLevel: "stadt", frage: "p3", typ: "ja_nein_enthaltung", status: "aktiv" }).returning();
+    const [p1] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "p1", typ: "ja_nein_enthaltung", status: "aktiv" }).returning();
+    const [p2] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "p2", typ: "ja_nein_enthaltung", status: "aktiv" }).returning();
+    const [p3] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "p3", typ: "ja_nein_enthaltung", status: "aktiv" }).returning();
 
     await db.insert(votes).values([
       { pollId: p1.id, tenantId: t.id, voterRef: myRef, choice: "ja", warVerifiziert: false },
@@ -397,7 +412,8 @@ describe("polls/queries (Integration)", () => {
     const [tB] = await db.insert(tenants).values({ slug: `bbb-${Date.now()}`, name: "BBB" }).returning();
     const [u] = await db.insert(users).values({ tenantId: tA.id, email: `bbt-${Date.now()}@t.de`, minAgeConfirmedAt: new Date() }).returning();
     const ref = computeVoterRefForUser(u.id);
-    const [pB] = await db.insert(polls).values({ tenantId: tB.id, scopeLevel: "stadt", frage: "fremd", typ: "ja_nein_enthaltung", status: "aktiv" }).returning();
+    const stadtB = await resolveRegionIdForScope(db as never, tB.id, "stadt", null);
+    const [pB] = await db.insert(polls).values({ tenantId: tB.id, regionId: stadtB, frage: "fremd", typ: "ja_nein_enthaltung", status: "aktiv" }).returning();
     await db.insert(votes).values({ pollId: pB.id, tenantId: tB.id, voterRef: ref, choice: "ja", warVerifiziert: false });
 
     // Fremd-Tenant-Stimme existiert, Abfrage im Tenant A (mit Fremd-poll_id) → nichts.

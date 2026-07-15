@@ -23,7 +23,7 @@
 
 import { headers } from "next/headers";
 import { z } from "zod";
-import { scopeLevelEnum } from "@/db/schema";
+import { SCOPE_INPUT_LEVELS } from "@/lib/region/ebenen";
 import { getStufe } from "@/lib/eligibility/stufe";
 import {
   getOptionalAuthContext,
@@ -43,7 +43,8 @@ import { checkQrRedeemRateLimit } from "@/lib/verification/rate-limit";
 // ---------------------------------------------------------------------------
 
 const qrErstellenSchema = z.object({
-  scopeLevel: z.enum(scopeLevelEnum.enumValues),
+  // ADR-024 contract: Eingabe-Ebene als TS-Union (kein DB-Enum), zu region_id aufgelöst.
+  scopeLevel: z.enum(SCOPE_INPUT_LEVELS),
   scopeCode: z.string().trim().max(100).optional().nullable(),
   label: z.string().trim().max(200).optional().nullable(),
   maxRedemptions: z

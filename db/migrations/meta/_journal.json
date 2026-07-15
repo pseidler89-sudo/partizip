@@ -176,6 +176,13 @@
       "when": 1784069322626,
       "tag": "0024_gebiet_region_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784069322627,
+      "tag": "0025_gebiet_contract",
+      "breakpoints": true
     }
   ]
 }
