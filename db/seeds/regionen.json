@@ -17,5 +17,14 @@
       { "typ": "kreis",    "pathLabel": "musterkreis", "name": "Musterkreis (Demo)" },
       { "typ": "gemeinde", "pathLabel": "musterstadt", "name": "Musterstadt (Demo)" }
     ]
+  },
+  {
+    "tenantSlug": "taunusstein-staging",
+    "fiktiv": true,
+    "zweig": [
+      { "typ": "land",     "pathLabel": "hessen_staging",      "name": "Hessen (Staging)" },
+      { "typ": "kreis",    "pathLabel": "rtk_staging",         "name": "Rheingau-Taunus-Kreis (Staging)" },
+      { "typ": "gemeinde", "pathLabel": "taunusstein_staging", "name": "Taunusstein (Staging)" }
+    ]
   }
 ]
