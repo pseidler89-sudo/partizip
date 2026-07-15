@@ -24,7 +24,8 @@ import { cookies, headers } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { createDb, type Db } from "@/db/client";
-import { sessions, scopeLevelEnum } from "@/db/schema";
+import { sessions } from "@/db/schema";
+import { SCOPE_INPUT_LEVELS } from "@/lib/region/ebenen";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { getTenantFromHost } from "@/lib/tenant";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
@@ -103,7 +104,8 @@ export type InvitationActionResult = { ok: boolean; error?: string; message?: st
 const einladenSchema = z.object({
   email: z.string().email("Bitte eine gültige E-Mail-Adresse angeben."),
   roleType: z.string().min(1),
-  scopeLevel: z.enum(scopeLevelEnum.enumValues).optional(),
+  // ADR-024 contract: Eingabe-Ebene als TS-Union (kein DB-Enum), zu region_id aufgelöst.
+  scopeLevel: z.enum(SCOPE_INPUT_LEVELS).optional(),
   scopeCode: z.string().trim().max(100).optional().nullable(),
 });
 

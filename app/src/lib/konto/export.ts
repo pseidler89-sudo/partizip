@@ -48,8 +48,9 @@ export type ExportKonto = {
 
 export type ExportRolle = {
   roleType: string;
-  scopeLevel: string;
-  scopeCode: string | null;
+  // ADR-024 contract: Gebietsknoten der Rolle (region_id) statt scope_level/scope_code
+  // — konsistent mit home_region_id/residency_region_id in ExportKonto.
+  regionId: string;
   createdAt: string | null;
 };
 
@@ -138,8 +139,7 @@ export function buildExportDocument(input: {
     },
     rollen: input.rollen.map((r) => ({
       roleType: r.roleType,
-      scopeLevel: r.scopeLevel,
-      scopeCode: r.scopeCode ?? null,
+      regionId: r.regionId,
       createdAt: iso(r.createdAt),
     })),
     gefolgteAnliegen: input.follows.map((f) => ({

@@ -32,6 +32,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "node:path";
@@ -50,7 +51,7 @@ import {
 } from "@/lib/admin/invitation-core";
 import type { Db } from "@/db/client";
 
-const { tenants, users, roles, invitations, auditEvents } = schema;
+const { tenants, users, roles, invitations, auditEvents, regions } = schema;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(__dirname, "../../../../../db/migrations");
@@ -115,7 +116,7 @@ describe("Einladungs-Flow (Integration)", () => {
       tenantId,
       userId: inviterId,
       roleType: "kommune_admin",
-      scopeLevel: "stadt",
+      regionId: await resolveRegionIdForScope(db, tenantId, "stadt", null),
     });
   });
 
@@ -288,14 +289,17 @@ describe("Einladungs-Flow (Integration)", () => {
     expect(a1.ok).toBe(true);
     expect(a1.roleType).toBe("redakteur");
 
-    // Rolle mit korrektem Scope zugewiesen.
+    // Rolle mit korrektem Gebietsknoten zugewiesen (ADR-024: region_id aus der
+    // Einladung; die Einladung löste "ortsteil"/"OT-7" beim Einladen zum Baum-Knoten
+    // auf — Gebietsart 'ortsteil', Name = übergebener Code "OT-7").
     const roleRows = await db
-      .select({ roleType: roles.roleType, scopeLevel: roles.scopeLevel, scopeCode: roles.scopeCode })
+      .select({ roleType: roles.roleType, regionTyp: regions.typ, regionName: regions.name })
       .from(roles)
+      .innerJoin(regions, eq(regions.id, roles.regionId))
       .where(and(eq(roles.tenantId, tenantId), eq(roles.userId, account.id), eq(roles.roleType, "redakteur")));
     expect(roleRows.length).toBe(1);
-    expect(roleRows[0].scopeLevel).toBe("ortsteil");
-    expect(roleRows[0].scopeCode).toBe("OT-7");
+    expect(roleRows[0].regionTyp).toBe("ortsteil");
+    expect(roleRows[0].regionName).toBe("OT-7");
 
     // Zweiter Accept → schon angenommen, KEINE zweite Rollenzeile.
     const a2 = await einladungAnnehmenCore(db, tenantId, token, account);
@@ -399,7 +403,7 @@ describe("Einladungs-Flow (Integration)", () => {
     const demoteInviter = await createUser(demoteEmail);
     const [demoteRole] = await db
       .insert(roles)
-      .values({ tenantId, userId: demoteInviter.id, roleType: "kommune_admin", scopeLevel: "stadt" })
+      .values({ tenantId, userId: demoteInviter.id, roleType: "kommune_admin", regionId: await resolveRegionIdForScope(db as never, tenantId, "stadt", null) })
       .returning();
 
     const targetEmail = nextEmail("demote-target");

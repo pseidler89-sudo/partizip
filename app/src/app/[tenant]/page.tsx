@@ -32,7 +32,8 @@ import {
   type PollListItem,
   type PollMitErgebnis,
 } from "@/lib/polls/queries";
-import { gruppiereNachEbene, SCOPE_LABEL, type ScopeLevel } from "@/lib/polls/gruppierung";
+import { gruppiereNachEbene } from "@/lib/polls/gruppierung";
+import { REGION_TYP_LABEL, type RegionTyp } from "@/lib/region/ebenen";
 import type { PollErgebnis } from "@/lib/polls/ergebnis";
 import { REGION_COOKIE_NAME, parseRegionCookie } from "@/lib/region/core";
 import { getOrtsteileForTenant } from "@/lib/region/queries";
@@ -55,12 +56,14 @@ interface PageProps {
 }
 
 // Prosa-Variante für den Hero-Satz (NICHT die kanonischen Kurz-Labels aus
-// gruppierung.SCOPE_LABEL). Exhaustiv über ScopeLevel → kein hängender Fallback.
-const SCOPE_PHRASE: Record<ScopeLevel, string> = {
+// REGION_TYP_LABEL). Exhaustiv über die Gebietsart (regions.typ) → kein
+// hängender Fallback (ADR-024 contract).
+const SCOPE_PHRASE: Record<RegionTyp, string> = {
   ortsteil: "in Ihrem Ortsteil",
-  stadt: "in Ihrer Kommune",
+  gemeinde: "in Ihrer Kommune",
   kreis: "in Ihrem Kreis",
   land: "in Ihrem Land",
+  bund: "bundesweit",
 };
 
 function databaseUrl(): string {
@@ -120,7 +123,7 @@ function PollKarte({
       className="pz-card pz-card-hover block p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        <PollTypBadge verbindlich={poll.verbindlich} scope={SCOPE_LABEL[poll.scopeLevel]} />
+        <PollTypBadge verbindlich={poll.verbindlich} scope={REGION_TYP_LABEL[poll.regionTyp]} />
         {abgestimmt !== undefined && <PollStatusChip abgestimmt={abgestimmt} />}
       </div>
       <h4 className="mt-2 text-sm font-semibold" style={{ color: "var(--pz-ink)" }}>
@@ -321,7 +324,7 @@ export default async function TenantLandingPage({ params }: PageProps) {
             <div className="text-center">
               <PollTypBadge
                 verbindlich={featured.verbindlich}
-                scope={SCOPE_PHRASE[featured.scopeLevel]}
+                scope={SCOPE_PHRASE[featured.regionTyp]}
               />
               <h1
                 className="mx-auto mt-4 max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl"
@@ -394,7 +397,7 @@ export default async function TenantLandingPage({ params }: PageProps) {
           ) : (
             <div className="space-y-7">
               {gruppen.map((g) => (
-                <div key={g.level}>
+                <div key={g.typ}>
                   <h3
                     className="mb-2.5 text-xs font-semibold uppercase tracking-wide"
                     style={{ color: "var(--pz-muted)" }}

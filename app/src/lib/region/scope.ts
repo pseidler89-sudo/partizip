@@ -6,11 +6,11 @@
  * Queries und Skripte (analog polls/queries.ts, region/tree.ts).
  *
  * Zwei Aufgaben:
- *   1. DUAL-WRITE: `resolveRegionIdForScope` leitet aus (tenant, scope_level,
- *      scope_code) die region_id ab — dieselbe Logik wie der DB-Trigger und der
+ *   1. SCOPE→REGION_ID (ADR-024 contract): `resolveRegionIdForScope` leitet aus
+ *      (tenant, Eingabe-Ebene, Code) die region_id ab — dieselbe Logik wie der
  *      Migrations-Backfill (die SQL-Funktion regions_resolve_region_id ist die
- *      Single Source of Truth; hier nur der Aufruf). Der Server setzt region_id
- *      damit explizit ZUSÄTZLICH zu scope_level/scope_code.
+ *      Single Source of Truth; hier nur der Aufruf). Der Server setzt damit die
+ *      EINZIGE Gebietsquelle — scope_level/scope_code existieren nicht mehr.
  *   2. LESE-SICHT: `resolveOrtsteilRegionId` bildet den Ortsteil-Code eines
  *      anonymen Cookie-Lesers auf seinen Ortsteil-Knoten ab (viewer_path der
  *      Standard-Sicht); rein lesend, KEIN Provisioning.
@@ -19,9 +19,13 @@
 import { sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { regions } from "@/db/schema";
-import type { scopeLevelEnum } from "@/db/schema";
+import type { ScopeInputLevel } from "@/lib/region/ebenen";
 
-export type ScopeLevel = (typeof scopeLevelEnum.enumValues)[number];
+/**
+ * Composer-Eingabe-Ebene (ADR-024 contract): früher der DB-Enum scope_level, jetzt
+ * ein reiner TS-Union (@/lib/region/ebenen), serverseitig zu region_id aufgelöst.
+ */
+export type ScopeLevel = ScopeInputLevel;
 
 /**
  * Leitet die region_id für einen Scope ab (Dual-Write). Delegiert an die

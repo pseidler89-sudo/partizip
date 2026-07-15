@@ -15,7 +15,7 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { digests, sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { isAdmin as isAdminCheck, beobachterDarfSehen, getUserRolesMitScope } from "@/lib/auth/roles";
+import { isAdmin as isAdminCheck, beobachterDarfTenantweitSehen, getUserRolesMitScope } from "@/lib/auth/roles";
 import { getAdminKennzahlen, maskTeilnahme } from "@/lib/admin/kennzahlen";
 import Link from "next/link";
 
@@ -88,7 +88,7 @@ export default async function AdminDashboardPage({ params }: PageProps) {
   if (!isAdmin && !hatBeobachterRolle) redirect(`/${slugFromPath}/anmelden`);
 
   // Beobachter: Digest-Karte nur mit stadtweitem Scope (Digests sind stadtweit).
-  const zeigeDigestKarte = isAdmin || beobachterDarfSehen(roleRows, "stadt", null);
+  const zeigeDigestKarte = isAdmin || beobachterDarfTenantweitSehen(roleRows);
 
   // Anzahl Digest-Entwürfe (Status: entwurf)
   let digestEntwurfCount = 0;

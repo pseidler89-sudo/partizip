@@ -78,12 +78,10 @@ export const roleTypeEnum = pgEnum("role_type", [
   "beobachter",
 ]);
 
-export const scopeLevelEnum = pgEnum("scope_level", [
-  "ortsteil",
-  "stadt",
-  "kreis",
-  "land",
-]);
+// ADR-024 contract (GEBIETSMODELL §4 Schritt 4): der frühere Enum `scope_level`
+// (ortsteil|stadt|kreis|land) ist ENTFERNT. Die geografische Ebene eines Objekts
+// ergibt sich jetzt ausschließlich aus seinem Gebietsknoten (`regions.typ`/`path`);
+// die Composer-Eingabe-Ebene lebt als reiner TS-Union in @/lib/region/ebenen.
 
 // ADR-024 / GEBIETSMODELL §3.1: Gebietsart des Baum-Knotens (NICHT der Scope).
 // Bewusst erweiterbar (z. B. `regierungsbezirk`, `verbandsgemeinde`) — die
@@ -223,13 +221,11 @@ export const plzRegionen = pgTable(
 // ---------------------------------------------------------------------------
 // regions — hierarchischer Gebietsbaum (ADR-024, GEBIETSMODELL §3.1)
 //
-// ETAPPE 1 (ADDITIV): Diese Tabelle ist das neue Fundament (Single Source of
-// Truth im Zielbild). Sie ändert NICHTS am Laufzeitverhalten — polls/roles/
-// qr_codes/verification_locations tragen weiterhin scope_level/scope_code, und
-// die App liest unverändert darüber. `regions` wird hier nur angelegt, befüllt
-// und rückwärtskompatibel aus den Bestandsdaten gespiegelt (Backfill im Seed
-// scripts/seed-regions.ts). Der Umbau der Leser (region_id-FKs, Enum-Contract)
-// ist Etappe 2.
+// Single Source of Truth (contract abgeschlossen): polls/roles/qr_codes/
+// verification_locations/invitations hängen ausschließlich über region_id am
+// Baum; scope_level/scope_code und der Enum scopeLevelEnum sind entfernt. Die
+// geografische Ebene eines Objekts ergibt sich aus regions.typ/path. Befüllt/
+// gespiegelt aus den Stammdaten via scripts/seed-regions.ts.
 //
 // Tenant-FREI: Bund → Land → Kreis → Gemeinde existieren global genau einmal.
 // tenant_id ist nur operativer Betreuungs-Marker (Branding/Betrieb), NICHT die
@@ -425,24 +421,21 @@ export const roles = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     roleType: roleTypeEnum("role_type").notNull(),
-    scopeLevel: scopeLevelEnum("scope_level").notNull(),
-    scopeCode: text("scope_code"),
-    // ADR-024 / GEBIETSMODELL §3.2 (ETAPPE 2): Gebietsknoten dieser Rolle.
-    // Dual-write neben scope_level/scope_code (Schatten bis zur contract-Etappe);
-    // der Server leitet region_id aus der Scope-Eingabe via Baum ab (BEFORE-INSERT-
-    // Trigger als Sicherheitsnetz). RESTRICT: referenzierter Knoten nicht löschbar.
-    // In Drizzle NULLABLE (wie regions.path): Inserts dürfen es weglassen, der
-    // Trigger füllt es; die Migration setzt NOT NULL auf DB-Ebene.
-    regionId: uuid("region_id").references(() => regions.id, { onDelete: "restrict" }),
+    // ADR-024 / GEBIETSMODELL §3.2: Gebietsknoten dieser Rolle (contract: einzige
+    // Ebenen-/Zuständigkeits-Quelle; scope_level/scope_code sind entfernt).
+    // RESTRICT: referenzierter Knoten nicht löschbar. NOT NULL (Migration 0024).
+    regionId: uuid("region_id")
+      .notNull()
+      .references(() => regions.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
     // M6: $onUpdate
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`).$onUpdate(() => new Date()),
   },
   (t) => [
-    // M1: NULLS NOT DISTINCT — NULL scope_code gilt als eindeutiger Wert im Constraint
-    unique("roles_tenant_user_role_scope_unique")
-      .on(t.tenantId, t.userId, t.roleType, t.scopeLevel, t.scopeCode)
-      .nullsNotDistinct(),
+    // ADR-024 contract: Eindeutigkeit jetzt am Gebietsknoten (region_id NOT NULL,
+    // daher kein nullsNotDistinct mehr nötig) statt an (scope_level, scope_code).
+    unique("roles_tenant_user_role_region_unique")
+      .on(t.tenantId, t.userId, t.roleType, t.regionId),
     index("idx_roles_region_id").on(t.regionId),
   ]
 );
@@ -464,12 +457,12 @@ export const verificationLocations = pgTable(
     hinweise: text("hinweise"),
     lat: numeric("lat"),
     lon: numeric("lon"),
-    // ADR-024 / GEBIETSMODELL §3.2 (ETAPPE 2): Gebietsknoten des Standorts.
-    // verification_locations trägt KEINEN scope_level — der Standort gehört zur
-    // Kommune, also leitet der Trigger region_id auf den Gemeinde-Knoten des
-    // Tenants ab. RESTRICT: referenzierter Knoten nicht löschbar.
-    // In Drizzle NULLABLE (wie regions.path): Inserts dürfen es weglassen, der
-    // Trigger füllt es; die Migration setzt NOT NULL auf DB-Ebene.
+    // ADR-024 / GEBIETSMODELL §3.2: Gebietsknoten des Standorts. verification_locations
+    // trug nie einen scope_level — der Standort gehört zur Kommune, der BEFORE-INSERT-
+    // Trigger leitet region_id auf den Gemeinde-Knoten des Tenants ab (Sicherheitsnetz
+    // für Seeds/direkte Inserts). RESTRICT: Knoten nicht löschbar.
+    // In Drizzle NULLABLE (Inserts dürfen es weglassen → Trigger füllt es); die DB
+    // erzwingt NOT NULL (Migration 0024).
     regionId: uuid("region_id").references(() => regions.id, { onDelete: "restrict" }),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
@@ -763,8 +756,12 @@ export const invitations = pgTable(
     // Immer normalisiert (trim + lowercase) gespeichert.
     email: text("email").notNull(),
     roleType: roleTypeEnum("role_type").notNull(),
-    scopeLevel: scopeLevelEnum("scope_level").notNull(),
-    scopeCode: text("scope_code"),
+    // ADR-024 contract: die Einladung ist eine aufgeschobene Rolle und trägt daher
+    // — wie roles — den Gebietsknoten (scope_level/scope_code sind entfernt). Beim
+    // Annehmen wird region_id 1:1 auf die erzeugte Rolle übernommen. NOT NULL.
+    regionId: uuid("region_id")
+      .notNull()
+      .references(() => regions.id, { onDelete: "restrict" }),
     // SHA-256-Hex des Roh-Tokens — Roh-Token verlässt nie den Server.
     tokenHash: text("token_hash").notNull().unique(),
     status: invitationStatusEnum("status").notNull().default("pending"),
@@ -791,6 +788,7 @@ export const invitations = pgTable(
     index("idx_invitations_tenant_id").on(t.tenantId),
     // Retention/Cleanup abgelaufener Einladungen.
     index("idx_invitations_expires_at").on(t.expiresAt),
+    index("idx_invitations_region_id").on(t.regionId),
   ]
 );
 
@@ -1061,17 +1059,12 @@ export const polls = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
-    // Geografische Ebene der Frage (bestehender scope_level-Enum wiederverwendet)
-    scopeLevel: scopeLevelEnum("scope_level").notNull(),
-    // Optionaler Scope-Code (z. B. Ortsteil-Code) — analog roles.scope_code
-    scopeCode: text("scope_code"),
-    // ADR-024 / GEBIETSMODELL §3.2 (ETAPPE 2): Gebietsknoten dieser Umfrage.
-    // Dual-write neben scope_level/scope_code (Schatten bis zur contract-Etappe);
-    // der Server leitet region_id aus der Scope-Eingabe via Baum ab (BEFORE-INSERT-
-    // Trigger als Sicherheitsnetz). RESTRICT: referenzierter Knoten nicht löschbar.
-    // In Drizzle NULLABLE (wie regions.path): Inserts dürfen es weglassen, der
-    // Trigger füllt es; die Migration setzt NOT NULL auf DB-Ebene.
-    regionId: uuid("region_id").references(() => regions.id, { onDelete: "restrict" }),
+    // ADR-024 / GEBIETSMODELL §3.2: Gebietsknoten dieser Umfrage (contract: einzige
+    // Ebenen-Quelle; scope_level/scope_code sind entfernt). Die geografische Ebene
+    // ergibt sich aus regions.typ/path. RESTRICT: Knoten nicht löschbar. NOT NULL.
+    regionId: uuid("region_id")
+      .notNull()
+      .references(() => regions.id, { onDelete: "restrict" }),
     frage: text("frage").notNull(),
     typ: pollTypeEnum("typ").notNull().default("ja_nein_enthaltung"),
     status: pollStatusEnum("status").notNull().default("entwurf"),
@@ -1203,17 +1196,12 @@ export const qrCodes = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
-    // Geografische Ebene der Verifizierung (bestehender scope_level-Enum)
-    scopeLevel: scopeLevelEnum("scope_level").notNull(),
-    // Optionaler Scope-Code (z. B. Ortsteil-Code) — analog roles.scope_code
-    scopeCode: text("scope_code"),
-    // ADR-024 / GEBIETSMODELL §3.2 (ETAPPE 2): Gebietsknoten dieses QR-Codes.
-    // Dual-write neben scope_level/scope_code (Schatten bis zur contract-Etappe);
-    // der Server leitet region_id aus der Scope-Eingabe via Baum ab (BEFORE-INSERT-
-    // Trigger als Sicherheitsnetz). RESTRICT: referenzierter Knoten nicht löschbar.
-    // In Drizzle NULLABLE (wie regions.path): Inserts dürfen es weglassen, der
-    // Trigger füllt es; die Migration setzt NOT NULL auf DB-Ebene.
-    regionId: uuid("region_id").references(() => regions.id, { onDelete: "restrict" }),
+    // ADR-024 / GEBIETSMODELL §3.2: Gebietsknoten dieses QR-Codes (contract: einzige
+    // Ebenen-Quelle; scope_level/scope_code sind entfernt). Die geografische Ebene
+    // ergibt sich aus regions.typ/path. RESTRICT: Knoten nicht löschbar. NOT NULL.
+    regionId: uuid("region_id")
+      .notNull()
+      .references(() => regions.id, { onDelete: "restrict" }),
     // SHA-256-Hex des Roh-Tokens — Roh-Token verlässt nie Server-Gedächtnis,
     // steht NUR im QR-URL. UNIQUE für O(1)-Lookup beim Einlösen.
     tokenHash: text("token_hash").notNull().unique(),

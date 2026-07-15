@@ -31,8 +31,8 @@ import {
   polls,
   votes,
   auditEvents,
-  scopeLevelEnum,
 } from "@/db/schema";
+import { SCOPE_INPUT_LEVELS } from "@/lib/region/ebenen";
 import { hashIp } from "@/lib/auth/crypto";
 import { getStufe } from "@/lib/eligibility/stufe";
 import {
@@ -256,7 +256,9 @@ export async function abstimmen(
 
 const pollErstellenSchema = z.object({
   frage: z.string().trim().min(5, "Die Frage ist zu kurz.").max(500, "Die Frage ist zu lang."),
-  scopeLevel: z.enum(scopeLevelEnum.enumValues),
+  // ADR-024 contract: Composer-Eingabe-Ebene als TS-Union (kein DB-Enum mehr),
+  // serverseitig zu region_id aufgelöst.
+  scopeLevel: z.enum(SCOPE_INPUT_LEVELS),
   scopeCode: z.string().trim().max(100).optional().nullable(),
   verbindlich: z.boolean().optional(),
   closesAt: z.coerce.date().optional().nullable(),
@@ -276,9 +278,9 @@ export async function pollErstellen(
   }
   const { frage, scopeLevel, scopeCode, verbindlich, closesAt } = parsed.data;
 
-  // ADR-024 (ETAPPE 2) DUAL-WRITE: region_id aus der Scope-Eingabe via Baum ableiten
-  // und ZUSÄTZLICH zu scope_level/scope_code setzen (Composer-UI liefert weiter nur
-  // den Scope). Kein Gebiet hinterlegt → freundlicher Fehler statt DB-Exception.
+  // ADR-024 contract: die Composer-Scope-Eingabe wird via Baum zu region_id
+  // aufgelöst — der EINZIGE geschriebene Gebietsbezug (scope_level/scope_code sind
+  // entfernt). Kein Gebiet hinterlegt → freundlicher Fehler statt DB-Exception.
   let regionId: string;
   try {
     regionId = await resolveRegionIdForScope(ctx.db, ctx.tenant.id, scopeLevel, scopeCode ?? null);
@@ -291,8 +293,6 @@ export async function pollErstellen(
       .insert(polls)
       .values({
         tenantId: ctx.tenant.id,
-        scopeLevel,
-        scopeCode: scopeCode ?? null,
         regionId,
         frage,
         typ: "ja_nein_enthaltung",
@@ -348,8 +348,7 @@ export async function pollAktivieren(
       .returning({
         id: polls.id,
         frage: polls.frage,
-        scopeLevel: polls.scopeLevel,
-        scopeCode: polls.scopeCode,
+        regionId: polls.regionId,
       });
 
     if (updated.length === 0) {

@@ -17,6 +17,7 @@ import Image from "next/image";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { qrErstellen, qrWiderrufen } from "@/lib/verification/qr-actions";
+import { regionTypLabel } from "@/lib/region/ebenen";
 
 const SCOPE_LEVELS = ["ortsteil", "stadt", "kreis", "land"] as const;
 type ScopeLevel = (typeof SCOPE_LEVELS)[number];
@@ -42,8 +43,9 @@ const SCOPE_HELP: Record<ScopeLevel, string> = {
 interface QrListItem {
   id: string;
   label: string | null;
-  scopeLevel: string;
-  scopeCode: string | null;
+  // ADR-024: Gebietsart + Name des QR-Knotens (statt scope_level/scope_code).
+  regionTyp: string;
+  regionName: string;
   redemptionCount: number;
   maxRedemptions: number;
   expiresAt: string;
@@ -353,8 +355,8 @@ export function QrVerwaltung({ liste }: Props) {
                         {q.label || "(ohne Bezeichnung)"}
                       </p>
                       <p className="mt-0.5 text-xs" style={{ color: "var(--pz-muted)" }}>
-                        {SCOPE_LABELS[q.scopeLevel as ScopeLevel] ?? q.scopeLevel}
-                        {q.scopeCode ? ` · ${q.scopeCode}` : ""} · {q.redemptionCount}/
+                        {regionTypLabel(q.regionTyp)}
+                        {q.regionTyp === "ortsteil" ? ` · ${q.regionName}` : ""} · {q.redemptionCount}/
                         {q.maxRedemptions} eingelöst · gültig bis {formatDate(q.expiresAt)}
                       </p>
                     </div>

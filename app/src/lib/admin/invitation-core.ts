@@ -35,7 +35,7 @@
 
 import { and, eq, desc, gt, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { invitations, roles, users, auditEvents } from "@/db/schema";
+import { invitations, roles, users, auditEvents, regions } from "@/db/schema";
 import {
   canManageRole,
   isAdmin,
@@ -122,6 +122,17 @@ export async function einladenCore(
     return { ok: false, error: "Ungültige Ebene (scope_level)." };
   }
 
+  // ADR-024 contract: die Einladung ist eine aufgeschobene Rolle und trägt den
+  // Gebietsknoten (region_id) statt scope_level/scope_code. Die Scope-Eingabe wird
+  // schon beim Einladen via Baum aufgelöst; beim Annehmen wird sie 1:1 auf die
+  // Rolle übernommen. Kein Gebiet hinterlegt → freundlicher Fehler.
+  let regionId: string;
+  try {
+    regionId = await resolveRegionIdForScope(db, tenantId, scopeLevel, scopeCode);
+  } catch {
+    return { ok: false, error: "Für die gewählte Ebene ist noch kein Gebiet hinterlegt." };
+  }
+
   const rawToken = generateRawToken();
   const tokenHash = sha256Hex(rawToken);
   const expiresAt = expiresInDays(INVITATION_TTL_DAYS);
@@ -157,8 +168,7 @@ export async function einladenCore(
         .update(invitations)
         .set({
           roleType: roleType as RoleType,
-          scopeLevel,
-          scopeCode,
+          regionId,
           tokenHash,
           expiresAt,
           resentBy: callerUserId,
@@ -193,8 +203,7 @@ export async function einladenCore(
         tenantId,
         email,
         roleType: roleType as RoleType,
-        scopeLevel,
-        scopeCode,
+        regionId,
         tokenHash,
         invitedBy: callerUserId,
         expiresAt,
@@ -388,8 +397,6 @@ export interface InvitationCheck {
   status: InvitationStatus;
   /** Nur bei status='valid' gesetzt (für Anzeige/Bindungsprüfung der Seite). */
   roleType?: string;
-  scopeLevel?: string;
-  scopeCode?: string | null;
   email?: string;
 }
 
@@ -403,8 +410,6 @@ export async function getInvitationStatus(
     .select({
       status: invitations.status,
       roleType: invitations.roleType,
-      scopeLevel: invitations.scopeLevel,
-      scopeCode: invitations.scopeCode,
       email: invitations.email,
       expiresAt: invitations.expiresAt,
     })
@@ -419,8 +424,6 @@ export async function getInvitationStatus(
   return {
     status: "valid",
     roleType: inv.roleType,
-    scopeLevel: inv.scopeLevel,
-    scopeCode: inv.scopeCode,
     email: inv.email,
   };
 }
@@ -441,7 +444,6 @@ export type AnnehmenReason =
 export interface AnnehmenResult {
   ok: boolean;
   roleType?: string;
-  scopeLevel?: string;
   reason?: AnnehmenReason;
   error?: string;
 }
@@ -505,8 +507,7 @@ export async function einladungAnnehmenCore(
           id: invitations.id,
           email: invitations.email,
           roleType: invitations.roleType,
-          scopeLevel: invitations.scopeLevel,
-          scopeCode: invitations.scopeCode,
+          regionId: invitations.regionId,
           invitedBy: invitations.invitedBy,
         });
       const inv = flipped[0];
@@ -552,17 +553,15 @@ export async function einladungAnnehmenCore(
       }
 
       // 4. Rolle an das authentifizierte Konto vergeben (idempotent) + Audit.
-      // ADR-024 (ETAPPE 2) DUAL-WRITE: region_id aus dem Scope via Baum ableiten.
-      const regionId = await resolveRegionIdForScope(tx, tenantId, inv.scopeLevel, inv.scopeCode);
+      // ADR-024 contract: der Gebietsknoten der Einladung (schon beim Einladen via
+      // Baum aufgelöst) wird 1:1 auf die Rolle übernommen.
       const inserted = await tx
         .insert(roles)
         .values({
           tenantId,
           userId: accepter.id,
           roleType: inv.roleType as RoleType,
-          scopeLevel: inv.scopeLevel,
-          scopeCode: inv.scopeCode,
-          regionId,
+          regionId: inv.regionId,
         })
         .onConflictDoNothing()
         .returning({ id: roles.id });
@@ -576,7 +575,7 @@ export async function einladungAnnehmenCore(
           action: "role.granted",
           targetType: "user",
           targetId: accepter.id,
-          metadata: { roleType: inv.roleType, scopeLevel: inv.scopeLevel, via: "invitation" },
+          metadata: { roleType: inv.roleType, via: "invitation" },
         });
       }
 
@@ -587,13 +586,12 @@ export async function einladungAnnehmenCore(
         action: "invitation.accepted",
         targetType: "invitation",
         targetId: inv.id,
-        metadata: { roleType: inv.roleType, scopeLevel: inv.scopeLevel },
+        metadata: { roleType: inv.roleType },
       });
 
       return {
         ok: true as const,
         roleType: inv.roleType,
-        scopeLevel: inv.scopeLevel,
       };
     });
   } catch (err) {
@@ -631,8 +629,10 @@ export interface EinladungRow {
   id: string;
   email: string;
   roleType: string;
-  scopeLevel: string;
-  scopeCode: string | null;
+  /** Gebietsart des Rollen-Knotens (regions.typ) — Ebenen-Label für die UI. */
+  regionTyp: string;
+  /** Name des Rollen-Knotens (z. B. Ortsteil-/Gemeinde-Name) für die Anzeige. */
+  regionName: string;
   status: string;
   resendCount: number;
   expiresAt: Date;
@@ -653,14 +653,15 @@ export async function einladungenListeCore(
       id: invitations.id,
       email: invitations.email,
       roleType: invitations.roleType,
-      scopeLevel: invitations.scopeLevel,
-      scopeCode: invitations.scopeCode,
+      regionTyp: regions.typ,
+      regionName: regions.name,
       status: invitations.status,
       resendCount: invitations.resendCount,
       expiresAt: invitations.expiresAt,
       createdAt: invitations.createdAt,
     })
     .from(invitations)
+    .innerJoin(regions, eq(regions.id, invitations.regionId))
     .where(eq(invitations.tenantId, tenantId))
     .orderBy(desc(invitations.createdAt));
   return rows as EinladungRow[];

@@ -12,8 +12,8 @@
  * Ein User kann mehrere Rollen haben; geprüft wird per Schnittmenge.
  */
 
-import { and, eq } from "drizzle-orm";
-import { roles, users } from "@/db/schema";
+import { and, eq, sql } from "drizzle-orm";
+import { roles, users, regions } from "@/db/schema";
 import type { Db } from "@/db/client";
 
 export const REDAKTION_ROLES = ["redakteur", "kommune_admin", "super_admin"] as const;
@@ -103,60 +103,66 @@ export function canBeobachten(roleTypes: string[]): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Scope-Sichtbarkeit für die View-Only-Rolle `beobachter`
+// Gebiets-Sichtbarkeit für die View-Only-Rolle `beobachter` (ADR-024)
 // ---------------------------------------------------------------------------
 
-/** Rollenzeile mit Scope — Eingabe für die Scope-Sichtbarkeits-Prüfung. */
+/**
+ * Rollenzeile mit Gebietsknoten — Eingabe für die Sichtbarkeits-Prüfung. Statt
+ * scope_level/scope_code (entfernt) trägt sie jetzt die Gebietsart (regions.typ)
+ * und den ltree-Pfad (regions.path) des Rollen-Knotens.
+ */
 export interface RoleScopeRow {
   roleType: string;
-  scopeLevel: string;
-  scopeCode: string | null;
+  regionTyp: string;
+  regionPath: string;
 }
 
-/** Hierarchie der Scope-Ebenen: höherer Rang deckt niedrigere Ebenen ab. */
-const SCOPE_RANG: Record<string, number> = {
-  ortsteil: 0,
-  stadt: 1,
-  kreis: 2,
-  land: 3,
-};
+/**
+ * Deckt der Vorfahr-(oder-Selbst-)Knoten `anc` den Knoten `node` ab? ltree-`@>`
+ * in JS: gleicher Pfad ODER `node` liegt echt unterhalb (`anc.` als Präfix).
+ */
+function pfadDecktAb(anc: string, node: string): boolean {
+  return node === anc || node.startsWith(anc + ".");
+}
 
 /**
- * Sieht ein `beobachter` mit diesen Rollen ein Objekt im Scope
- * (objScopeLevel, objScopeCode)? REINE Funktion, fail-closed:
+ * Sieht ein `beobachter` mit diesen Rollen ein Objekt am Knoten `objPath`?
+ * REINE Funktion, fail-closed:
  *
  *   - Betrachtet werden AUSSCHLIESSLICH `beobachter`-Rollen — Admin-/
  *     Redaktions-Sichtbarkeit läuft weiterhin über die bestehenden Achsen.
- *   - Höherer Scope deckt niedrigere ab (stadt-Beobachter sieht auch
- *     Ortsteil-Objekte des Tenants).
- *   - Gleiche Ebene: scopeCode muss übereinstimmen; eine Rolle mit
- *     scopeCode NULL deckt die ganze Ebene ab.
- *   - Niedrigerer Scope sieht NICHTS auf höherer Ebene (ein Ortsteil-
- *     Beobachter sieht keine stadtweiten Objekte) und unbekannte Ebenen
- *     sind nie sichtbar.
+ *   - Ein Beobachter-Knoten deckt sein eigenes Gebiet UND alle Nachfahren ab
+ *     (Kreis-Beobachter sieht Gemeinde-/Ortsteil-Objekte); Vorfahr-oder-Selbst
+ *     im ltree-Sinn (`beobachter.path @> obj.path`). Das ersetzt strukturell die
+ *     alte „höherer Scope deckt niedrigere ab"-Rang-Logik — inkl. korrektem
+ *     Ortsteil-Verhalten (ein Ortsteil-Beobachter sieht nur SEINEN Ortsteil,
+ *     keine Nachbarorte, keine stadtweiten Objekte).
  */
 export function beobachterDarfSehen(
   rollen: RoleScopeRow[],
-  objScopeLevel: string,
-  objScopeCode: string | null,
+  objPath: string,
 ): boolean {
-  const objRang = SCOPE_RANG[objScopeLevel];
-  if (objRang === undefined) return false;
-
-  return rollen.some((r) => {
-    if (r.roleType !== "beobachter") return false;
-    const rollenRang = SCOPE_RANG[r.scopeLevel];
-    if (rollenRang === undefined) return false;
-    if (rollenRang > objRang) return true;
-    if (rollenRang === objRang) {
-      return r.scopeCode === null || r.scopeCode === objScopeCode;
-    }
-    return false;
-  });
+  return rollen.some(
+    (r) => r.roleType === "beobachter" && pfadDecktAb(r.regionPath, objPath),
+  );
 }
 
 /**
- * Lädt die Rollen eines aktiven Users MIT Scope (für die Beobachter-
+ * Sieht ein `beobachter` die tenant-weiten (Gemeinde-Ebene) Objekte — z. B.
+ * Digest-Entwürfe? Das ist genau dann der Fall, wenn er einen Beobachter-Knoten
+ * ab Gemeinde-Ebene aufwärts hat (Gebietsart != ortsteil): innerhalb eines
+ * Tenants liegen alle Beobachter-Knoten auf dessen vertikalem Pfad, also deckt
+ * jeder Nicht-Ortsteil-Knoten den Gemeinde-Knoten ab. Ein reiner Ortsteil-
+ * Beobachter sieht keine tenant-weiten Objekte (fail-closed).
+ */
+export function beobachterDarfTenantweitSehen(rollen: RoleScopeRow[]): boolean {
+  return rollen.some(
+    (r) => r.roleType === "beobachter" && r.regionTyp !== "ortsteil",
+  );
+}
+
+/**
+ * Lädt die Rollen eines aktiven Users MIT Gebietsknoten (für die Beobachter-
  * Sichtbarkeit). Gleiche Eskalationsgrenze wie getUserRoleTypes:
  * gesperrte/gelöschte Konten erhalten [] (innerer JOIN auf users.active).
  */
@@ -168,11 +174,12 @@ export async function getUserRolesMitScope(
   const rows = await db
     .select({
       roleType: roles.roleType,
-      scopeLevel: roles.scopeLevel,
-      scopeCode: roles.scopeCode,
+      regionTyp: regions.typ,
+      regionPath: sql<string>`${regions.path}::text`,
     })
     .from(roles)
     .innerJoin(users, eq(users.id, roles.userId))
+    .innerJoin(regions, eq(regions.id, roles.regionId))
     .where(
       and(
         eq(roles.tenantId, tenantId),

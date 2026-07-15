@@ -127,8 +127,8 @@ function serializeListe(
   return liste.map((q) => ({
     id: q.id,
     label: q.label,
-    scopeLevel: q.scopeLevel,
-    scopeCode: q.scopeCode,
+    regionTyp: q.regionTyp,
+    regionName: q.regionName,
     redemptionCount: q.redemptionCount,
     maxRedemptions: q.maxRedemptions,
     expiresAt: q.expiresAt.toISOString(),

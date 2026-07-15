@@ -41,7 +41,7 @@ function readSeed<T>(file: string): T {
 }
 
 // Deterministische UUID v5: geteilter Helfer (scripts/seed-utils.ts).
-import { SEED_NAMESPACE, uuidV5 } from "./seed-utils.js";
+import { SEED_NAMESPACE, uuidV5, resolveRegionId } from "./seed-utils.js";
 import { seedRegions } from "./seed-regions.js";
 
 // ---------------------------------------------------------------------------
@@ -389,13 +389,14 @@ async function main() {
     if (!tenantId) throw new Error(`Unknown tenant slug: ${p.tenantSlug}`);
 
     const pollId = uuidV5(SEED_NAMESPACE, `poll:${p.seedKey}`);
+    // ADR-024 contract: Scope-Eingabe → region_id (Trigger ist im contract entfernt).
+    const regionId = await resolveRegionId(db, tenantId, p.scopeLevel, p.scopeCode ?? null);
     await db
       .insert(polls)
       .values({
         id: pollId,
         tenantId,
-        scopeLevel: p.scopeLevel,
-        scopeCode: p.scopeCode ?? null,
+        regionId,
         frage: p.frage,
         typ: "ja_nein_enthaltung",
         status: "aktiv",

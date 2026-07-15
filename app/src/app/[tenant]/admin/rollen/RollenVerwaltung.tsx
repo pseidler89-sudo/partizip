@@ -15,6 +15,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { assignRole, revokeRole } from "@/lib/admin/actions";
+import { regionTypLabel } from "@/lib/region/ebenen";
 
 const ROLE_LABELS: Record<string, string> = {
   user: "Bürger:in",
@@ -34,8 +35,9 @@ type ScopeLevel = (typeof SCOPE_LEVELS)[number];
 interface RoleEntry {
   roleId: string;
   roleType: string;
-  scopeLevel: string;
-  scopeCode: string | null;
+  // ADR-024: Gebietsart + Name des Rollen-Knotens (statt scope_level/scope_code).
+  regionTyp: string;
+  regionName: string;
 }
 
 interface TenantUser {
@@ -218,8 +220,8 @@ export function RollenVerwaltung({ users, erlaubteRollen }: Props) {
                         <span className="text-sm text-zinc-700">
                           <span className="font-medium">{ROLE_LABELS[r.roleType] ?? r.roleType}</span>
                           <span className="text-zinc-400">
-                            {" "}· {r.scopeLevel}
-                            {r.scopeCode ? ` (${r.scopeCode})` : ""}
+                            {" "}· {regionTypLabel(r.regionTyp)}
+                            {r.regionTyp === "ortsteil" ? ` (${r.regionName})` : ""}
                           </span>
                         </span>
                         {darfEntziehen ? (

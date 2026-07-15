@@ -19,7 +19,7 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { digests, digestStatements, sessions, risDocuments } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { canRedaktion, canFreigeben, beobachterDarfSehen, getUserRolesMitScope } from "@/lib/auth/roles";
+import { canRedaktion, canFreigeben, beobachterDarfTenantweitSehen, getUserRolesMitScope } from "@/lib/auth/roles";
 import { hatDigestRedigiert, isSelfApprovalAllowed } from "@/lib/digest/freigabe-core";
 import Link from "next/link";
 import { DigestActionButtons } from "./DigestActionButtons";
@@ -63,7 +63,7 @@ async function getDigestData(tenantSlug: string, digestId: string) {
   // Rollen-Governance: `beobachter` (stadtweiter Scope — Digests sind stadtweit)
   // sieht Entwürfe READ-ONLY; alle Mutationen bleiben serverseitig gesperrt.
   const kannRedigieren = canRedaktion(roleTypes);
-  const istBeobachter = beobachterDarfSehen(roleRows, "stadt", null);
+  const istBeobachter = beobachterDarfTenantweitSehen(roleRows);
   if (!kannRedigieren && !istBeobachter) {
     return { tenant, digest: null, isAdmin: false, canFreigeben: false };
   }

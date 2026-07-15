@@ -35,10 +35,12 @@ import {
   canBeobachten,
   canManageRole,
   beobachterDarfSehen,
+  beobachterDarfTenantweitSehen,
   ALL_ROLE_TYPES,
 } from "../roles";
 import { assignRoleCore, revokeRoleCore } from "@/lib/admin/role-actions.js";
 import { getAllPollsForAdmin } from "@/lib/polls/queries";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 
 const { tenants, users, roles, polls, auditEvents } = schema;
 
@@ -102,11 +104,19 @@ describe("beobachter — View-Only-Rolle (Integration)", () => {
       .values({ tenantId, email: nextEmail("admin") })
       .returning();
     kommuneAdminId = admin.id;
+    // ADR-024 contract: direkte Fach-Inserts setzen region_id explizit (der
+    // frühere Dual-Write-Trigger für roles/polls ist im contract entfernt). Die
+    // Scope→region_id-Auflösung provisioniert die Baumknoten im Test (GUC an).
+    const stadtRegion = await resolveRegionIdForScope(db, tenantId, "stadt", null);
+    const nordRegion = await resolveRegionIdForScope(db, tenantId, "ortsteil", "nord");
+    const suedRegion = await resolveRegionIdForScope(db, tenantId, "ortsteil", "sued");
+    const stadtRegionT2 = await resolveRegionIdForScope(db, tenant2Id, "stadt", null);
+
     await db.insert(roles).values({
       tenantId,
       userId: kommuneAdminId,
       roleType: "kommune_admin",
-      scopeLevel: "stadt",
+      regionId: stadtRegion,
     });
 
     beobachterStadtEmail = nextEmail("beob-stadt");
@@ -125,17 +135,16 @@ describe("beobachter — View-Only-Rolle (Integration)", () => {
       tenantId,
       userId: beobachterNordId,
       roleType: "beobachter",
-      scopeLevel: "ortsteil",
-      scopeCode: "nord",
+      regionId: nordRegion,
     });
 
     // Abstimmungen: stadtweit + ortsteil nord + ortsteil sued (Tenant 1),
     // stadtweit (Tenant 2 — Isolation).
     await db.insert(polls).values([
-      { tenantId, scopeLevel: "stadt", scopeCode: null, frage: "Stadtweite Frage?", status: "aktiv" },
-      { tenantId, scopeLevel: "ortsteil", scopeCode: "nord", frage: "Nord-Frage?", status: "aktiv" },
-      { tenantId, scopeLevel: "ortsteil", scopeCode: "sued", frage: "Sued-Frage?", status: "entwurf" },
-      { tenantId: tenant2Id, scopeLevel: "stadt", scopeCode: null, frage: "Fremder Tenant?", status: "aktiv" },
+      { tenantId, regionId: stadtRegion, frage: "Stadtweite Frage?", status: "aktiv" },
+      { tenantId, regionId: nordRegion, frage: "Nord-Frage?", status: "aktiv" },
+      { tenantId, regionId: suedRegion, frage: "Sued-Frage?", status: "entwurf" },
+      { tenantId: tenant2Id, regionId: stadtRegionT2, frage: "Fremder Tenant?", status: "aktiv" },
     ]);
   });
 
@@ -237,7 +246,7 @@ describe("beobachter — View-Only-Rolle (Integration)", () => {
   it.skipIf(SKIP)("4. stadt-Beobachter sieht alle Abstimmungen des Tenants (inkl. Entwürfe)", async () => {
     const rollen = await getUserRolesMitScope(db, tenantId, beobachterStadtId);
     const alle = await getAllPollsForAdmin(db, tenantId);
-    const sichtbar = alle.filter((p) => beobachterDarfSehen(rollen, p.scopeLevel, p.scopeCode));
+    const sichtbar = alle.filter((p) => beobachterDarfSehen(rollen, p.regionPath));
 
     const fragen = sichtbar.map((p) => p.frage).sort();
     expect(fragen).toEqual(["Nord-Frage?", "Sued-Frage?", "Stadtweite Frage?"].sort());
@@ -248,21 +257,21 @@ describe("beobachter — View-Only-Rolle (Integration)", () => {
   it.skipIf(SKIP)("4b. ortsteil-Beobachter sieht NUR den eigenen Ortsteil — außerhalb nichts", async () => {
     const rollen = await getUserRolesMitScope(db, tenantId, beobachterNordId);
     const alle = await getAllPollsForAdmin(db, tenantId);
-    const sichtbar = alle.filter((p) => beobachterDarfSehen(rollen, p.scopeLevel, p.scopeCode));
+    const sichtbar = alle.filter((p) => beobachterDarfSehen(rollen, p.regionPath));
 
     expect(sichtbar.map((p) => p.frage)).toEqual(["Nord-Frage?"]);
     // Insbesondere: KEINE stadtweiten und KEINE fremden Ortsteil-Umfragen.
     expect(sichtbar.some((p) => p.frage === "Stadtweite Frage?")).toBe(false);
     expect(sichtbar.some((p) => p.frage === "Sued-Frage?")).toBe(false);
     // Digest-Sicht (Digests sind stadtweit): ortsteil-Beobachter → false.
-    expect(beobachterDarfSehen(rollen, "stadt", null)).toBe(false);
+    expect(beobachterDarfTenantweitSehen(rollen)).toBe(false);
   });
 
   it.skipIf(SKIP)("5. Tenant-Isolation: im fremden Tenant keine Rollen, keine Sicht", async () => {
     const rollenImFremdenTenant = await getUserRolesMitScope(db, tenant2Id, beobachterStadtId);
     expect(rollenImFremdenTenant).toEqual([]);
     expect(await getUserRoleTypes(db, tenant2Id, beobachterStadtId)).toEqual([]);
-    expect(beobachterDarfSehen(rollenImFremdenTenant, "stadt", null)).toBe(false);
+    expect(beobachterDarfTenantweitSehen(rollenImFremdenTenant)).toBe(false);
   });
 
   it.skipIf(SKIP)("6. Gesperrtes Konto verliert die Beobachter-Sicht sofort (fail-closed)", async () => {

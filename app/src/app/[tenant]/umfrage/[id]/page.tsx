@@ -16,13 +16,13 @@ import Link from "next/link";
 import { and, eq } from "drizzle-orm";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
-import { polls, sessions, users } from "@/db/schema";
+import { polls, sessions, users, regions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getPollErgebnis, hatBereitsAbgestimmt } from "@/lib/polls/queries";
 import { istBeendet } from "@/lib/polls/ergebnis";
 import { getStufe } from "@/lib/eligibility/stufe";
-import { SCOPE_LABEL, type ScopeLevel } from "@/lib/polls/gruppierung";
+import { regionTypLabel } from "@/lib/region/ebenen";
 import PollMitmachen from "../../PollMitmachen";
 import { TeilenButton } from "../../TeilenButton";
 import { PollTypBadge } from "../../PollTypBadge";
@@ -64,11 +64,12 @@ async function getPublicPoll(tenantSlug: string, pollId: string) {
       typ: polls.typ,
       status: polls.status,
       verbindlich: polls.verbindlich,
-      scopeLevel: polls.scopeLevel,
+      regionTyp: regions.typ,
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
     })
     .from(polls)
+    .innerJoin(regions, eq(regions.id, polls.regionId))
     .where(and(eq(polls.id, pollId), eq(polls.tenantId, tenant.id)))
     .limit(1);
 
@@ -96,7 +97,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const { poll } = data;
   const frage = kuerzen(poll.frage.trim(), 70);
   const beschreibung = `Stimmungsbild auf Partizip (Ebene: ${
-    SCOPE_LABEL[poll.scopeLevel as ScopeLevel]
+    regionTypLabel(poll.regionTyp)
   }). Ergebnis nach Abstimmungsende, mit Gesamt- und verifizierten Stimmen.`;
 
   return {
@@ -184,7 +185,7 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
       <div className="mt-3 mb-6">
         <PollTypBadge
           verbindlich={poll.verbindlich}
-          scope={SCOPE_LABEL[poll.scopeLevel as ScopeLevel]}
+          scope={regionTypLabel(poll.regionTyp)}
         />
         <h1 className="mt-3 text-2xl font-semibold" style={{ color: "var(--pz-ink)" }}>
           {poll.frage}

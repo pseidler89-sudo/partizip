@@ -18,6 +18,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "node:path";
@@ -105,10 +106,11 @@ describe("Digest-Freigabe — Separation of Duties (Integration, echte freigeben
     }).returning();
     redakteurId = redakteur.id;
 
+    const sodRegion = await resolveRegionIdForScope(db as never, tenantId, "stadt", null);
     await db.insert(roles).values([
-      { tenantId, userId: adminId, roleType: "kommune_admin", scopeLevel: "stadt" },
-      { tenantId, userId: zweiterAdminId, roleType: "kommune_admin", scopeLevel: "stadt" },
-      { tenantId, userId: redakteurId, roleType: "redakteur", scopeLevel: "stadt" },
+      { tenantId, userId: adminId, roleType: "kommune_admin", regionId: sodRegion },
+      { tenantId, userId: zweiterAdminId, roleType: "kommune_admin", regionId: sodRegion },
+      { tenantId, userId: redakteurId, roleType: "redakteur", regionId: sodRegion },
     ]);
 
     const [body] = await db.insert(risBodies).values({

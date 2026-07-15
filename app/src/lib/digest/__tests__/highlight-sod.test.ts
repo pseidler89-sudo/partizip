@@ -34,6 +34,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "node:path";
@@ -198,11 +199,12 @@ describe("Highlight-SoD — Spur nicht überschreibbar (Integration, echte Actio
     admin3Id = await mkUser("admin3");
     prueferId = await mkUser("pruefer");
 
+    const sodRegion = await resolveRegionIdForScope(db as never, tenantId, "stadt", null);
     await db.insert(roles).values([
-      { tenantId, userId: admin1Id, roleType: "kommune_admin", scopeLevel: "stadt" },
-      { tenantId, userId: admin2Id, roleType: "kommune_admin", scopeLevel: "stadt" },
-      { tenantId, userId: admin3Id, roleType: "kommune_admin", scopeLevel: "stadt" },
-      { tenantId, userId: prueferId, roleType: "redakteur", scopeLevel: "stadt" },
+      { tenantId, userId: admin1Id, roleType: "kommune_admin", regionId: sodRegion },
+      { tenantId, userId: admin2Id, roleType: "kommune_admin", regionId: sodRegion },
+      { tenantId, userId: admin3Id, roleType: "kommune_admin", regionId: sodRegion },
+      { tenantId, userId: prueferId, roleType: "redakteur", regionId: sodRegion },
     ]);
 
     const [body] = await db.insert(risBodies).values({

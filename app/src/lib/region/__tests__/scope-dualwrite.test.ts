@@ -106,17 +106,19 @@ describe("region/scope Dual-Write (Integration)", () => {
     expect(wehenRead).toBe(wehen);
   });
 
-  it.skipIf(SKIP)("Trigger füllt region_id bei direktem Insert konsistent zum Resolver", async () => {
-    const erwartet = await resolveRegionIdForScope(db as never, tenantId, "ortsteil", "wehen");
-    // Direkter Insert OHNE region_id → Trigger leitet ab.
-    const [p] = await db
-      .insert(schema.polls)
-      .values({ tenantId, scopeLevel: "ortsteil", scopeCode: "wehen", frage: "Trigger?", typ: "ja_nein_enthaltung", status: "entwurf" })
-      .returning();
-    expect(p.regionId).toBe(erwartet);
+  it.skipIf(SKIP)("CONTRACT: direkter Poll-Insert OHNE region_id wird abgelehnt (NOT NULL, kein Trigger mehr)", async () => {
+    // ADR-024 contract: der frühere Dual-Write-Trigger für polls/roles/qr ist
+    // entfernt. region_id ist NOT NULL und muss vom Schreibpfad explizit gesetzt
+    // werden — ein direkter Insert ohne region_id schlägt hart fehl (kein stilles
+    // Default). Das ist die Invariante, die einen vergessenen Setter sofort aufdeckt.
+    await expect(
+      db
+        .insert(schema.polls)
+        .values({ tenantId, frage: "Ohne Region?", typ: "ja_nein_enthaltung", status: "entwurf" } as never)
+    ).rejects.toThrow();
   });
 
-  it.skipIf(SKIP)("DUAL-WRITE qrErstellenCore: scope_level UND region_id konsistent", async () => {
+  it.skipIf(SKIP)("qrErstellenCore setzt region_id aus der Scope-Eingabe (contract: nur region_id)", async () => {
     const [u] = await db.insert(users).values({ tenantId, email: `qr-${Date.now()}@t.de`, minAgeConfirmedAt: new Date() }).returning();
     const res = await qrErstellenCore(db as never, tenantId, u.id, {
       scopeLevel: "ortsteil",
@@ -125,12 +127,10 @@ describe("region/scope Dual-Write (Integration)", () => {
       gueltigkeitStunden: 24,
     });
     const [row] = await db.select().from(qrCodes).where(eq(qrCodes.id, res.qrId)).limit(1);
-    expect(row.scopeLevel).toBe("ortsteil");
-    expect(row.scopeCode).toBe("wehen");
     expect(await pathOf(db, row.regionId!)).toBe("de.hessen.rtk.taunusstein.wehen");
   });
 
-  it.skipIf(SKIP)("DUAL-WRITE assignRoleCore: Rolle trägt scope UND passenden region_id", async () => {
+  it.skipIf(SKIP)("assignRoleCore setzt region_id aus der Scope-Eingabe (contract: nur region_id)", async () => {
     const [caller] = await db.insert(users).values({ tenantId, email: `caller-${Date.now()}@t.de`, minAgeConfirmedAt: new Date() }).returning();
     const [target] = await db.insert(users).values({ tenantId, email: `target-${Date.now()}@t.de`, minAgeConfirmedAt: new Date() }).returning();
 
@@ -148,8 +148,6 @@ describe("region/scope Dual-Write (Integration)", () => {
       .from(roles)
       .where(sql`${roles.tenantId} = ${tenantId} AND ${roles.userId} = ${target.id} AND ${roles.roleType} = 'verifier'`)
       .limit(1);
-    expect(role.scopeLevel).toBe("ortsteil");
-    expect(role.scopeCode).toBe("wehen");
     expect(await pathOf(db, role.regionId!)).toBe("de.hessen.rtk.taunusstein.wehen");
   });
 

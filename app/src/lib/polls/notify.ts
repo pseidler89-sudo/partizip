@@ -20,9 +20,9 @@
  *   - Nur Drizzle-Operatoren, KEIN Roh-SQL mit JS-Date (brach den Treiber).
  */
 
-import { and, eq, isNull, notLike } from "drizzle-orm";
+import { and, eq, isNull, notLike, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { users, ortsteile, scopeLevelEnum } from "@/db/schema";
+import { users, ortsteile, regions } from "@/db/schema";
 import type { TenantRow } from "@/lib/tenant";
 import { BRAND_COLOR } from "@/lib/brand";
 import {
@@ -33,12 +33,11 @@ import {
 const EMAIL_FROM =
   process.env.EMAIL_FROM ?? "Partizip <noreply@partizip.online>";
 
-/** Minimal benötigte Poll-Daten für die Benachrichtigung. */
+/** Minimal benötigte Poll-Daten für die Benachrichtigung (ADR-024: Gebietsknoten). */
 export interface NotifyPoll {
   id: string;
   frage: string;
-  scopeLevel: (typeof scopeLevelEnum.enumValues)[number];
-  scopeCode: string | null;
+  regionId: string;
 }
 
 /**
@@ -52,11 +51,12 @@ export interface NotifyPoll {
  *   - deletedAt IS NULL
  *   - E-Mail endet NICHT auf '@deleted.invalid' (anonymisierte Tombstones aus)
  *
- * Scope-Filter:
- *   - scopeLevel='ortsteil' UND scopeCode gesetzt → zusätzlich users.ortsteilId =
- *     (ortsteile-Datensatz mit code=scopeCode im selben Tenant). Existiert der
- *     Ortsteil nicht → leere Empfängerliste (kein tenant-weiter Fallback).
- *   - sonst (stadt/kreis/land oder ortsteil ohne Code) → tenant-weit alle.
+ * Scope-Filter (ADR-024, über den Gebietsknoten der Umfrage):
+ *   - Knoten ist ein Ortsteil (regions.typ='ortsteil') → nur User mit passendem
+ *     users.ortsteilId. Der ortsteile-Datensatz wird über sein normalisiertes
+ *     Label (regions_ltree_label(code)=regions.path_label) tenant-scoped
+ *     aufgelöst. Kein passender Ortsteil → leere Liste (kein tenant-weiter Fallback).
+ *   - sonst (Gemeinde/Kreis/Land/Bund) → tenant-weit alle.
  */
 export async function getPollNotifyEmpfaenger(
   db: Db,
@@ -78,17 +78,25 @@ export async function getPollNotifyEmpfaenger(
     notLike(users.email, "%@demo.invalid"),
   ];
 
-  // Ortsteil-Scope: nur User mit passendem Ortsteil. Wir lösen den Ortsteil über
-  // seinen Code (tenant-scoped) auf und filtern users.ortsteilId darauf.
-  if (poll.scopeLevel === "ortsteil") {
-    // Ortsteil-Poll OHNE Code → niemand (kein tenant-weiter Fallback; verhindert,
-    // dass eine fehlkonfigurierte Ortsteil-Umfrage versehentlich alle anschreibt).
-    if (!poll.scopeCode) return [];
+  // Gebietsart + Label des Umfrage-Knotens laden (tenant-frei, nur lesend).
+  const regionRows = await db
+    .select({ typ: regions.typ, pathLabel: regions.pathLabel })
+    .from(regions)
+    .where(eq(regions.id, poll.regionId))
+    .limit(1);
+  const region = regionRows[0];
+
+  // Ortsteil-Knoten: nur User mit passendem Ortsteil. Auflösung über das Label
+  // (identisch zur Baum-Spiegelung), tenant-scoped.
+  if (region?.typ === "ortsteil") {
     const otRows = await db
       .select({ id: ortsteile.id })
       .from(ortsteile)
       .where(
-        and(eq(ortsteile.tenantId, tenant.id), eq(ortsteile.code, poll.scopeCode)),
+        and(
+          eq(ortsteile.tenantId, tenant.id),
+          sql`regions_ltree_label(${ortsteile.code}) = ${region.pathLabel}`,
+        ),
       )
       .limit(1);
     const ortsteilId = otRows[0]?.id;
@@ -102,7 +110,7 @@ export async function getPollNotifyEmpfaenger(
     return rows.map((r: { email: string }) => r.email);
   }
 
-  // stadt/kreis/land (oder ortsteil ohne Code) → tenant-weit.
+  // Gemeinde/Kreis/Land/Bund → tenant-weit.
   const rows = await db
     .select({ email: users.email })
     .from(users)

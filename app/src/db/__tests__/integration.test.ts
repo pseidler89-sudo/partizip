@@ -21,6 +21,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
@@ -260,24 +261,24 @@ describe("Integration: Migrationen + Constraints + Idempotenz", () => {
       .values({ tenantId: tenant.id, email: "roles-null@test.com" })
       .returning({ id: users.id });
 
-    // Erste Rolle mit scope_code = NULL einfügen
+    // ADR-024 contract: Eindeutigkeit jetzt an (tenant, user, role_type, region_id).
+    const stadtRegion = await resolveRegionIdForScope(db as never, tenant.id, "stadt", null);
+    // Erste Rolle einfügen
     await db.insert(roles).values({
       tenantId: tenant.id,
       userId: user.id,
       roleType: "kommune_admin",
-      scopeLevel: "stadt",
-      scopeCode: null,
+      regionId: stadtRegion,
     });
 
-    // Zweite Rolle mit identischen Werten und scope_code = NULL → muss Fehler werfen
+    // Zweite Rolle mit identischem (tenant, user, role_type, region_id) → Fehler
     let thrownMessage = "";
     try {
       await db.insert(roles).values({
         tenantId: tenant.id,
         userId: user.id,
         roleType: "kommune_admin",
-        scopeLevel: "stadt",
-        scopeCode: null,
+        regionId: stadtRegion,
       });
     } catch (err) {
       thrownMessage = getDbErrorMessage(err);
