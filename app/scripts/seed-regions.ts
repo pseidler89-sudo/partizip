@@ -14,6 +14,25 @@
  *      Amtliche Schlüssel per WebSearch gegen Destatis-nahe Quellen verifiziert
  *      (openplzapi, gemeindeverzeichnis.de, factfish) — NICHT geraten.
  *
+ *   1b. Fiktiver Demo-Teilbaum für den Demo-Tenant (Slug via DEMO_TENANT_SLUG,
+ *       Default "demo"), aufgehängt an DERSELBEN Wurzel „Deutschland":
+ *         Deutschland (bund)
+ *           └─ Musterland  (land,     KEINE amtl. Schlüssel — bewusst NULL)
+ *               └─ Musterkreis (kreis, KEINE amtl. Schlüssel)
+ *                   └─ Musterstadt (gemeinde, tenant_id = Demo-Tenant)
+ *       Alles klar als Beispiel markiert; synthetische path_labels, KEINE echten
+ *       AGS/ARS (Musterland/-kreis/-stadt sind erfunden). Der Musterstadt-Knoten
+ *       trägt tenant_id = Demo-Tenant → das ist der Anker, den Migration 0024 für
+ *       die (scope='stadt') Demo-Polls bindet. Existiert der Demo-Tenant nicht
+ *       (frische DB), wird der Zweig sauber übersprungen (kein Fehler).
+ *
+ *   GENERISCHES PRINZIP: JEDER Tenant mit Fachzeilen (polls/roles/qr_codes/
+ *   verification_locations) braucht VOR Migration 0024 einen Gebietsbaum-Zweig mit
+ *   einem Gemeinde-Knoten, der seine tenant_id trägt — sonst findet der 0024-
+ *   Backfill keinen Anker und bricht hart ab. Hier explizit gepflegt: Taunusstein
+ *   (amtlich) + Musterstadt (Demo). Weitere Tenants ⇒ hier je einen Zweig ergänzen
+ *   (volle Generik/tenant-getriebene Ableitung ist spätere Etappe).
+ *
  *   2. Ortsteile spiegeln (Seed + Backfill in einem): jede Zeile aus `ortsteile`
  *      des Taunusstein-Tenants wird als regions-Ortsteil-Knoten unter Taunusstein
  *      angelegt. path_label = ortsteile.code (der in §9 geforderte stabile,
@@ -48,6 +67,11 @@ const databaseUrl =
 // operativen tenant_id-Marker trägt.
 const PILOT_TENANT_SLUG = "taunusstein";
 
+// Slug des Demo-Tenants („Musterstadt", scripts/seed-musterstadt.ts). Über die
+// SELBE Env aufgelöst wie der Demo-Seed (nicht hardcoden), Default "demo".
+const DEMO_TENANT_SLUG =
+  process.env.DEMO_TENANT_SLUG?.trim().toLowerCase() || "demo";
+
 /**
  * SQL-Ausdruck, der einen (beliebigen) Ortsteil-Code ltree-sicher zu einem
  * path_label normalisiert: lowercase, Umlaute/ß transliterieren, alles außrige
@@ -67,7 +91,7 @@ function ltreeLabelExpr(col: string): string {
   );
 }
 
-interface AmtlicherKnoten {
+interface Gebietsknoten {
   pathLabel: string;
   name: string;
   typ: "bund" | "land" | "kreis" | "gemeinde";
@@ -79,10 +103,56 @@ interface AmtlicherKnoten {
 }
 
 export interface SeedRegionsResult {
+  /** Gemeinde-Knoten des Pilot-Tenants (Taunusstein). */
   gemeindeId: string | null;
+  /** Gemeinde-Knoten des Demo-Tenants (Musterstadt) bzw. null wenn kein Demo-Tenant. */
+  demoGemeindeId: string | null;
   ortsteile: number;
   plzRegions: number;
   usersBackfilled: number;
+}
+
+/**
+ * Upsertet EINEN Gebietsknoten unter `parentId` und gibt seine id zurück.
+ * Idempotent über (parent_id, path_label) (NULLS NOT DISTINCT → auch die Wurzel).
+ * path wird NICHT gesetzt — der BEFORE-Trigger leitet ihn aus parent_id ab.
+ */
+async function upsertKnoten(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: PostgresJsDatabase<any>,
+  k: Gebietsknoten,
+  parentId: string | null
+): Promise<string> {
+  // Explizite Annotation: die Selbst-FK von `regions` macht den abgeleiteten
+  // Zeilentyp zirkulär (TS7022) — die Rückgabe ist { id: string }.
+  const inserted: { id: string }[] = await db
+    .insert(regions)
+    .values({
+      parentId,
+      typ: k.typ,
+      ags: k.ags,
+      ars: k.ars,
+      name: k.name,
+      pathLabel: k.pathLabel,
+      lat: k.lat ?? null,
+      lon: k.lon ?? null,
+      tenantId: k.tenantId ?? null,
+    })
+    .onConflictDoUpdate({
+      target: [regions.parentId, regions.pathLabel],
+      set: {
+        typ: k.typ,
+        ags: k.ags,
+        ars: k.ars,
+        name: k.name,
+        lat: k.lat ?? null,
+        lon: k.lon ?? null,
+        tenantId: k.tenantId ?? null,
+        updatedAt: new Date(),
+      },
+    })
+    .returning({ id: regions.id });
+  return inserted[0].id;
 }
 
 /**
@@ -94,9 +164,9 @@ export async function seedRegions(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   db: PostgresJsDatabase<any>
 ): Promise<SeedRegionsResult> {
-  // Pilot-Tenant (operativer Marker auf dem Gemeinde-Knoten). Fehlt er (z. B.
-  // frische Test-DB), bleibt tenant_id NULL und der Ortsteil-/PLZ-/User-Backfill
-  // findet schlicht 0 Zeilen — der amtliche Baum wird trotzdem gesetzt.
+  // Pilot- und Demo-Tenant (operative Marker auf dem jeweiligen Gemeinde-Knoten).
+  // Fehlt einer (z. B. frische Test-DB), bleibt sein Zweig-Anker ungesetzt bzw. der
+  // Demo-Zweig wird übersprungen — der amtliche Baum wird trotzdem gesetzt.
   const [pilotTenant] = await db
     .select({ id: tenants.id })
     .from(tenants)
@@ -104,9 +174,23 @@ export async function seedRegions(
     .limit(1);
   const pilotTenantId = pilotTenant?.id ?? null;
 
-  // ----- 1. Amtlicher Teilbaum (verifizierte ARS/AGS) ----------------------
-  const kette: AmtlicherKnoten[] = [
+  const [demoTenant] = await db
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(eq(tenants.slug, DEMO_TENANT_SLUG))
+    .limit(1);
+  const demoTenantId = demoTenant?.id ?? null;
+
+  // ----- 1. Wurzel „Deutschland" (bund) — von ALLEN Zweigen geteilt. --------
+  const bundId = await upsertKnoten(
+    db,
     { pathLabel: "de", name: "Deutschland", typ: "bund", ags: null, ars: null },
+    null
+  );
+  console.log(`region: bund      Deutschland → ${bundId}`);
+
+  // ----- 1a. Amtlicher Pilot-Zweig (verifizierte ARS/AGS) ------------------
+  const pilotZweig: Gebietsknoten[] = [
     { pathLabel: "hessen", name: "Hessen", typ: "land", ags: "06", ars: "060000000000" },
     {
       pathLabel: "rtk",
@@ -128,43 +212,49 @@ export async function seedRegions(
     },
   ];
 
-  let parentId: string | null = null;
+  let parentId = bundId;
   let gemeindeId: string | null = null;
-  for (const k of kette) {
-    // Explizite Annotation: die Selbst-FK von `regions` macht den abgeleiteten
-    // Zeilentyp zirkulär (TS7022) — die Rückgabe ist { id: string }.
-    const inserted: { id: string }[] = await db
-      .insert(regions)
-      .values({
-        parentId,
-        typ: k.typ,
-        ags: k.ags,
-        ars: k.ars,
-        name: k.name,
-        pathLabel: k.pathLabel,
-        lat: k.lat ?? null,
-        lon: k.lon ?? null,
-        tenantId: k.tenantId ?? null,
-        // path NICHT setzen — der BEFORE-Trigger leitet ihn aus parent_id ab.
-      })
-      .onConflictDoUpdate({
-        target: [regions.parentId, regions.pathLabel],
-        set: {
-          typ: k.typ,
-          ags: k.ags,
-          ars: k.ars,
-          name: k.name,
-          lat: k.lat ?? null,
-          lon: k.lon ?? null,
-          tenantId: k.tenantId ?? null,
-          updatedAt: new Date(),
-        },
-      })
-      .returning({ id: regions.id });
-    const row = inserted[0];
-    parentId = row.id;
-    if (k.typ === "gemeinde") gemeindeId = row.id;
-    console.log(`region: ${k.typ.padEnd(9)} ${k.name} → ${row.id}`);
+  for (const k of pilotZweig) {
+    const nodeId = await upsertKnoten(db, k, parentId);
+    parentId = nodeId;
+    if (k.typ === "gemeinde") gemeindeId = nodeId;
+    console.log(`region: ${k.typ.padEnd(9)} ${k.name} → ${nodeId}`);
+  }
+
+  // ----- 1b. Fiktiver Demo-Zweig (Musterstadt) — an DERSELBEN Wurzel. -------
+  // Nur wenn der Demo-Tenant existiert (sonst sauber überspringen). Der Guard
+  // demoTenantId !== pilotTenantId verhindert bei Fehlkonfiguration (DEMO_TENANT_SLUG
+  // == PILOT_TENANT_SLUG) einen ZWEITEN Gemeinde-Knoten für denselben Tenant — der
+  // würde den EINDEUTIGEN Gemeinde-Anker von Migration 0024 mehrdeutig machen.
+  // KEINE echten AGS/ARS: Musterland/-kreis/-stadt sind erfundene Beispiele (ars NULL;
+  // mehrere NULL-ars sind unter dem partiellen ars-Unique-Index erlaubt).
+  let demoGemeindeId: string | null = null;
+  if (demoTenantId && demoTenantId !== pilotTenantId) {
+    const demoZweig: Gebietsknoten[] = [
+      { pathLabel: "musterland", name: "Musterland (Demo)", typ: "land", ags: null, ars: null },
+      { pathLabel: "musterkreis", name: "Musterkreis (Demo)", typ: "kreis", ags: null, ars: null },
+      {
+        pathLabel: "musterstadt",
+        name: "Musterstadt (Demo)",
+        typ: "gemeinde",
+        ags: null,
+        ars: null,
+        tenantId: demoTenantId,
+      },
+    ];
+    let demoParent = bundId;
+    for (const k of demoZweig) {
+      const nodeId = await upsertKnoten(db, k, demoParent);
+      demoParent = nodeId;
+      if (k.typ === "gemeinde") demoGemeindeId = nodeId;
+      console.log(`region: ${k.typ.padEnd(9)} ${k.name} → ${nodeId}`);
+    }
+  } else {
+    console.log(
+      `Demo-Zweig übersprungen (Demo-Tenant '${DEMO_TENANT_SLUG}' ${
+        demoTenantId ? "== Pilot-Tenant" : "nicht vorhanden"
+      }).`
+    );
   }
 
   // ----- 2. Ortsteile spiegeln (Seed + Backfill) ---------------------------
@@ -217,6 +307,7 @@ export async function seedRegions(
 
   return {
     gemeindeId,
+    demoGemeindeId,
     ortsteile: ortsteilRes.count ?? 0,
     plzRegions: plzRes.count ?? 0,
     usersBackfilled: userRes.count ?? 0,
