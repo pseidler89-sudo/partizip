@@ -190,6 +190,13 @@
       "when": 1784230517133,
       "tag": "0026_cute_talos",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1784232828308,
+      "tag": "0027_backfill_residency_region",
+      "breakpoints": true
     }
   ]
 }

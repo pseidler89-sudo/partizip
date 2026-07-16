@@ -40,6 +40,14 @@ export function getStufe(
   // N3: Ohne bestätigtes Mindestalter (≥16) keine Teilnahme — bleibt Stufe 0.
   if (user.minAgeConfirmedAt == null) return 0;
 
+  // Audit m1: expliziter Entzug (verificationStatus='rejected') muss wirken.
+  // Vorher hob die ODER-Verknüpfung unten (… || residencyVerifiedAt !== null) den
+  // Entzug auf, solange ein alter Verifizierungs-Stempel stand → Person blieb bis
+  // zu 24 Monate auf Stufe 2. 'rejected' kappt jetzt hart auf Stufe 1.
+  if (user.verificationStatus === "rejected") {
+    return 1;
+  }
+
   // ADR-014 Block 2: Abgelaufene Wohnsitz-Verifizierung → zurück auf Stufe 1.
   // Greift NUR, wenn residencyVerifiedUntil gesetzt ist UND in der Vergangenheit
   // liegt. NULL bleibt unverändert (kein Ablauf — Bestand grandfathered).
