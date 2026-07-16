@@ -229,9 +229,10 @@ function TenantLayoutInner({
         {children}
       </div>
 
-      {/* Footer */}
+      {/* Footer — dauerhaft erreichbare Einstiege (FAQ/Für-Kommunen lebten sonst
+          nur auf der Landing, die mit dem Region-Cookie verschwindet) */}
       <footer className="border-t border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-center gap-4 px-4 py-4 text-xs text-zinc-600">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-x-4 gap-y-2 px-4 py-4 text-xs text-zinc-600">
           <Link
             href={`/${slugFromPath}/impressum`}
             className="hover:text-zinc-900 transition-colors"
@@ -252,6 +253,27 @@ function TenantLayoutInner({
           >
             Transparenz
           </Link>
+          <span aria-hidden>·</span>
+          <Link
+            href={`/${slugFromPath}/faq`}
+            className="hover:text-zinc-900 transition-colors"
+          >
+            Häufige Fragen
+          </Link>
+          <span aria-hidden>·</span>
+          <Link
+            href={`/${slugFromPath}/fuer-kommunen`}
+            className="hover:text-zinc-900 transition-colors"
+          >
+            Für Kommunen
+          </Link>
+          <span aria-hidden>·</span>
+          <a
+            href="https://github.com/pseidler89-sudo/partizip"
+            className="hover:text-zinc-900 transition-colors"
+          >
+            Quellcode (GitHub)
+          </a>
         </div>
       </footer>
     </div>

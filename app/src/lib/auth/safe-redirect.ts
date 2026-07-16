@@ -17,8 +17,12 @@
  * Alles andere → Fallback (Default: /konto).
  */
 
-/** Standard-Ziel nach erfolgreicher Anmeldung. */
-export const DEFAULT_LOGIN_REDIRECT = "/konto";
+/**
+ * Standard-Ziel nach erfolgreicher Anmeldung: die Beteiligung (/umfragen),
+ * nicht die Kontoverwaltung — der erste Moment nach dem Login soll Mitmachen
+ * zeigen, nicht E-Mail/Stufe/Löschen. /konto bleibt über die Nav erreichbar.
+ */
+export const DEFAULT_LOGIN_REDIRECT = "/umfragen";
 
 /**
  * Validiert ein Redirect-Ziel. Gibt den Pfad nur zurück, wenn er ein

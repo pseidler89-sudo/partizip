@@ -12,6 +12,7 @@
 import Link from "next/link";
 import { RegionEinstieg } from "./RegionEinstieg";
 import { LoginForm } from "./LoginForm";
+import { FAQ } from "./faq-daten";
 
 const SCHRITTE = [
   {
@@ -52,15 +53,6 @@ const NUTZEN = [
   "Sehen, was Ihre Nachbarschaft bewegt.",
   "In wenigen Minuten, von zu Hause oder unterwegs.",
   "Auch für Ihren Ortsteil — nicht nur die große Politik.",
-];
-
-const FAQ = [
-  { f: "Ist das wirklich anonym?", a: "Ja. Wir speichern nicht, wie Sie abgestimmt haben. Ihre Stimme ist von Ihrer Person getrennt (geheime Wahl)." },
-  { f: "Kostet das etwas?", a: "Nein. Die Teilnahme ist für Bürgerinnen und Bürger kostenlos." },
-  { f: "Brauche ich eine App?", a: "Nein. Alles läuft im Browser — am Handy, Tablet oder Computer." },
-  { f: "Ab welchem Alter?", a: "Ab 16 Jahren. Das bestätigen Sie einmalig bei der Anmeldung." },
-  { f: "Brauche ich ein Passwort?", a: "Nein. Sie erhalten einen Anmelde-Link per E-Mail — ohne Passwort." },
-  { f: "Ich bin technisch unsicher — geht das trotzdem?", a: "Ja. Sie brauchen nur Ihre Postleitzahl und eine E-Mail-Adresse. Mehr nicht." },
 ];
 
 /**
@@ -263,7 +255,15 @@ export function Landing({ tenantName, slug }: { tenantName: string; slug: string
           >
             Für Kommunen & Vereine →
           </Link>
-          <p className="mt-3 text-sm text-white/80">Oder direkt eine Demo anfragen: patrick@seidler.ml</p>
+          <p className="mt-3 text-sm text-white/80">
+            Oder sofort selbst ausprobieren:{" "}
+            <a
+              href="https://demo.partizip.online"
+              className="font-semibold text-white underline underline-offset-4 hover:opacity-90"
+            >
+              Demo-Spielwiese öffnen
+            </a>
+          </p>
         </div>
       </section>
     </main>

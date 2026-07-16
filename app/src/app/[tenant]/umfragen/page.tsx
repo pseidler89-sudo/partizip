@@ -29,6 +29,8 @@ import {
   type PollMitErgebnis,
 } from "@/lib/polls/queries";
 import { gruppiereNachEbene } from "@/lib/polls/gruppierung";
+import { RegionEinstieg } from "../RegionEinstieg";
+import { isDemoTenant } from "@/lib/demo/config";
 import { REGION_TYP_LABEL } from "@/lib/region/ebenen";
 import type { PollErgebnis } from "@/lib/polls/ergebnis";
 import { REGION_COOKIE_NAME, parseRegionCookie } from "@/lib/region/core";
@@ -276,9 +278,33 @@ export default async function UmfragenListePage({ params }: PageProps) {
 
   const teilnahmen = await getMeineTeilnahmen(db, tenant.id, userId!);
 
+  // Erst-Login-Lücke: wer sich ohne vorherige PLZ-Eingabe registriert, hat weder
+  // home_region noch Cookie und sieht nur die tenant-weite Sicht. Einmalige
+  // Einladung, den Wohnort zu setzen (regionAusPlz schreibt für Eingeloggte
+  // home_region_id mit — lib/region/actions.ts).
+  // Nicht auf dem Demo-Tenant: Demo-Konten haben nie einen Wohnort, und der
+  // Musterstadt-Zweig hat keine PLZ-Zuordnungen — die Karte wäre eine Sackgasse
+  // mitten im Demo-Rundgang (Gate-B-Befund).
+  const zeigeRegionEinstieg =
+    viewerRegionId == null && region == null && !isDemoTenant(tenant.slug);
+
   return (
     <main className="mx-auto max-w-2xl px-4 py-10">
       {banner}
+      {zeigeRegionEinstieg && (
+        <section className="pz-card mb-8 p-5" aria-label="Wohnort festlegen">
+          <h2 className="text-sm font-semibold" style={{ color: "var(--pz-ink)" }}>
+            Wo wohnen Sie?
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed" style={{ color: "var(--pz-body)" }}>
+            Mit Ihrer Postleitzahl sehen Sie zuerst die Abstimmungen aus Ihrem
+            Ortsteil und Ihrer Stadt — statt allem auf einmal.
+          </p>
+          <div className="mt-4">
+            <RegionEinstieg tenantName={tenant.name} variante="eingeloggt" />
+          </div>
+        </section>
+      )}
       <header className="mb-8">
         <h1 className="text-2xl font-semibold" style={{ color: "var(--pz-ink)" }}>
           Abstimmungen

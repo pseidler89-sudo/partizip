@@ -8,6 +8,7 @@
 
 import type { Metadata } from "next";
 import Link from "next/link";
+import { isDemoTenant } from "@/lib/demo/config";
 
 export const metadata: Metadata = {
   title: "Für Kommunen & Vereine — Partizip",
@@ -17,6 +18,9 @@ export const metadata: Metadata = {
 
 const DEMO_MAILTO =
   "mailto:patrick@seidler.ml?subject=Partizip%20%E2%80%93%20Demo%20f%C3%BCr%20unsere%20Kommune";
+
+/** Öffentliche Selbstbedienungs-Demo (Musterstadt-Spielwiese, nächtlicher Reset). */
+const DEMO_URL = "https://demo.partizip.online";
 
 const SCHRITTE: { n: string; titel: string; text: string }[] = [
   {
@@ -56,6 +60,9 @@ export default async function FuerKommunenPage({
   params: Promise<{ tenant: string }>;
 }) {
   const { tenant: slug } = await params;
+  // Auf dem Demo-Tenant selbst ist „Demo ausprobieren" ein Kreisverweis —
+  // der Besucher IST bereits in der Demo (Gate-B-Befund).
+  const inDemo = isDemoTenant(slug);
 
   return (
     <main>
@@ -78,13 +85,29 @@ export default async function FuerKommunenPage({
             Fragen Sie Ihre Bürger:innen direkt — datensparsam, überparteilich und
             barrierefrei. Ergebnis nach Ebene, mit verifiziertem Stimmenanteil.
           </p>
-          <a
-            href={DEMO_MAILTO}
-            className="mt-7 inline-flex min-h-[48px] items-center rounded-lg px-6 py-3 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
-            style={{ backgroundColor: "var(--pz-brand)" }}
-          >
-            Demo anfragen
-          </a>
+          <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+            {!inDemo && (
+              <a
+                href={DEMO_URL}
+                className="inline-flex min-h-[48px] items-center rounded-lg px-6 py-3 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
+                style={{ backgroundColor: "var(--pz-brand)" }}
+              >
+                Demo sofort ausprobieren
+              </a>
+            )}
+            <a
+              href={DEMO_MAILTO}
+              className="inline-flex min-h-[48px] items-center rounded-lg border px-6 py-3 text-sm font-semibold transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
+              style={{ borderColor: "var(--pz-brand)", color: "var(--pz-brand-strong)" }}
+            >
+              Persönliche Demo anfragen
+            </a>
+          </div>
+          <p className="mx-auto mt-3 max-w-xl text-sm" style={{ color: "var(--pz-body)" }}>
+            {inDemo
+              ? "Sie sind bereits in der Demo-Spielwiese — probieren Sie alles gefahrlos aus, jede Nacht wird zurückgesetzt."
+              : "Die Demo-Spielwiese \u201eMusterstadt\u201c ist fiktiv, ohne Anmeldung nutzbar und wird jede Nacht zurückgesetzt — probieren Sie alles gefahrlos aus."}
+          </p>
         </div>
       </section>
 
@@ -142,12 +165,20 @@ export default async function FuerKommunenPage({
             Eine kurze Demo zeigt Ihnen die ganze Kette — von der Frage bis zum Ergebnis.
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+            {!inDemo && (
+              <a
+                href={DEMO_URL}
+                className="inline-flex min-h-[48px] items-center rounded-lg bg-white px-6 py-3 text-sm font-semibold shadow-sm transition-opacity hover:opacity-90"
+                style={{ color: "var(--pz-brand-strong)" }}
+              >
+                Demo sofort ausprobieren
+              </a>
+            )}
             <a
               href={DEMO_MAILTO}
-              className="inline-flex min-h-[48px] items-center rounded-lg bg-white px-6 py-3 text-sm font-semibold shadow-sm transition-opacity hover:opacity-90"
-              style={{ color: "var(--pz-brand-strong)" }}
+              className="inline-flex min-h-[48px] items-center rounded-lg px-6 py-3 text-sm font-semibold text-white underline-offset-4 hover:underline"
             >
-              Demo anfragen
+              Persönliche Demo anfragen
             </a>
             <Link
               href={`/${slug}`}

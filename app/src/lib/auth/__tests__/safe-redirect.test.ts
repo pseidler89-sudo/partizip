@@ -57,8 +57,8 @@ describe("safeRedirectPath", () => {
     }
   });
 
-  it("Default-Fallback ist /konto, eigener Fallback wird respektiert", () => {
-    expect(DEFAULT_LOGIN_REDIRECT).toBe("/konto");
+  it("Default-Fallback ist /umfragen (Beteiligung statt Kontoverwaltung), eigener Fallback wird respektiert", () => {
+    expect(DEFAULT_LOGIN_REDIRECT).toBe("/umfragen");
     expect(safeRedirectPath("https://evil.tld", "/start")).toBe("/start");
     expect(safeRedirectPath("/ziel", "/start")).toBe("/ziel");
   });
