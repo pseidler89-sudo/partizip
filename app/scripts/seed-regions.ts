@@ -413,6 +413,28 @@ export async function seedRegions(
     .where(and(isNull(regions.parentId), eq(regions.typ, "bund")));
   if (roots !== 1) throw new Error(`Erwartet genau 1 Wurzel, gefunden: ${roots}`);
 
+  // Audit M6: höchstens EIN Gemeinde-Knoten je Tenant. Der partielle Unique-Index
+  // (Migration 0028) erzwingt das hart in der DB; diese Prüfung fängt einen
+  // versehentlichen Doppel-Knoten schon im Seed mit klarer Meldung ab (statt erst
+  // beim nächsten region_id-Insert mit „Anker nicht eindeutig").
+  const doppelteGemeinden = (await db.execute(sql`
+    SELECT tenant_id, count(*)::int AS n
+    FROM regions
+    WHERE typ = 'gemeinde' AND tenant_id IS NOT NULL
+    GROUP BY tenant_id
+    HAVING count(*) > 1
+  `)) as unknown as Array<{ tenant_id: string; n: number }>;
+  if (doppelteGemeinden.length > 0) {
+    const details = doppelteGemeinden
+      .map((r) => `${r.tenant_id} (${r.n} Knoten)`)
+      .join(", ");
+    throw new Error(
+      `seed-regions FEHLER: Tenant(s) mit mehr als EINEM Gemeinde-Knoten: ${details}. ` +
+        `Vermutlich hat eine pathLabel/name-Änderung in regionen.json einen zweiten ` +
+        `Knoten angelegt. Duplikate bereinigen (Knoten umbenennen/entfernen), dann erneut.`
+    );
+  }
+
   return {
     gemeindeIdBySlug,
     uebersprungeneSlugs,
