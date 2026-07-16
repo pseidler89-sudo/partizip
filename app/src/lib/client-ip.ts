@@ -6,8 +6,7 @@
  * vertrauenswürdiger Proxy (Traefik) vor der App, der die echte Client-IP
  * ANHÄNGT. Das erste Element ist client-kontrollierbar (Header-Spoofing) —
  * wer es verwendet, macht IP-basierte Rate-Limits (Stimmen, QR-Einlösung,
- * Anliegen) per gefälschtem Header rotierbar und entwertet den forensischen
- * ipHash an Stimmen. Deshalb hier bewusst KEIN x-real-ip-Fallback: der Header
+ * Anliegen) per gefälschtem Header rotierbar. Deshalb hier bewusst KEIN x-real-ip-Fallback: der Header
  * wäre bei direkter Erreichbarkeit der App ebenfalls client-kontrollierbar.
  *
  * Ohne Header (direkte Verbindung, lokale Entwicklung) → null; die Aufrufer

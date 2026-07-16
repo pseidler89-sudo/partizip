@@ -33,7 +33,6 @@ import {
   auditEvents,
 } from "@/db/schema";
 import { SCOPE_INPUT_LEVELS } from "@/lib/region/ebenen";
-import { hashIp } from "@/lib/auth/crypto";
 import { getStufe } from "@/lib/eligibility/stufe";
 import {
   getOptionalAuthContext,
@@ -181,8 +180,6 @@ export async function abstimmen(
     };
   }
 
-  const ipHash = ipAddress ? hashIp(ipAddress) : null;
-
   // Insert mit onConflictDoNothing auf UNIQUE(pollId, voterRef).
   // Audit (PII-frei, OHNE choice) in DERSELBEN Transaktion.
   const result = await ctx.db.transaction(async (tx: Db) => {
@@ -212,7 +209,6 @@ export async function abstimmen(
         voterRef,
         choice: parsed.data.choice,
         warVerifiziert,
-        ipHash,
       })
       .onConflictDoNothing({ target: [votes.pollId, votes.voterRef] })
       .returning({ id: votes.id });

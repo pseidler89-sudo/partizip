@@ -245,7 +245,6 @@ async function main() {
         voterRef: `demo:geschlossen:${i}`,
         choice: DEMO_CHOICES[i],
         warVerifiziert: i % 2 === 0,
-        ipHash: null,
       });
       // 1 Beleg je Stimme (Invariante #Belege == #Stimmen). Echter CSPRNG-Code.
       let inserted = false;

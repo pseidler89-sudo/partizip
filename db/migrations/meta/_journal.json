@@ -183,6 +183,13 @@
       "when": 1784069322627,
       "tag": "0025_gebiet_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1784230517133,
+      "tag": "0026_cute_talos",
+      "breakpoints": true
     }
   ]
 }
