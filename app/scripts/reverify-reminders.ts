@@ -80,8 +80,16 @@ async function main() {
       gesendet.push(f.userId);
     } catch (e) {
       fehler += 1;
-      // KEINE E-Mail-Adresse loggen (PII) — nur userId (UUID) + Fehlertext.
-      console.error(`Versand fehlgeschlagen für ${f.userId}:`, e instanceof Error ? e.message : e);
+      // Audit m5: SMTP-Fehlertexte enthalten typischerweise die Empfänger-Adresse
+      // (z. B. „550 <user@example.com> rejected"). userId (UUID) + Audit-Pseudonym
+      // stehen ohnehin in den Logs → E-Mails aus dem Fehlertext redigieren, sonst
+      // koppeln Bounce-Logs Klartext-Mail an das Pseudonym.
+      const rohtext = e instanceof Error ? e.message : String(e);
+      const redigiert = rohtext.replace(
+        /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
+        "[E-Mail redigiert]",
+      );
+      console.error(`Versand fehlgeschlagen für ${f.userId}:`, redigiert);
     }
   }
 

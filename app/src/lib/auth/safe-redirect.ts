@@ -14,7 +14,7 @@
  *   - URL-Parse-Gegenprobe: relativ zu einer Dummy-Base geparst darf sich
  *     weder Origin noch Protokoll ändern
  *
- * Alles andere → Fallback (Default: /konto).
+ * Alles andere → Fallback (Default: /umfragen).
  */
 
 /**

@@ -206,11 +206,16 @@ export async function revokeRoleCore(
       const otherAdminRows = await tx
         .select({ n: count() })
         .from(roles)
+        // Audit m2: nur AKTIVE Admins zählen — ein gesperrtes/gelöschtes Konto
+        // ist nicht handlungsfähig und darf den Letzter-Admin-Schutz nicht
+        // aushebeln (sonst bliebe die Kommune ohne bedienbaren Admin zurück).
+        .innerJoin(users, eq(users.id, roles.userId))
         .where(
           and(
             eq(roles.tenantId, tenantId),
             ne(roles.id, role.id),
             inArray(roles.roleType, [...ADMIN_ROLES]),
+            eq(users.accountStatus, "active"),
           ),
         );
       const otherAdminCount = otherAdminRows[0]?.n ?? 0;

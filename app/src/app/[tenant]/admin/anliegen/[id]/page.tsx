@@ -91,7 +91,9 @@ export default async function AdminAnliegenDetailPage({ params }: PageProps) {
     const ortsteilRows = await db
       .select({ name: ortsteile.name })
       .from(ortsteile)
-      .where(eq(ortsteile.id, a.ortsteilId))
+      // Audit m6: Tenant-Filter als zweite Verteidigungslinie (Invariante
+      // „tenant_id in JEDER Query"; die öffentliche Schwesterseite tut das bereits).
+      .where(and(eq(ortsteile.id, a.ortsteilId), eq(ortsteile.tenantId, tenant.id)))
       .limit(1);
     ortsteilName = ortsteilRows[0]?.name ?? null;
   }

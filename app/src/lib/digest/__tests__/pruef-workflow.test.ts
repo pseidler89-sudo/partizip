@@ -176,19 +176,22 @@ async function simulierSetAlleStatementsGeprueft(
   if (digestRows.length === 0) return { ok: false, error: "Digest nicht gefunden." };
   if (digestRows[0].status !== "entwurf") return { ok: false, error: "Prüf-Markierung nur im Status 'entwurf' möglich." };
 
-  const stmts = await db
-    .select({ id: digestStatements.id })
-    .from(digestStatements)
-    .where(eq(digestStatements.digestId, digestId));
-
-  const anzahl = stmts.length;
   const now = new Date();
 
-  await db.transaction(async (tx) => {
-    await tx
+  return await db.transaction(async (tx) => {
+    // Audit m7: nur ungeprüfte Aussagen stempeln → die geprueft_by-Spur eines
+    // früheren Prüfers bleibt erhalten (SoD). RETURNING = tatsächlich neu markiert.
+    const neu = await tx
       .update(digestStatements)
-      .set({ geprueftAt: now })
-      .where(eq(digestStatements.digestId, digestId));
+      .set({ geprueftAt: now, geprueftBy: adminUserId })
+      .where(
+        and(
+          eq(digestStatements.digestId, digestId),
+          isNull(digestStatements.geprueftAt),
+        ),
+      )
+      .returning({ id: digestStatements.id });
+    const anzahl = neu.length;
 
     await tx.insert(auditEvents).values({
       tenantId,
@@ -199,9 +202,9 @@ async function simulierSetAlleStatementsGeprueft(
       targetId: digestId,
       metadata: { digestId, anzahl },
     });
-  });
 
-  return { ok: true };
+    return { ok: true };
+  });
 }
 
 /**
@@ -450,6 +453,33 @@ describe("Prüf-Workflow (Integration)", () => {
         .where(eq(digestStatements.id, stmt.id));
       expect(row.geprueftAt).not.toBeNull();
     }
+  });
+
+  it.skipIf(SKIP)("3c. Audit m7: „Alle geprüft\" überschreibt die Prüf-Spur eines Erstprüfers NICHT", async () => {
+    const { digest, stmts } = await createDigestMitStatements(2);
+    // Ein anderer Prüfer hat Aussage 1 bereits geprüft (SoD-Spur).
+    const [erstpruefer] = await db.insert(users).values({
+      tenantId, email: `erst-${nextId()}@pruef-test.de`,
+    }).returning();
+    const frueher = new Date(Date.now() - 60_000);
+    await db.update(digestStatements)
+      .set({ geprueftAt: frueher, geprueftBy: erstpruefer.id })
+      .where(eq(digestStatements.id, stmts[0].id));
+
+    const res = await simulierSetAlleStatementsGeprueft(db, digest.id, tenantId, adminUserId);
+    expect(res.ok).toBe(true);
+
+    const [s0] = await db.select().from(digestStatements).where(eq(digestStatements.id, stmts[0].id));
+    const [s1] = await db.select().from(digestStatements).where(eq(digestStatements.id, stmts[1].id));
+    // Erstprüfer-Spur unangetastet …
+    expect(s0.geprueftBy).toBe(erstpruefer.id);
+    expect(s0.geprueftAt?.getTime()).toBe(frueher.getTime());
+    // … nur die zuvor ungeprüfte Aussage bekommt den zweiten Prüfer.
+    expect(s1.geprueftBy).toBe(adminUserId);
+    // Audit zählt nur die tatsächlich neu markierte Aussage.
+    const [audit] = await db.select().from(auditEvents)
+      .where(and(eq(auditEvents.action, "digest.statements_geprueft"), eq(auditEvents.targetId, digest.id)));
+    expect((audit.metadata as Record<string, unknown>).anzahl).toBe(1);
   });
 
   it.skipIf(SKIP)("3b. setAlleStatementsGeprueft schreibt Audit-Event mit Anzahl", async () => {
