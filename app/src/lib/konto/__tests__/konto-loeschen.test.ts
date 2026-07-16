@@ -28,6 +28,7 @@ import { deleteKontoCore, isLetzterAdmin } from "@/lib/konto/delete";
 const {
   tenants, users, roles, sessions, authTokens,
   anliegen, anliegenEvents, anliegenFollowers, auditEvents,
+  verificationLocations, verificationSlots, verificationBookings, invitations,
 } = schema;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -223,6 +224,77 @@ describe("Konto-Löschung (Integration)", () => {
     expect(anl.titel).toBe("Mein Anliegen");
     // creator_ref bleibt unverändert (kein User-FK, Pseudonymität gewahrt)
     expect(anl.creatorRef).toBe(computeCreatorRefWithSalt(TEST_SALT, user.id));
+  });
+
+  it.skipIf(SKIP)("löscht verification_bookings und gibt Slot-Kapazität frei (Audit M4)", async () => {
+    const { user } = await seedFullUser();
+    const regionId = await resolveRegionIdForScope(db as never, tenantId, "stadt", null);
+    const [loc] = await db.insert(verificationLocations).values({
+      tenantId, regionId, name: "Rathaus", address: "Markt 1",
+    }).returning();
+    const [slot] = await db.insert(verificationSlots).values({
+      locationId: loc.id,
+      startsAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      endsAt: new Date(Date.now() + 1000 * 60 * 60 * 25),
+      capacity: 5, bookedCount: 1,
+    }).returning();
+    await db.insert(verificationBookings).values({
+      tenantId, slotId: slot.id, userId: user.id,
+      code: `TERMIN-${nextId()}`, status: "gebucht",
+    });
+
+    const result = await deleteKontoCore(db, tenantId, user.id);
+    expect(result.ok).toBe(true);
+
+    const bookings = await db.select().from(verificationBookings)
+      .where(and(eq(verificationBookings.tenantId, tenantId), eq(verificationBookings.userId, user.id)));
+    expect(bookings).toHaveLength(0);
+
+    const [slotAfter] = await db.select().from(verificationSlots)
+      .where(eq(verificationSlots.id, slot.id));
+    expect(slotAfter.bookedCount).toBe(0);
+  });
+
+  it.skipIf(SKIP)("tombstoned invitations.email und nullt accepted_by (Audit M5)", async () => {
+    const { user, email } = await seedFullUser();
+    const regionId = await resolveRegionIdForScope(db as never, tenantId, "stadt", null);
+    const [inv] = await db.insert(invitations).values({
+      tenantId, email, roleType: "verifier", regionId,
+      tokenHash: `inv-${nextId()}`, status: "accepted", acceptedBy: user.id,
+      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+    }).returning();
+
+    await deleteKontoCore(db, tenantId, user.id);
+
+    const [invAfter] = await db.select().from(invitations).where(eq(invitations.id, inv.id));
+    expect(invAfter.email).toBe(`geloescht-${user.id}@deleted.invalid`);
+    expect(invAfter.email).not.toContain("@konto-test.de");
+    expect(invAfter.acceptedBy).toBeNull();
+    // PII-freie Historie bleibt erhalten
+    expect(invAfter.status).toBe("accepted");
+    expect(invAfter.roleType).toBe("verifier");
+  });
+
+  it.skipIf(SKIP)("tombstoned auch eine PENDING-Einladung bei Mixed-Case-Konto-Mail (Gate-B M5)", async () => {
+    // users.email wird NICHT normalisiert, invitations.email schon (lowercase).
+    const regionId = await resolveRegionIdForScope(db as never, tenantId, "stadt", null);
+    const mixed = `Max.${nextId()}@Konto-Test.de`;
+    const [user] = await db.insert(users).values({
+      tenantId, email: mixed, birthYear: 1990, birthMonth: 4,
+      minAgeConfirmedAt: new Date(), accountStatus: "active",
+    }).returning();
+    // pending-Einladung mit normalisierter (lowercase) Mail, acceptedBy noch NULL
+    const [inv] = await db.insert(invitations).values({
+      tenantId, email: mixed.trim().toLowerCase(), roleType: "beobachter", regionId,
+      tokenHash: `inv-${nextId()}`, status: "pending",
+      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+    }).returning();
+
+    await deleteKontoCore(db, tenantId, user.id);
+
+    const [invAfter] = await db.select().from(invitations).where(eq(invitations.id, inv.id));
+    expect(invAfter.email).toBe(`geloescht-${user.id}@deleted.invalid`);
+    expect(invAfter.email.toLowerCase()).not.toContain("konto-test.de");
   });
 
   it.skipIf(SKIP)("schreibt ein PII-freies Audit-Event konto.deleted", async () => {

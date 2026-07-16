@@ -547,7 +547,10 @@ export const verificationBookings = pgTable(
     slotId: uuid("slot_id")
       .notNull()
       .references(() => verificationSlots.id, { onDelete: "cascade" }),
-    // Konto-Löschung (DSGVO) entfernt die Buchung mit.
+    // onDelete:cascade greift NICHT bei der Konto-Löschung (die users-Zeile wird
+    // nur anonymisiert, nie gelöscht) — deleteKontoCore löscht die Buchungen
+    // deshalb explizit (Schritt 5c, Audit M4). Cascade wirkt nur bei echtem
+    // users-DELETE (z. B. Test-Teardown).
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
