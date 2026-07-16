@@ -23,6 +23,7 @@ import {
   verificationBookings,
   verificationSlots,
   verificationLocations,
+  regions,
   auditEvents,
 } from "@/db/schema";
 import { grantResidency } from "@/lib/verification/qr-core";
@@ -342,11 +343,29 @@ export async function bookingWahrnehmenCore(
           sql`${verificationBookings.slotId} IN (SELECT s.id FROM verification_slots s JOIN verification_locations l ON l.id = s.location_id WHERE l.tenant_id = ${tenantId} AND s.starts_at > now() - interval '1 day')`,
         ),
       )
-      .returning({ userId: verificationBookings.userId });
+      .returning({
+        userId: verificationBookings.userId,
+        slotId: verificationBookings.slotId,
+      });
 
     if (done.length === 0) {
       return { ok: false, error: "Termin nicht gefunden oder nicht (mehr) offen." };
     }
+
+    // Verifizierter Wohnsitz-Knoten = Region des Verifizierungs-Standorts (Audit M3).
+    // location.region_id ist nullable → dann kein Anker (regionId bleibt undefined).
+    // regionTyp mitladen, damit grantResidency den weichen Wohnort nur an feine
+    // Knoten (Gemeinde/Ortsteil) koppelt.
+    const locRegion = await tx
+      .select({ regionId: verificationLocations.regionId, regionTyp: regions.typ })
+      .from(verificationSlots)
+      .innerJoin(
+        verificationLocations,
+        eq(verificationLocations.id, verificationSlots.locationId),
+      )
+      .leftJoin(regions, eq(regions.id, verificationLocations.regionId))
+      .where(eq(verificationSlots.id, done[0].slotId))
+      .limit(1);
 
     // Stufe-2 vergeben über den gemeinsamen, tenant-scoped Grant (wie QR-Einlösung).
     const verifiedUntil = await grantResidency(
@@ -354,6 +373,10 @@ export async function bookingWahrnehmenCore(
       tenantId,
       done[0].userId,
       "in_person",
+      {
+        regionId: locRegion[0]?.regionId ?? null,
+        regionTyp: locRegion[0]?.regionTyp ?? null,
+      },
     );
 
     await tx.insert(auditEvents).values({

@@ -46,6 +46,17 @@ describe("getStufe", () => {
     expect(getStufe({ ...aktiv, residencyVerifiedAt: new Date() })).toBe(2);
   });
 
+  it("Audit m1: expliziter Entzug (rejected) kappt trotz altem residency_verified_at auf Stufe 1", () => {
+    expect(
+      getStufe({
+        ...aktiv,
+        verificationStatus: "rejected",
+        residencyVerifiedAt: new Date(),
+        residencyVerifiedUntil: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365),
+      }),
+    ).toBe(1);
+  });
+
   // ADR-014 Block 2: Ablauf der Wohnsitz-Verifizierung.
   it("ADR-014: residencyVerifiedUntil in der Vergangenheit → zurück auf Stufe 1", () => {
     const verifiziert = {

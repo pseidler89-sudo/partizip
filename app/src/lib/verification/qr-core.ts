@@ -73,9 +73,15 @@ export async function grantResidency(
   tenantId: string,
   userId: string,
   method: ResidencyMethod,
-  opts?: { ortsteilId?: string },
+  opts?: { ortsteilId?: string; regionId?: string | null; regionTyp?: string | null },
 ): Promise<Date> {
   const verifiedUntil = addMonths(new Date(), QR_VERIFICATION_MONTHS);
+  // Weichen Wohnort (home_region_id) nur an einen FEINEN Knoten (Gemeinde/
+  // Ortsteil) koppeln: ein grober Kreis-/Land-QR würde die Standard-Sicht sonst
+  // auf das gesamte Untergebiet aufweiten (path <@). residency_region_id (der
+  // harte Anker) bildet dagegen exakt ab, was verifiziert wurde — auch grob.
+  const homeGeeignet =
+    opts?.regionTyp === "gemeinde" || opts?.regionTyp === "ortsteil";
   await tx
     .update(users)
     .set({
@@ -86,6 +92,19 @@ export async function grantResidency(
       // Neuer Verifizierungs-Zyklus → Erinnerungs-Marke zurücksetzen.
       reverifyReminderSentAt: null,
       ...(opts?.ortsteilId ? { ortsteilId: opts.ortsteilId } : {}),
+      // Audit M3: den VERIFIZIERTEN Wohnsitz-Knoten festhalten (QR-Knoten bzw.
+      // Standort-Region). Bisher blieb residency_region_id trotz Verifizierung
+      // NULL — der „harte" Anker fehlte, auf den die Gebiets-Eligibility baut.
+      ...(opts?.regionId
+        ? {
+            residencyRegionId: opts.regionId,
+            // Weichen Wohnort nur setzen, wenn (a) noch keiner gewählt ist und
+            // (b) der Knoten fein genug ist — bewusste Wahl nicht überschreiben.
+            ...(homeGeeignet
+              ? { homeRegionId: sql`COALESCE(${users.homeRegionId}, ${opts.regionId})` }
+              : {}),
+          }
+        : {}),
     })
     .where(and(eq(users.id, userId), eq(users.tenantId, tenantId)));
   return verifiedUntil;
@@ -262,6 +281,7 @@ export async function qrEinloesenCore(
   const found = await db
     .select({
       id: qrCodes.id,
+      regionId: qrCodes.regionId,
       regionTyp: regions.typ,
       regionPathLabel: regions.pathLabel,
       expiresAt: qrCodes.expiresAt,
@@ -342,6 +362,9 @@ export async function qrEinloesenCore(
 
       const verifiedUntil = await grantResidency(tx, tenantId, userId, "qr", {
         ortsteilId,
+        // Der verifizierte Wohnsitz-Knoten = der Gebietsknoten des QR-Codes.
+        regionId: qr.regionId,
+        regionTyp: qr.regionTyp,
       });
 
       // 4. Audit (PII-frei: actorRef=userId ist eine UUID, kein Personenbezug

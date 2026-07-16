@@ -343,6 +343,10 @@ describe("verification/qr (Integration)", () => {
     const [after] = await db.select().from(users).where(eq(users.id, u.id));
     expect(after.ortsteilId).toBe(ot.id);
     expect(getStufe(after)).toBe(2);
+    // Audit M3: der verifizierte Wohnsitz-Knoten wird jetzt festgehalten und —
+    // weil home_region_id noch NULL war — per COALESCE auch als Standard-Sicht.
+    expect(after.residencyRegionId).not.toBeNull();
+    expect(after.homeRegionId).toBe(after.residencyRegionId);
   });
 
   // --- Ungültiger Token ----------------------------------------------------
