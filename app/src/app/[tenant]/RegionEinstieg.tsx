@@ -16,7 +16,21 @@ import {
   regionUebernehmen,
 } from "@/lib/region/actions";
 
-export function RegionEinstieg({ tenantName }: { tenantName: string }) {
+/**
+ * variante:
+ *  - "landing"    (Default): eigenständige Karte, anonymer Kontext — PLZ landet
+ *                 nur im Cookie („nur lokal").
+ *  - "eingeloggt": rahmenlos (Eltern-Karte liefert den Rahmen); regionAusPlz
+ *                 schreibt für Eingeloggte zusätzlich den Wohnknoten ins Konto
+ *                 (home_region_id) → der Datenschutz-Hinweis muss das ehrlich sagen.
+ */
+export function RegionEinstieg({
+  tenantName,
+  variante = "landing",
+}: {
+  tenantName: string;
+  variante?: "landing" | "eingeloggt";
+}) {
   const router = useRouter();
   const [plz, setPlz] = useState("");
   const [fehler, setFehler] = useState<string | null>(null);
@@ -91,7 +105,13 @@ export function RegionEinstieg({ tenantName }: { tenantName: string }) {
   const busy = pending || geoBusy;
 
   return (
-    <div className="mx-auto max-w-lg pz-card p-6 text-left">
+    <div
+      className={
+        variante === "eingeloggt"
+          ? "text-left"
+          : "mx-auto max-w-lg pz-card p-6 text-left"
+      }
+    >
       <form onSubmit={handlePlzSubmit} noValidate>
         <label htmlFor="plz" className="block text-sm font-medium" style={{ color: "var(--pz-ink)" }}>
           Ihre Postleitzahl
@@ -177,8 +197,9 @@ export function RegionEinstieg({ tenantName }: { tenantName: string }) {
       </p>
 
       <p className="mt-4 text-xs" style={{ color: "var(--pz-muted)" }}>
-        Ihre PLZ wird nur lokal gespeichert, um Ihnen passende Abstimmungen zu zeigen.
-        Kein Konto nötig.
+        {variante === "eingeloggt"
+          ? "Ihr Wohnort wird in Ihrem Konto gespeichert und bestimmt Ihre Standard-Ansicht. Sie können ihn jederzeit ändern."
+          : "Ihre PLZ wird nur lokal gespeichert, um Ihnen passende Abstimmungen zu zeigen. Kein Konto nötig."}
       </p>
     </div>
   );
