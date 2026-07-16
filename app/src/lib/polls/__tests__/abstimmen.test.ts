@@ -120,7 +120,6 @@ async function simulierAbstimmen(
         voterRef,
         choice,
         warVerifiziert,
-        ipHash: null,
       })
       .onConflictDoNothing({ target: [votes.pollId, votes.voterRef] })
       .returning({ id: votes.id });

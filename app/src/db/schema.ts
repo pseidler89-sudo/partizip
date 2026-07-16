@@ -1103,8 +1103,10 @@ export const votes = pgTable(
     choice: text("choice").notNull(),
     // Snapshot: war der Wähler bei Stimmabgabe Stufe≥2 (wohnsitz-verifiziert)?
     warVerifiziert: boolean("war_verifiziert").notNull().default(false),
-    // Gehashte IP (HMAC) — optional, nur für Missbrauchsanalyse; PII-frei
-    ipHash: text("ip_hash"),
+    // KEIN ip_hash mehr: der frühere Wert war über denselben Salt mit dem
+    // userId-tragenden Auth-Audit-ip_hash korrelierbar → Deanonymisierungs-Brücke
+    // (Audit 2026-07-16 M1). Rate-Limiting läuft über separate rateLimitEvents,
+    // die Stimme braucht kein IP-Merkmal. Spalte in Migration 0026 entfernt.
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
     // Kein updatedAt — Stimmen sind immutable
   },

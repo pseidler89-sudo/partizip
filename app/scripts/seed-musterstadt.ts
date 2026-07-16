@@ -193,7 +193,6 @@ async function main() {
         voterRef: `demo:musterstadt:geschlossen:${i}`,
         choice: CHOICES[i],
         warVerifiziert: i % 2 === 0,
-        ipHash: null,
       });
       let inserted = false;
       for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
