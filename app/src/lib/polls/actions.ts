@@ -40,6 +40,7 @@ import {
   requireAdminCtx,
 } from "@/lib/auth/action-context";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
+import { istGebietsZustaendig, waehleAnkerRegionId } from "@/lib/polls/gebiet";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { insertBelegCode } from "@/lib/polls/beleg";
 import { checkVoteRateLimit } from "@/lib/polls/rate-limit";
@@ -102,6 +103,7 @@ export async function abstimmen(
       typ: polls.typ,
       status: polls.status,
       verbindlich: polls.verbindlich,
+      regionId: polls.regionId,
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
     })
@@ -153,6 +155,27 @@ export async function abstimmen(
     return {
       ok: false,
       error: "Diese verbindliche Abstimmung ist verifizierten Bürger:innen vorbehalten.",
+    };
+  }
+
+  // Gebiets-Zuständigkeit HART serverseitig (Audit M2): Die Lese-Sicht blendet
+  // fremde Gebiete aus — hier wird das durchgesetzt, damit Detail-URL/Direkt-
+  // aufruf keine Stimme in einem fremden Ortsteil/Gebiet erlaubt. Anker je nach
+  // Verbindlichkeit (verifizierter vs. weicher Wohnsitz), Fallback Gemeinde-Knoten.
+  // stufe >= 1 (oben geprüft) ⇒ ctx.user ist non-null (getStufe(null)=0).
+  const ankerRegionId = ctx.user
+    ? waehleAnkerRegionId(ctx.user, poll.verbindlich)
+    : null;
+  const gebietsZustaendig = await istGebietsZustaendig(
+    ctx.db,
+    ctx.tenant.id,
+    poll.regionId,
+    ankerRegionId,
+  );
+  if (!gebietsZustaendig) {
+    return {
+      ok: false,
+      error: "Diese Abstimmung gehört nicht zu Ihrem Gebiet.",
     };
   }
 

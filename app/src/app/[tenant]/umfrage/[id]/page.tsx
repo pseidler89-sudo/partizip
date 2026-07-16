@@ -22,6 +22,7 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getPollErgebnis, hatBereitsAbgestimmt } from "@/lib/polls/queries";
 import { istBeendet } from "@/lib/polls/ergebnis";
 import { getStufe } from "@/lib/eligibility/stufe";
+import { istGebietsZustaendig, waehleAnkerRegionId } from "@/lib/polls/gebiet";
 import { regionTypLabel } from "@/lib/region/ebenen";
 import PollMitmachen from "../../PollMitmachen";
 import { TeilenButton } from "../../TeilenButton";
@@ -64,6 +65,7 @@ async function getPublicPoll(tenantSlug: string, pollId: string) {
       typ: polls.typ,
       status: polls.status,
       verbindlich: polls.verbindlich,
+      regionId: polls.regionId,
       regionTyp: regions.typ,
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
@@ -133,6 +135,9 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
   // Optionale Session für voter_ref / bereits-abgestimmt
   let userId: string | null = null;
   let verifiziert = false;
+  // Gebiets-Zuständigkeit (Audit M2): true, solange kein eingeloggter Nutzer als
+  // nicht-zuständig erkannt wird (Anonyme sehen ohnehin nur Ergebnis/Login-CTA).
+  let gebietsZustaendig = true;
   const cookieStore = await cookies();
   const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (rawToken) {
@@ -154,13 +159,25 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
           residencyVerifiedUntil: users.residencyVerifiedUntil,
           accountStatus: users.accountStatus,
           minAgeConfirmedAt: users.minAgeConfirmedAt,
+          // Gebiets-Anker (Audit M2) — dieselbe Prüfung wie die Abstimm-Action.
+          residencyRegionId: users.residencyRegionId,
+          homeRegionId: users.homeRegionId,
         })
         .from(users)
         .where(and(eq(users.id, session.userId), eq(users.tenantId, tenant.id)))
         .limit(1);
       const user = userRows[0];
       userId = user?.id ?? null;
-      if (user) verifiziert = getStufe(user) >= 2;
+      if (user) {
+        verifiziert = getStufe(user) >= 2;
+        const ankerRegionId = waehleAnkerRegionId(user, poll.verbindlich);
+        gebietsZustaendig = await istGebietsZustaendig(
+          db,
+          tenant.id,
+          poll.regionId,
+          ankerRegionId,
+        );
+      }
     }
   }
 
@@ -201,10 +218,18 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
           tenantSlug={slugFromPath}
           eingeloggt={userId != null}
           verifiziert={verifiziert}
-          bereitsAbgestimmt={bereitsAbgestimmt || !istOffen}
+          // Nicht-zuständige eingeloggte Nutzer sehen nur das Ergebnis (die
+          // Abstimm-Action würde ohnehin ablehnen — Audit M2).
+          bereitsAbgestimmt={bereitsAbgestimmt || !istOffen || !gebietsZustaendig}
           ergebnis={ergebnis}
           demoMode={isDemoTenant(tenant.slug)}
         />
+        {userId != null && !gebietsZustaendig && istOffen && (
+          <p className="mt-3 text-sm" style={{ color: "var(--pz-muted)" }}>
+            Diese Abstimmung gehört nicht zu Ihrem Gebiet — Sie sehen das Ergebnis,
+            können aber nicht mitstimmen.
+          </p>
+        )}
       </div>
 
       <div className="mt-4">
