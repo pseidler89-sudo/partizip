@@ -282,6 +282,14 @@ export const regions = pgTable(
     unique("regions_parent_label_unique").on(t.parentId, t.pathLabel).nullsNotDistinct(),
     index("idx_regions_parent_id").on(t.parentId),
     index("idx_regions_tenant_id").on(t.tenantId),
+    // Audit M6: höchstens EIN Gemeinde-Knoten je Tenant. Ohne diesen Index legte
+    // eine pathLabel/name-Änderung in regionen.json (bei fiktiven Tenants real
+    // möglich) still einen ZWEITEN Gemeinde-Knoten mit derselben tenant_id an →
+    // der Seed lief grün durch, aber jeder spätere Insert ohne region_id brach mit
+    // „Gemeinde-Anker nicht eindeutig" ab (genau die Falle des Staging-Deploys).
+    uniqueIndex("regions_one_gemeinde_per_tenant")
+      .on(t.tenantId)
+      .where(sql`${t.typ} = 'gemeinde' AND ${t.tenantId} IS NOT NULL`),
     // Genau eine Wurzel, beidseitig: Bund ⇔ Wurzel. (typ='bund') genau dann,
     // wenn (parent_id IS NULL) — verhindert sowohl einen Bund mit Elternknoten
     // als auch eine Nicht-Bund-Wurzel. Die Einzigkeit der Wurzel erzwingt
