@@ -18,6 +18,7 @@ import {
   setAlleStatementsGeprueft,
   setStatementHighlight,
 } from "@/lib/digest/actions";
+import BestaetigungsDialog from "../../../BestaetigungsDialog";
 
 interface Props {
   digestId: string;
@@ -57,6 +58,9 @@ export function DigestActionButtons({
 }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  // Block E: Bestätigung vor Freigabe/Veröffentlichung (Veröffentlichen postet
+  // unwiderruflich auf die öffentlichen Kanäle — Fediverse/Bluesky).
+  const [confirmAktion, setConfirmAktion] = useState<null | "freigeben" | "veroeffentlichen">(null);
   const router = useRouter();
 
   // ---------------------------------------------------------------------------
@@ -155,23 +159,15 @@ export function DigestActionButtons({
   // ---------------------------------------------------------------------------
   // Modus 3: Freigabe-/Veröffentlichen-Button (Standard)
   // ---------------------------------------------------------------------------
-  async function handleFreigeben() {
+  function ausfuehren() {
+    if (!confirmAktion) return;
+    const aktion = confirmAktion;
     setError(null);
     startTransition(async () => {
-      const result = await freigeben(digestId);
+      const result =
+        aktion === "freigeben" ? await freigeben(digestId) : await veroeffentlichen(digestId);
       if (result.ok) {
-        router.refresh();
-      } else {
-        setError(result.error ?? "Unbekannter Fehler");
-      }
-    });
-  }
-
-  async function handleVeroeffentlichen() {
-    setError(null);
-    startTransition(async () => {
-      const result = await veroeffentlichen(digestId);
-      if (result.ok) {
+        setConfirmAktion(null);
         router.refresh();
       } else {
         setError(result.error ?? "Unbekannter Fehler");
@@ -203,7 +199,7 @@ export function DigestActionButtons({
       {status === "entwurf" && (
         <>
           <button
-            onClick={handleFreigeben}
+            onClick={() => setConfirmAktion("freigeben")}
             disabled={isPending || !alleGeprueft || sodGesperrt}
             title={
               sodGesperrt
@@ -233,7 +229,7 @@ export function DigestActionButtons({
 
       {status === "freigegeben" && (
         <button
-          onClick={handleVeroeffentlichen}
+          onClick={() => setConfirmAktion("veroeffentlichen")}
           disabled={isPending}
           className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
         >
@@ -244,6 +240,27 @@ export function DigestActionButtons({
       {error && (
         <p className="text-sm text-red-600">{error}</p>
       )}
+
+      <BestaetigungsDialog
+        offen={confirmAktion !== null}
+        titel={
+          confirmAktion === "veroeffentlichen"
+            ? "Digest veröffentlichen?"
+            : "Digest freigeben?"
+        }
+        beschreibung={
+          confirmAktion === "veroeffentlichen"
+            ? "Der Digest wird öffentlich sichtbar und automatisch auf die verbundenen Kanäle (Fediverse, Bluesky) gepostet. Das lässt sich nicht zurücknehmen."
+            : "Mit der Freigabe bestätigen Sie, dass alle Aussagen quellen-geprüft sind. Danach kann der Digest veröffentlicht werden."
+        }
+        bestaetigenLabel={
+          confirmAktion === "veroeffentlichen" ? "Ja, veröffentlichen" : "Ja, freigeben"
+        }
+        variante={confirmAktion === "veroeffentlichen" ? "gefahr" : "normal"}
+        busy={isPending}
+        onBestaetigen={ausfuehren}
+        onAbbrechen={() => !isPending && setConfirmAktion(null)}
+      />
     </div>
   );
 }

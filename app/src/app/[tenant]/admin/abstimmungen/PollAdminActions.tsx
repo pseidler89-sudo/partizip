@@ -9,6 +9,10 @@
  * Alle Aktionen rufen die admin-gated Server-Actions; serverseitig wird die
  * Berechtigung + der Status-Guard (atomar) erneut erzwungen — die Buttons sind
  * nur Komfort. Fehler werden inline gezeigt, Erfolg löst router.refresh() aus.
+ *
+ * Block E: Aktivieren (feuert Benachrichtigungen an alle Opt-in-Nutzer im Gebiet)
+ * und Schließen (irreversibel — eine geschlossene Abstimmung öffnet nicht wieder)
+ * verlangen jetzt eine bewusste Bestätigung; Entwurf-Löschen ebenso.
  */
 
 "use client";
@@ -20,38 +24,70 @@ import {
   pollSchliessen,
   pollEntwurfLoeschen,
 } from "@/lib/polls/actions";
+import BestaetigungsDialog from "../../BestaetigungsDialog";
 
 type Status = "entwurf" | "aktiv" | "geschlossen";
+type Op = "aktivieren" | "schliessen" | "loeschen";
 
 interface Props {
   pollId: string;
   status: Status;
 }
 
+const DIALOG: Record<
+  Op,
+  { titel: string; beschreibung: string; label: string; variante: "gefahr" | "normal" }
+> = {
+  aktivieren: {
+    titel: "Abstimmung aktivieren?",
+    beschreibung:
+      "Die Abstimmung wird sofort sichtbar und alle Nutzer:innen im Gebiet, die Benachrichtigungen aktiviert haben, erhalten eine E-Mail. Das lässt sich nicht zurücknehmen.",
+    label: "Ja, aktivieren",
+    variante: "normal",
+  },
+  schliessen: {
+    titel: "Abstimmung schließen?",
+    beschreibung:
+      "Nach dem Schließen kann niemand mehr abstimmen und das Ergebnis wird endgültig ausgezählt. Eine geschlossene Abstimmung lässt sich nicht wieder öffnen.",
+    label: "Ja, schließen",
+    variante: "gefahr",
+  },
+  loeschen: {
+    titel: "Entwurf löschen?",
+    beschreibung:
+      "Der Entwurf wird dauerhaft gelöscht. Das lässt sich nicht rückgängig machen.",
+    label: "Ja, löschen",
+    variante: "gefahr",
+  },
+};
+
 export default function PollAdminActions({ pollId, status }: Props) {
   const router = useRouter();
-  const [busy, setBusy] = useState<null | "aktivieren" | "schliessen" | "loeschen">(null);
+  const [busy, setBusy] = useState<null | Op>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirm, setConfirm] = useState<Op | null>(null);
 
-  async function run(
-    op: "aktivieren" | "schliessen" | "loeschen",
-    fn: () => Promise<{ ok: boolean; error?: string }>
-  ) {
+  const AKTIONEN: Record<Op, () => Promise<{ ok: boolean; error?: string }>> = {
+    aktivieren: () => pollAktivieren(pollId),
+    schliessen: () => pollSchliessen(pollId),
+    loeschen: () => pollEntwurfLoeschen(pollId),
+  };
+
+  async function run(op: Op) {
     setError(null);
     setBusy(op);
     try {
-      const result = await fn();
+      const result = await AKTIONEN[op]();
       if (!result.ok) {
         setError(result.error ?? "Die Aktion ist fehlgeschlagen.");
         return;
       }
+      setConfirm(null);
       router.refresh();
     } catch {
       setError("Verbindungsfehler — bitte erneut versuchen.");
     } finally {
       setBusy(null);
-      setConfirmDelete(false);
     }
   }
 
@@ -66,46 +102,20 @@ export default function PollAdminActions({ pollId, status }: Props) {
             <button
               type="button"
               disabled={busy !== null}
-              onClick={() => run("aktivieren", () => pollAktivieren(pollId))}
+              onClick={() => setConfirm("aktivieren")}
               className={`${btnBase} text-white hover:opacity-90`}
               style={{ backgroundColor: "var(--tenant-primary)" }}
             >
-              {busy === "aktivieren" ? "…" : "Aktivieren"}
+              Aktivieren
             </button>
-
-            {!confirmDelete ? (
-              <button
-                type="button"
-                disabled={busy !== null}
-                onClick={() => setConfirmDelete(true)}
-                className={`${btnBase} border border-red-200 bg-white text-red-700 hover:bg-red-50`}
-              >
-                Entwurf löschen
-              </button>
-            ) : (
-              <span className="inline-flex items-center gap-2">
-                <span className="text-xs" style={{ color: "var(--pz-muted)" }}>
-                  Wirklich löschen?
-                </span>
-                <button
-                  type="button"
-                  disabled={busy !== null}
-                  onClick={() => run("loeschen", () => pollEntwurfLoeschen(pollId))}
-                  className={`${btnBase} border border-red-300 bg-red-600 text-white hover:bg-red-700`}
-                >
-                  {busy === "loeschen" ? "…" : "Ja, löschen"}
-                </button>
-                <button
-                  type="button"
-                  disabled={busy !== null}
-                  onClick={() => setConfirmDelete(false)}
-                  className={`${btnBase} border bg-white`}
-                  style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
-                >
-                  Abbrechen
-                </button>
-              </span>
-            )}
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => setConfirm("loeschen")}
+              className={`${btnBase} border border-red-200 bg-white text-red-700 hover:bg-red-50`}
+            >
+              Entwurf löschen
+            </button>
           </>
         )}
 
@@ -113,18 +123,27 @@ export default function PollAdminActions({ pollId, status }: Props) {
           <button
             type="button"
             disabled={busy !== null}
-            onClick={() => run("schliessen", () => pollSchliessen(pollId))}
+            onClick={() => setConfirm("schliessen")}
             className={`${btnBase} border bg-white`}
             style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
           >
-            {busy === "schliessen" ? "…" : "Schließen"}
+            Schließen
           </button>
         )}
       </div>
 
-      {error && (
-        <p className="mt-2 text-sm text-red-700">{error}</p>
-      )}
+      {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+
+      <BestaetigungsDialog
+        offen={confirm !== null}
+        titel={confirm ? DIALOG[confirm].titel : ""}
+        beschreibung={confirm ? DIALOG[confirm].beschreibung : undefined}
+        bestaetigenLabel={confirm ? DIALOG[confirm].label : ""}
+        variante={confirm ? DIALOG[confirm].variante : "gefahr"}
+        busy={busy !== null}
+        onBestaetigen={() => confirm && run(confirm)}
+        onAbbrechen={() => busy === null && setConfirm(null)}
+      />
     </div>
   );
 }
