@@ -150,20 +150,24 @@ export async function setAlleStatementsGeprueft(
   if (digestRows.length === 0) return { ok: false, error: "Digest nicht gefunden." };
   if (digestRows[0].status !== "entwurf") return { ok: false, error: "Prüf-Markierung nur im Status 'entwurf' möglich." };
 
-  // Alle Statements auf jetzt geprüft setzen + Anzahl zählen
-  const stmtCount = await ctx.db
-    .select({ count: count() })
-    .from(digestStatements)
-    .where(eq(digestStatements.digestId, digestId));
-
-  const anzahl = stmtCount[0]?.count ?? 0;
   const now = new Date();
 
   await ctx.db.transaction(async (tx: Db) => {
-    await tx
+    // Audit m7: NUR noch ungeprüfte Aussagen stempeln (geprueft_at IS NULL). Sonst
+    // überschriebe „Alle als geprüft" die Prüf-Spur (geprueft_by) eines früheren
+    // Prüfers und löschte dessen Vier-Augen-/SoD-Mitwirkung restlos. RETURNING →
+    // exakte Anzahl der TATSÄCHLICH neu markierten Aussagen fürs Audit.
+    const neu = await tx
       .update(digestStatements)
       .set({ geprueftAt: now, geprueftBy: ctx.userId })
-      .where(eq(digestStatements.digestId, digestId));
+      .where(
+        and(
+          eq(digestStatements.digestId, digestId),
+          isNull(digestStatements.geprueftAt),
+        ),
+      )
+      .returning({ id: digestStatements.id });
+    const anzahl = neu.length;
 
     // Audit-Event: PII-frei, Muster der bestehenden Events
     await tx.insert(auditEvents).values({

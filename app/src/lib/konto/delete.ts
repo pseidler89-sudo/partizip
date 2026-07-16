@@ -54,15 +54,19 @@ export async function isLetzterAdmin(
     .limit(1);
   if (ownAdminRows.length === 0) return false; // kein Admin → nie „letzter Admin"
 
-  // Gibt es noch einen ANDEREN Admin im Tenant?
+  // Gibt es noch einen ANDEREN AKTIVEN Admin im Tenant? (Audit m2: gesperrte/
+  // gelöschte Konten sind nicht handlungsfähig und dürfen den Schutz nicht
+  // aushebeln.)
   const otherAdminRows = await db
     .select({ n: count() })
     .from(roles)
+    .innerJoin(users, eq(users.id, roles.userId))
     .where(
       and(
         eq(roles.tenantId, tenantId),
         ne(roles.userId, userId),
         inArray(roles.roleType, [...ADMIN_ROLES]),
+        eq(users.accountStatus, "active"),
       ),
     );
   const otherAdminCount = otherAdminRows[0]?.n ?? 0;

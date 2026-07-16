@@ -17,7 +17,7 @@
  *
  * Optionaler ?next=-Parameter: Ziel nach der Anmeldung. Wird serverseitig
  * über safeRedirectPath validiert — nur same-origin-relative Pfade,
- * sonst Default (/konto). Kein Open-Redirect.
+ * sonst Default (/umfragen). Kein Open-Redirect.
  *
  * referrer: "no-referrer" — der Token steht in der URL dieser Seite und
  * darf nicht über den Referer-Header an Dritte abfließen.

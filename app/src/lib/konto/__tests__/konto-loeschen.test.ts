@@ -384,4 +384,27 @@ describe("Konto-Löschung (Integration)", () => {
       .where(eq(roles.tenantId, t2.id));
     expect(remainingRoles).toHaveLength(1);
   });
+
+  it.skipIf(SKIP)("Audit m2: ein GESPERRTER Zweit-Admin zählt nicht — letzter AKTIVER Admin bleibt geschützt", async () => {
+    // Isolierter Tenant (kontrollierte Admin-Zahl, keine Pollution des Shared-Tenants).
+    const [t3] = await db.insert(tenants).values({
+      slug: `konto-m2-${Date.now()}`, name: "m2-Tenant",
+    }).returning();
+    const regionId = await resolveRegionIdForScope(db as never, t3.id, "stadt", null);
+    async function seedAdmin(status: "active" | "locked") {
+      const [u] = await db.insert(users).values({
+        tenantId: t3.id, email: `${nextId()}@m2-test.de`, accountStatus: status,
+      }).returning();
+      await db.insert(roles).values({ tenantId: t3.id, userId: u.id, roleType: "kommune_admin", regionId });
+      return u;
+    }
+    const aktiv = await seedAdmin("active");
+    await seedAdmin("locked"); // gesperrter Zweit-Admin — nicht handlungsfähig
+
+    // Trotz des gesperrten Zweit-Admins ist der aktive der LETZTE handlungsfähige.
+    expect(await isLetzterAdmin(db, t3.id, aktiv.id)).toBe(true);
+    const res = await deleteKontoCore(db, t3.id, aktiv.id);
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/einzige/i);
+  });
 });
