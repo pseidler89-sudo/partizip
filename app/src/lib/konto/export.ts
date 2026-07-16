@@ -17,6 +17,8 @@ import {
   anliegen,
   anliegenEvents,
   anliegenFollowers,
+  verificationBookings,
+  qrRedemptions,
 } from "@/db/schema";
 import { computeCreatorRef } from "@/lib/anliegen/creator-ref";
 
@@ -75,6 +77,17 @@ export type ExportAnliegen = {
   events: ExportAnliegenEvent[];
 };
 
+export type ExportTermin = {
+  code: string;
+  status: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type ExportQrEinloesung = {
+  redeemedAt: string | null;
+};
+
 export type ExportDocument = {
   hinweis: string;
   exportiertAm: string;
@@ -83,6 +96,10 @@ export type ExportDocument = {
   rollen: ExportRolle[];
   gefolgteAnliegen: ExportFollow[];
   meineAnliegen: ExportAnliegen[];
+  // Verifizierungs-Spuren (Audit m3): vom Projekt selbst als PII eingestuft
+  // (delete.ts löscht sie), gehören daher in die Art.-15-Auskunft.
+  verifizierungsTermine: ExportTermin[];
+  qrEinloesungen: ExportQrEinloesung[];
 };
 
 function iso(d: Date | null | undefined): string | null {
@@ -100,6 +117,8 @@ export function buildExportDocument(input: {
   follows: (typeof anliegenFollowers.$inferSelect)[];
   anliegen: (typeof anliegen.$inferSelect)[];
   events: (typeof anliegenEvents.$inferSelect)[];
+  termine: (typeof verificationBookings.$inferSelect)[];
+  qrEinloesungen: (typeof qrRedemptions.$inferSelect)[];
   exportiertAm?: Date;
 }): ExportDocument {
   const eventsByAnliegen = new Map<string, ExportAnliegenEvent[]>();
@@ -153,6 +172,15 @@ export function buildExportDocument(input: {
       status: a.status,
       createdAt: iso(a.createdAt),
       events: eventsByAnliegen.get(a.id) ?? [],
+    })),
+    verifizierungsTermine: input.termine.map((t) => ({
+      code: t.code,
+      status: t.status,
+      createdAt: iso(t.createdAt),
+      updatedAt: iso(t.updatedAt),
+    })),
+    qrEinloesungen: input.qrEinloesungen.map((q) => ({
+      redeemedAt: iso(q.redeemedAt),
     })),
   };
 }
@@ -220,6 +248,28 @@ export async function collectExportData(
           .where(inArray(anliegenEvents.anliegenId, anliegenIds))
       : [];
 
+  // Verifizierungs-Termine (tenant + user scoped) — Audit m3.
+  const termine = await db
+    .select()
+    .from(verificationBookings)
+    .where(
+      and(
+        eq(verificationBookings.tenantId, tenant.id),
+        eq(verificationBookings.userId, userId),
+      ),
+    );
+
+  // QR-Einlösungen (tenant + user scoped) — Audit m3.
+  const qrEinloesungen = await db
+    .select()
+    .from(qrRedemptions)
+    .where(
+      and(
+        eq(qrRedemptions.tenantId, tenant.id),
+        eq(qrRedemptions.userId, userId),
+      ),
+    );
+
   return buildExportDocument({
     tenant: { slug: tenant.slug, name: tenant.name },
     user,
@@ -227,5 +277,7 @@ export async function collectExportData(
     follows: followRows,
     anliegen: meineAnliegen,
     events,
+    termine,
+    qrEinloesungen,
   });
 }

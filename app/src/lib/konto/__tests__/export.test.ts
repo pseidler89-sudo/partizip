@@ -90,6 +90,8 @@ describe("buildExportDocument", () => {
       follows: [follow],
       anliegen: [eigenesAnliegen],
       events: [event],
+      termine: [],
+      qrEinloesungen: [],
     });
 
     expect(doc.hinweis).toContain("Art. 15 DSGVO");
@@ -105,6 +107,8 @@ describe("buildExportDocument", () => {
       follows: [],
       anliegen: [],
       events: [],
+      termine: [],
+      qrEinloesungen: [],
     });
     expect(doc.konto.email).toBe("max@example.org");
     expect(doc.konto.birthYear).toBe(1990);
@@ -121,6 +125,8 @@ describe("buildExportDocument", () => {
       follows: [follow],
       anliegen: [eigenesAnliegen],
       events: [event],
+      termine: [],
+      qrEinloesungen: [],
     });
 
     expect(doc.meineAnliegen).toHaveLength(1);
@@ -137,6 +143,8 @@ describe("buildExportDocument", () => {
       follows: [follow],
       anliegen: [],
       events: [],
+      termine: [],
+      qrEinloesungen: [],
     });
     expect(doc.rollen).toEqual([
       { roleType: "user", regionId: "region-1", createdAt: T0.toISOString() },
@@ -154,6 +162,8 @@ describe("buildExportDocument", () => {
       follows: [],
       anliegen: [eigenesAnliegen],
       events: [],
+      termine: [],
+      qrEinloesungen: [],
     });
     expect(doc.konto.createdAt).toBe(T0.toISOString());
     expect(doc.meineAnliegen[0].createdAt).toBe(T0.toISOString());
@@ -167,9 +177,49 @@ describe("buildExportDocument", () => {
       follows: [],
       anliegen: [],
       events: [],
+      termine: [],
+      qrEinloesungen: [],
     });
     expect(doc.rollen).toEqual([]);
     expect(doc.gefolgteAnliegen).toEqual([]);
     expect(doc.meineAnliegen).toEqual([]);
+    expect(doc.verifizierungsTermine).toEqual([]);
+    expect(doc.qrEinloesungen).toEqual([]);
+  });
+
+  it("nimmt Verifizierungs-Termine und QR-Einlösungen in die Auskunft auf (Audit m3)", () => {
+    const doc = buildExportDocument({
+      tenant: { slug: "t", name: "T" },
+      user,
+      rollen: [],
+      follows: [],
+      anliegen: [],
+      events: [],
+      termine: [
+        {
+          id: "b-1",
+          tenantId: "t-1",
+          slotId: "s-1",
+          userId: "user-1",
+          code: "TERMIN-AAAA-BBBB",
+          status: "gebucht",
+          createdAt: T0,
+          updatedAt: T0,
+        },
+      ],
+      qrEinloesungen: [
+        {
+          id: "r-1",
+          qrCodeId: "qr-1",
+          userId: "user-1",
+          tenantId: "t-1",
+          redeemedAt: T0,
+        },
+      ],
+    });
+    expect(doc.verifizierungsTermine).toEqual([
+      { code: "TERMIN-AAAA-BBBB", status: "gebucht", createdAt: T0.toISOString(), updatedAt: T0.toISOString() },
+    ]);
+    expect(doc.qrEinloesungen).toEqual([{ redeemedAt: T0.toISOString() }]);
   });
 });

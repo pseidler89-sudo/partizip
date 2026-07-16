@@ -9,7 +9,7 @@
  * (Pseudonymität via creator_ref). Audit ist PII-frei.
  */
 
-import { and, eq, inArray, isNull, ne, count, sql } from "drizzle-orm";
+import { and, eq, or, inArray, isNull, ne, count, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import {
   users,
@@ -19,9 +19,12 @@ import {
   anliegenFollowers,
   auditEvents,
   qrRedemptions,
+  verificationBookings,
+  verificationSlots,
+  invitations,
 } from "@/db/schema";
 import { ADMIN_ROLES } from "@/lib/auth/roles";
-import { buildAnonymizePayload } from "@/lib/konto/anonymize";
+import { buildAnonymizePayload, buildTombstoneEmail } from "@/lib/konto/anonymize";
 import { KONTO_LOESCHEN_BESTAETIGUNG } from "@/lib/konto/constants";
 
 export { KONTO_LOESCHEN_BESTAETIGUNG };
@@ -157,6 +160,57 @@ export async function deleteKontoCore(
     await tx
       .delete(qrRedemptions)
       .where(and(eq(qrRedemptions.tenantId, tenantId), eq(qrRedemptions.userId, userId)));
+
+    // 5c. verification_bookings des Users löschen (Audit M4). Der user_id-FK
+    //     trägt onDelete:cascade, aber die users-Zeile wird nur ANONYMISIERT
+    //     (nie gelöscht) → die Kaskade feuert nie, und ein Termin mit Ort/Zeit/
+    //     user_id bliebe nach der Anonymisierung re-identifizierbar (Art. 17).
+    //     DELETE ... RETURNING statt SELECT-dann-DELETE: der DELETE lockt die
+    //     Zeile, sodass eine nebenläufig committete Selbst-Stornierung als
+    //     'storniert' zurückkommt und NICHT ein zweites Mal dekrementiert wird
+    //     (Gate-B: booked_count-Doppel-Dekrement-Race). Nur für tatsächlich
+    //     'gebucht' gelöschte Termine die Slot-Kapazität freigeben.
+    const geloeschteTermine = await tx
+      .delete(verificationBookings)
+      .where(
+        and(
+          eq(verificationBookings.tenantId, tenantId),
+          eq(verificationBookings.userId, userId),
+        ),
+      )
+      .returning({
+        slotId: verificationBookings.slotId,
+        status: verificationBookings.status,
+      });
+    for (const t of geloeschteTermine) {
+      if (t.status !== "gebucht") continue;
+      await tx
+        .update(verificationSlots)
+        .set({ bookedCount: sql`GREATEST(${verificationSlots.bookedCount} - 1, 0)` })
+        .where(eq(verificationSlots.id, t.slotId));
+    }
+
+    // 5d. invitations: die eingeladene Klartext-E-Mail ist PII und überlebt die
+    //     Anonymisierung (Audit M5) — sie ist über accepted_by=userId bzw.
+    //     email=alteEmail trivial rückführbar. Tombstone setzen + accepted_by
+    //     nullen; die PII-freie Historie (Rolle/Region/Status) bleibt erhalten.
+    //     invitations.email ist stets normalisiert (trim+lowercase) gespeichert,
+    //     users.email jedoch nicht → für den E-Mail-Zweig normalisiert
+    //     vergleichen, sonst entgeht eine Mixed-Case-pending-Einladung dem
+    //     Tombstone (Gate-B MAJOR).
+    const alteEmailNormalisiert = alteEmail.trim().toLowerCase();
+    await tx
+      .update(invitations)
+      .set({ email: buildTombstoneEmail(userId), acceptedBy: null })
+      .where(
+        and(
+          eq(invitations.tenantId, tenantId),
+          or(
+            eq(invitations.email, alteEmailNormalisiert),
+            eq(invitations.acceptedBy, userId),
+          ),
+        ),
+      );
 
     // 6. Anliegen werden NICHT gelöscht (pseudonymer Vorgang bleibt).
 
