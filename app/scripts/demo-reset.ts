@@ -16,10 +16,18 @@
  *   1. Stimmen + Beleg-Codes aller AKTIVEN Fragen des Demo-Mandanten löschen
  *      (dort stimmen nur Demo-Besucher ab). Die GESCHLOSSENE Beispiel-Frage
  *      samt ihrer 7 Seed-Stimmen/Belege bleibt — sie IST der Prüf-Moment.
- *   2. Ephemere Demo-Konten (@demo.invalid) löschen — Sessions/Rollen CASCADE.
- *   3. Anliegen des Demo-Mandanten löschen (Events/Follower CASCADE) — Seed
+ *   2. Alle NICHT-Seed-Fragen des Demo-Mandanten löschen (Kaskade räumt
+ *      Optionen/Stimmen/Belege/Zuteilungen/Widerstände): ephemere Demo-Admins
+ *      (Verwaltungs-Perspektive, lib/demo/actions.ts) erstellen eigene Fragen —
+ *      die Spielstände verschwinden vollständig; nur die drei kuratierten
+ *      Seed-Fragen (deterministische IDs aus src/lib/demo/seed-ids.ts) bleiben.
+ *   3. Alle QR-Codes des Demo-Mandanten löschen (qr_redemptions CASCADE) —
+ *      auch die stammen nur von Demo-Admins, der Seed legt keine an.
+ *   4. Ephemere Demo-Konten (@demo.invalid) löschen — Sessions/Rollen CASCADE.
+ *   5. Anliegen des Demo-Mandanten löschen (Events/Follower CASCADE) — Seed
  *      legt keine an; alles dort ist Besucher-Content (Gate-B MINOR-5).
- *   4. rate_limit_events des Demo-Scopes älter als 24 h aufräumen.
+ *   6. rate_limit_events der Demo-Scopes (Bürger + Verwaltung) älter als 24 h
+ *      aufräumen.
  *
  * Verwendung (Cron, täglich z. B. 03:30):
  *   DEMO_TENANT_SLUG=demo npm run demo:reset
@@ -27,7 +35,7 @@
 
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { and, eq, inArray, like, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, like, lt, notInArray, sql } from "drizzle-orm";
 import {
   tenants,
   polls,
@@ -35,10 +43,12 @@ import {
   voteReceipts,
   users,
   anliegen,
+  qrCodes,
   rateLimitEvents,
   auditEvents,
 } from "../src/db/schema.js";
 import { SEED_NAMESPACE, uuidV5 } from "./seed-utils.js";
+import { musterstadtSeedPollIds } from "../src/lib/demo/seed-ids.js";
 
 const databaseUrl =
   process.env.DATABASE_URL ??
@@ -111,6 +121,22 @@ async function main() {
       receiptsDeleted = r.length;
     }
 
+    // Nicht-Seed-Fragen der Demo-Admins (Verwaltungs-Perspektive) — VOR der
+    // User-Löschung, damit der Spielstand komplett verschwindet (polls-Kaskade
+    // räumt options/votes/receipts/allocations/resistances; erstelltVon wäre
+    // nach der User-Löschung ohnehin nur SET NULL, die Frage bliebe sonst stehen).
+    const seedPollIds = musterstadtSeedPollIds(SLUG);
+    const p = await tx
+      .delete(polls)
+      .where(and(eq(polls.tenantId, tenantId), notInArray(polls.id, seedPollIds)))
+      .returning({ id: polls.id });
+
+    // QR-Codes der Demo-Admins (qr_redemptions CASCADE) — der Seed legt keine an.
+    const q = await tx
+      .delete(qrCodes)
+      .where(eq(qrCodes.tenantId, tenantId))
+      .returning({ id: qrCodes.id });
+
     const u = await tx
       .delete(users)
       .where(and(eq(users.tenantId, tenantId), like(users.email, `%@${DEMO_EMAIL_DOMAIN}`)))
@@ -122,11 +148,12 @@ async function main() {
       .where(eq(anliegen.tenantId, tenantId))
       .returning({ id: anliegen.id });
 
+    // Beide Demo-Scopes (Bürger-Session + Verwaltungs-Session) aufräumen.
     await tx
       .delete(rateLimitEvents)
       .where(
         and(
-          eq(rateLimitEvents.scope, "demo_session"),
+          inArray(rateLimitEvents.scope, ["demo_session", "demo_admin_session"]),
           lt(rateLimitEvents.createdAt, sql`now() - interval '24 hours'`),
         ),
       );
@@ -140,16 +167,26 @@ async function main() {
         tenant: SLUG,
         votesDeleted,
         receiptsDeleted,
+        pollsDeleted: p.length,
+        qrCodesDeleted: q.length,
         usersDeleted: u.length,
         anliegenDeleted: a.length,
       },
     });
 
-    return { votesDeleted, receiptsDeleted, usersDeleted: u.length, anliegenDeleted: a.length };
+    return {
+      votesDeleted,
+      receiptsDeleted,
+      pollsDeleted: p.length,
+      qrCodesDeleted: q.length,
+      usersDeleted: u.length,
+      anliegenDeleted: a.length,
+    };
   });
 
   console.log(
     `Demo-Reset '${SLUG}': ${stats.votesDeleted} Stimmen, ${stats.receiptsDeleted} Belege, ` +
+      `${stats.pollsDeleted} Demo-Fragen, ${stats.qrCodesDeleted} QR-Codes, ` +
       `${stats.usersDeleted} Demo-Konten, ${stats.anliegenDeleted} Anliegen entfernt.`,
   );
   await sqlc.end();

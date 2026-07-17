@@ -43,6 +43,8 @@ import {
   requireAdminCtx,
 } from "@/lib/auth/action-context";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
+import { isDemoTenant } from "@/lib/demo/config";
+import { istMusterstadtSeedPollId } from "@/lib/demo/seed-ids";
 import { istGebietsZustaendig, waehleAnkerRegionId } from "@/lib/polls/gebiet";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { insertBelegCode } from "@/lib/polls/beleg";
@@ -745,6 +747,13 @@ export async function pollAktivieren(
   const idParsed = z.string().uuid().safeParse(pollId);
   if (!idParsed.success) return { ok: false, error: "Ungültige Umfrage-ID." };
 
+  // Seed-Schutz (Demo-Spielwiese): die drei kuratierten Beispiel-Fragen sind
+  // der Bürger-Rundgang — ephemere Demo-Admins dürfen sie nicht verändern
+  // (defensiv: die Seeds sind aktiv/geschlossen, der Status-Guard griffe schon).
+  if (isDemoTenant(ctx.tenant.slug) && istMusterstadtSeedPollId(ctx.tenant.slug, idParsed.data)) {
+    return { ok: false, error: "Diese Beispiel-Frage gehört zum Demo-Rundgang und bleibt unverändert." };
+  }
+
   const result = await ctx.db.transaction(async (tx: Db) => {
     // TOCTOU-Guard: nur aus 'entwurf' nach 'aktiv', tenant-scoped.
     // Poll-Daten (frage/scope) werden für die spätere Benachrichtigung MITGEFÜHRT
@@ -783,6 +792,16 @@ export async function pollAktivieren(
   });
 
   if (!result.ok) return { ok: false, error: result.error };
+
+  // SIDE-EFFECT-FENCE (Demo-Spielwiese, fail-closed): auf dem Demo-Mandanten
+  // wird notifyNewPoll KOMPLETT übersprungen — kein Mail-Versand nach außen,
+  // wenn ein ephemerer Demo-Admin eine Frage aktiviert. Der Empfängerfilter in
+  // notify.ts (schließt @demo.invalid + notifyNewPolls=false aus) ist nur
+  // Defense-in-Depth, KEIN Tenant-Gate: ein einziges echtes Opt-in-Konto im
+  // Demo-Tenant würde sonst bei jedem Demo-Spielzug E-Mail bekommen.
+  if (isDemoTenant(ctx.tenant.slug)) {
+    return { ok: true };
+  }
 
   // BEST-EFFORT-Benachrichtigung NACH erfolgreicher Aktivierung, AUSSERHALB der
   // Transaktion. Ein Mail-/Empfänger-Fehler darf pollAktivieren NIEMALS auf
@@ -845,6 +864,13 @@ export async function pollSchliessen(
   const idParsed = z.string().uuid().safeParse(pollId);
   if (!idParsed.success) return { ok: false, error: "Ungültige Umfrage-ID." };
 
+  // Seed-Schutz (Demo-Spielwiese): die kuratierte AKTIVE Beispiel-Frage ist der
+  // Abstimm-Moment des Bürger-Rundgangs — würde ein Demo-Admin sie schließen,
+  // wäre der Rundgang für ALLE Besucher bis zum nächtlichen Reset kaputt.
+  if (isDemoTenant(ctx.tenant.slug) && istMusterstadtSeedPollId(ctx.tenant.slug, idParsed.data)) {
+    return { ok: false, error: "Diese Beispiel-Frage gehört zum Demo-Rundgang und bleibt unverändert." };
+  }
+
   const result = await ctx.db.transaction(async (tx: Db) => {
     // ATOMARER Guard: nur aus 'aktiv' nach 'geschlossen', tenant-scoped.
     const updated = await tx
@@ -896,6 +922,12 @@ export async function pollEntwurfLoeschen(
 
   const idParsed = z.string().uuid().safeParse(pollId);
   if (!idParsed.success) return { ok: false, error: "Ungültige Umfrage-ID." };
+
+  // Seed-Schutz (Demo-Spielwiese): kuratierte Beispiel-Fragen nie löschbar
+  // (defensiv — sie sind aktiv/geschlossen, der Entwurf-Guard griffe schon).
+  if (isDemoTenant(ctx.tenant.slug) && istMusterstadtSeedPollId(ctx.tenant.slug, idParsed.data)) {
+    return { ok: false, error: "Diese Beispiel-Frage gehört zum Demo-Rundgang und bleibt unverändert." };
+  }
 
   const result = await ctx.db.transaction(async (tx: Db) => {
     // Sicherheitsnetz: bei vorhandenen Stimmen NIEMALS löschen (sollte bei
