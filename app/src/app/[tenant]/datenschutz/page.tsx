@@ -178,7 +178,7 @@ export default function DatenschutzPage() {
 
       <Abschnitt titel="11. Cookies: nur funktional, kein Tracking">
         <p>
-          Wir setzen ausschließlich zwei funktionale, technisch notwendige Cookies
+          Wir setzen ausschließlich drei funktionale, technisch notwendige Cookies
           ein — <strong>keine</strong> Analyse-Dienste, externen Schriftarten/CDNs
           oder Social-Media-Plugins:
         </p>
@@ -195,6 +195,14 @@ export default function DatenschutzPage() {
             Wiedererkennung über Websites hinweg und schaltet keine Rechte frei.
             Rechtsgrundlage: § 25 Abs. 2 Nr. 2 TDDDG (von Ihnen ausdrücklich
             angefordert) bzw. Art. 6 Abs. 1 lit. b/f DSGVO.
+          </li>
+          <li>
+            <strong>Hinweis-Cookie <code>pz_einrichtung_spaeter</code></strong>:
+            wird nur gesetzt, wenn Sie den Einrichtungs-Hinweis über „Später“
+            ausblenden; Laufzeit 30 Tage, fester Inhalt „1“ ohne jeden
+            Personenbezug — merkt sich ausschließlich diese Anzeige-Entscheidung.
+            Rechtsgrundlage: § 25 Abs. 2 Nr. 2 TDDDG (von Ihnen ausdrücklich
+            angefordert).
           </li>
         </ul>
       </Abschnitt>

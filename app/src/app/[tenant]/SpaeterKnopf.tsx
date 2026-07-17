@@ -18,7 +18,9 @@ export function SpaeterKnopf() {
   const router = useRouter();
 
   function handleSpaeter() {
-    document.cookie = `${EINRICHTUNG_SPAETER_COOKIE}=1; Path=/; Max-Age=${EINRICHTUNG_SPAETER_MAX_AGE}; SameSite=Lax`;
+    // Secure in Prod (Projektstandard, wie pz_region) — lokal via http weglassen.
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${EINRICHTUNG_SPAETER_COOKIE}=1; Path=/; Max-Age=${EINRICHTUNG_SPAETER_MAX_AGE}; SameSite=Lax${secure}`;
     router.refresh();
   }
 

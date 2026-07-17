@@ -319,15 +319,18 @@ export default async function UmfragenListePage({ params }: PageProps) {
 
   const teilnahmen = await getMeineTeilnahmen(db, tenant.id, userId!);
 
-  // Erst-Login-Lücke: wer sich ohne vorherige PLZ-Eingabe registriert, hat weder
-  // home_region noch Cookie und sieht nur die tenant-weite Sicht. Einmalige
-  // Einladung, den Wohnort zu setzen (regionAusPlz schreibt für Eingeloggte
-  // home_region_id mit — lib/region/actions.ts).
+  // Erst-Login-Lücke: Eingeloggte ohne Wohnort-Anker sehen nur die tenant-weite
+  // Sicht. Einmalige Einladung, den Wohnort zu setzen (regionAusPlz schreibt für
+  // Eingeloggte home_region_id mit — lib/region/actions.ts).
+  // BEWUSST UNABHÄNGIG vom Region-Cookie (Gate-B Checkliste MAJOR): wer als
+  // Anonymer die PLZ-Haustür passiert hat (Cookie gesetzt) und sich DANN
+  // registriert, hat trotzdem home_region_id = NULL — die eingeloggte Sicht
+  // nutzt das Cookie nicht. Ohne die Karte liefe der „Wohnort festlegen"-CTA
+  // der Einrichtungs-Checkliste hier ins Leere (Sackgassen-Klasse).
   // Nicht auf dem Demo-Tenant: Demo-Konten haben nie einen Wohnort, und der
   // Musterstadt-Zweig hat keine PLZ-Zuordnungen — die Karte wäre eine Sackgasse
   // mitten im Demo-Rundgang (Gate-B-Befund).
-  const zeigeRegionEinstieg =
-    viewerRegionId == null && region == null && !isDemoTenant(tenant.slug);
+  const zeigeRegionEinstieg = viewerRegionId == null && !isDemoTenant(tenant.slug);
 
   // Ein-Schritt-Nudge (Fläche B) oberhalb der Liste — aber NIE zwei
   // Setup-Elemente übereinander: zeigt die RegionEinstieg-Karte schon, entfällt
@@ -340,7 +343,10 @@ export default async function UmfragenListePage({ params }: PageProps) {
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-10">
-      {banner}
+      {/* Nie zwei Region-Elemente übereinander: zeigt die Wohnort-Karte, ist der
+          Banner (Ortsteil-Umschalter fürs Cookie) redundant — die eingeloggte
+          Sicht hängt ohnehin nicht am Cookie. */}
+      {!zeigeRegionEinstieg && banner}
       {zeigeNudge && einrichtungsSchritt && (
         <div className="mb-8">
           <NaechsterSchritt schritt={einrichtungsSchritt} tenantSlug={slugFromPath} />

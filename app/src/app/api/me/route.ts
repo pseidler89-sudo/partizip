@@ -50,7 +50,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // Einrichtungs-Checkliste (Konto-Seite): eigene Daten des eingeloggten Users —
   // datensparsam (nur Booleans, Teilnahme nur als Existenz via voter_ref).
-  const einrichtung = await getEinrichtungsStatus(db, tenant, user, user.id);
+  // Demo-Mandant: gar nicht erst berechnen — die Konto-Seite zeigt die Karte
+  // dort nie, die 3 Existenz-Queries wären umsonst (Gate-B MINOR).
+  const istDemo = isDemoTenant(tenant.slug);
+  const einrichtung = istDemo
+    ? null
+    : await getEinrichtungsStatus(db, tenant, user, user.id);
 
   return NextResponse.json({
     user: {
@@ -74,7 +79,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // Demo-Mandant (env-basiert, nur serverseitig entscheidbar): die Konto-
       // Seite blendet dort die Einrichtungs-Checkliste aus — Demo-Konten
       // erfüllen die Schritte nie (RegionEinstieg-Gate-B-Lehre).
-      istDemo: isDemoTenant(tenant.slug),
+      istDemo,
     },
   });
 }

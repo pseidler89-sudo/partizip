@@ -30,7 +30,8 @@ type MeData = {
     isAdmin?: boolean;
   };
   // Einrichtungs-Checkliste (Fläche A) — Booleans aus getEinrichtungsStatus.
-  einrichtung?: EinrichtungsStatus;
+  // null auf dem Demo-Mandanten (serverseitig übersprungen).
+  einrichtung?: EinrichtungsStatus | null;
   tenant: {
     slug: string;
     name: string;
@@ -103,6 +104,16 @@ export default function KontoPage() {
         .catch(() => { /* ignorieren */ });
     }
   }, [router]);
+
+  // Anker-Ziel (#benachrichtigungen, Checklisten-CTA) existiert erst NACH dem
+  // /api/me-Fetch — der native Anker-Scroll des Browsers läuft daher ins Leere.
+  // Nach dem Laden einmal manuell hinscrollen (Gate-B MINOR).
+  useEffect(() => {
+    if (data == null || typeof window === "undefined") return;
+    if (window.location.hash === "#benachrichtigungen") {
+      document.getElementById("benachrichtigungen")?.scrollIntoView({ block: "start" });
+    }
+  }, [data]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });

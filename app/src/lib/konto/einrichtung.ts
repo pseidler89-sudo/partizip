@@ -35,6 +35,13 @@ export interface EinrichtungsStatus {
   benachrichtigungAn: boolean;
   /** Mindestens eine Teilnahme in irgendeinem Abstimm-Format (nur das OB). */
   ersteTeilnahme: boolean;
+  /**
+   * false → die Teilnahme konnte nicht ermittelt werden (voter_ref-Salt fehlt).
+   * Die Checkliste blendet den Schritt dann komplett aus („X von 3") statt
+   * einen falschen Haken zu zeigen (Gate-B MINOR); ersteTeilnahme ist in dem
+   * Fall true, damit Nudge/alleErledigt nicht fälschlich nörgeln.
+   */
+  teilnahmeErmittelbar: boolean;
   /** Alle vier Schritte erledigt → Checkliste/Nudge verschwinden vollständig. */
   alleErledigt: boolean;
 }
@@ -81,11 +88,13 @@ export async function getEinrichtungsStatus(
   const benachrichtigungAn = user.notifyNewPolls;
 
   let ersteTeilnahme = true;
+  let teilnahmeErmittelbar = true;
   let voterRef: string | null;
   try {
     voterRef = computeVoterRefForUser(userId);
   } catch {
     voterRef = null;
+    teilnahmeErmittelbar = false;
   }
   if (voterRef != null) {
     // Deckt ALLE Abstimm-Formate ab: Ja/Nein liegt in `votes`, Dot-Voting NUR
@@ -125,7 +134,14 @@ export async function getEinrichtungsStatus(
   const alleErledigt =
     wohnortGesetzt && verifiziert && benachrichtigungAn && ersteTeilnahme;
 
-  return { wohnortGesetzt, verifiziert, benachrichtigungAn, ersteTeilnahme, alleErledigt };
+  return {
+    wohnortGesetzt,
+    verifiziert,
+    benachrichtigungAn,
+    ersteTeilnahme,
+    teilnahmeErmittelbar,
+    alleErledigt,
+  };
 }
 
 /**

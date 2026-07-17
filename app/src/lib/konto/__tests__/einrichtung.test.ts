@@ -65,6 +65,7 @@ function status(
     verifiziert,
     benachrichtigungAn,
     ersteTeilnahme,
+    teilnahmeErmittelbar: true,
     alleErledigt: wohnortGesetzt && verifiziert && benachrichtigungAn && ersteTeilnahme,
   };
 }
@@ -117,6 +118,38 @@ describe("naechsterSchritt (Priorität)", () => {
           }
         }
       }
+    }
+  });
+
+  it("Salt fehlt → teilnahmeErmittelbar=false, Teilnahme gilt als erledigt (ausblenden statt nörgeln)", async () => {
+    // Salt-Fehler-Pfad (Gate-B MINOR): keine DB-Queries nötig — die Funktion
+    // bricht die Teilnahme-Ermittlung vor jedem Query ab; db bleibt ungenutzt.
+    const prevVote = process.env.VOTE_REF_SALT;
+    const prevAnliegen = process.env.ANLIEGEN_REF_SALT;
+    delete process.env.VOTE_REF_SALT;
+    delete process.env.ANLIEGEN_REF_SALT;
+    try {
+      const s = await getEinrichtungsStatus(
+        {} as never,
+        { id: "00000000-0000-0000-0000-000000000000" } as never,
+        {
+          ortsteilId: null,
+          homeRegionId: null,
+          notifyNewPolls: true,
+          verificationStatus: "pending",
+          residencyVerifiedAt: null,
+          residencyVerifiedUntil: null,
+          accountStatus: "active",
+          minAgeConfirmedAt: new Date(),
+        },
+        "11111111-1111-1111-1111-111111111111",
+      );
+      expect(s.teilnahmeErmittelbar).toBe(false);
+      expect(s.ersteTeilnahme).toBe(true); // Nudge/alleErledigt nörgeln nicht
+      expect(naechsterSchritt(s)).toBe("wohnort"); // übrige Schritte unberührt
+    } finally {
+      if (prevVote !== undefined) process.env.VOTE_REF_SALT = prevVote;
+      if (prevAnliegen !== undefined) process.env.ANLIEGEN_REF_SALT = prevAnliegen;
     }
   });
 });
@@ -197,6 +230,7 @@ describe("konto/einrichtung (Integration)", () => {
       verifiziert: false,
       benachrichtigungAn: false,
       ersteTeilnahme: false,
+      teilnahmeErmittelbar: true,
       alleErledigt: false,
     });
     expect(naechsterSchritt(s)).toBe("wohnort");

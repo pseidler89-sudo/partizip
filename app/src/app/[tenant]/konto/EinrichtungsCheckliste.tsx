@@ -85,14 +85,18 @@ function Schritt({
 }
 
 export function EinrichtungsCheckliste({ einrichtung, tenantSlug }: Props) {
-  // Text-Zähler über die vier Einrichtungs-Schritte (Konto-erstellt zählt
-  // nicht mit — es ist der Startpunkt, kein offener Schritt).
-  const erledigt = [
+  // Ist die Teilnahme nicht ermittelbar (Salt-Konfiguration), fällt der Schritt
+  // KOMPLETT aus der Liste und dem Zähler — ein falscher Haken wäre gelogen,
+  // eine falsche Aufforderung nörgelnd (Gate-B MINOR).
+  const schritte = [
     einrichtung.wohnortGesetzt,
     einrichtung.verifiziert,
     einrichtung.benachrichtigungAn,
-    einrichtung.ersteTeilnahme,
-  ].filter(Boolean).length;
+    ...(einrichtung.teilnahmeErmittelbar ? [einrichtung.ersteTeilnahme] : []),
+  ];
+  // Text-Zähler über die echten Einrichtungs-Schritte (Konto-erstellt zählt
+  // nicht mit — es ist der Startpunkt, kein offener Schritt).
+  const erledigt = schritte.filter(Boolean).length;
 
   return (
     <section className="pz-card mb-6 p-5" aria-label="Ihr Konto einrichten">
@@ -100,7 +104,7 @@ export function EinrichtungsCheckliste({ einrichtung, tenantSlug }: Props) {
         Ihr Konto einrichten
       </h2>
       <p className="mt-0.5 text-xs" style={{ color: "var(--pz-muted)" }}>
-        {erledigt} von 4 Schritten erledigt
+        {erledigt} von {schritte.length} Schritten erledigt
       </p>
       <ul className="mt-3 space-y-2.5">
         <Schritt erledigt titel="Konto erstellt" />
@@ -122,12 +126,14 @@ export function EinrichtungsCheckliste({ einrichtung, tenantSlug }: Props) {
           nutzen="Sie erfahren per E-Mail, wenn eine neue Abstimmung in Ihrem Gebiet startet."
           href="#benachrichtigungen"
         />
-        <Schritt
-          erledigt={einrichtung.ersteTeilnahme}
-          titel="Erste Abstimmung mitmachen"
-          nutzen="Probieren Sie es einfach aus — unverbindliche Stimmungsbilder gehen ab Stufe 1."
-          href={`/${tenantSlug}/umfragen`}
-        />
+        {einrichtung.teilnahmeErmittelbar && (
+          <Schritt
+            erledigt={einrichtung.ersteTeilnahme}
+            titel="Erste Abstimmung mitmachen"
+            nutzen="Probieren Sie es einfach aus — unverbindliche Stimmungsbilder gehen ab Stufe 1."
+            href={`/${tenantSlug}/umfragen`}
+          />
+        )}
       </ul>
     </section>
   );
