@@ -38,6 +38,7 @@ import * as schema from "@/db/schema.js";
 import {
   getPollErgebnis,
   getAktivePolls,
+  getAllPollsForAdmin,
   getMeineTeilnahmen,
   hatBereitsAbgestimmtBatch,
   mitErgebnissen,
@@ -580,5 +581,50 @@ describe("polls/queries (Integration)", () => {
 
     const ja = enriched.find((p) => p.id === pJa.id)!;
     expect(ja.widerstand).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // getAllPollsForAdmin — Teilnahme-Zähler über ALLE Formate (Gate-B MAJOR
+  // Block G: zählte vorher nur votes → Dot/Widerstand zeigten „0 Stimmen").
+  // -------------------------------------------------------------------------
+
+  it.skipIf(SKIP)("getAllPollsForAdmin zählt Dot-/Widerstands-Teilnehmende (distinct), nicht nur votes", async () => {
+    const [t] = await db.insert(tenants).values({ slug: `adm-${Date.now()}`, name: "AdminAgg" }).returning();
+    const stadtT = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+
+    // Ja/Nein: 3 Stimmen (davon 1 verifiziert).
+    const [pJa] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "ja?", typ: "ja_nein_enthaltung", status: "aktiv" }).returning();
+    await db.insert(votes).values([
+      { pollId: pJa.id, tenantId: t.id, voterRef: "aj1", choice: "ja", warVerifiziert: true },
+      { pollId: pJa.id, tenantId: t.id, voterRef: "aj2", choice: "nein", warVerifiziert: false },
+      { pollId: pJa.id, tenantId: t.id, voterRef: "aj3", choice: "ja", warVerifiziert: false },
+    ]);
+
+    // Dot: 2 Teilnehmende (einer verteilt auf 2 Optionen → 3 Zeilen, aber 2 Personen).
+    const [pDot] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "dot?", typ: "dot_voting", status: "aktiv", punkteBudget: 5 }).returning();
+    const [dA] = await db.insert(pollOptions).values({ pollId: pDot.id, tenantId: t.id, label: "A", position: 0 }).returning();
+    const [dB] = await db.insert(pollOptions).values({ pollId: pDot.id, tenantId: t.id, label: "B", position: 1 }).returning();
+    await db.insert(voteAllocations).values([
+      { pollId: pDot.id, tenantId: t.id, optionId: dA.id, voterRef: "ad1", punkte: 2, warVerifiziert: true },
+      { pollId: pDot.id, tenantId: t.id, optionId: dB.id, voterRef: "ad1", punkte: 3, warVerifiziert: true },
+      { pollId: pDot.id, tenantId: t.id, optionId: dA.id, voterRef: "ad2", punkte: 5, warVerifiziert: false },
+    ]);
+
+    // Widerstand: 1 Teilnehmende:r über 2 Optionen (2 Zeilen, 1 Person).
+    const [pW] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "wid?", typ: "widerstandsabfrage", status: "aktiv" }).returning();
+    const [wA] = await db.insert(pollOptions).values({ pollId: pW.id, tenantId: t.id, label: "WA", position: 0 }).returning();
+    const [wB] = await db.insert(pollOptions).values({ pollId: pW.id, tenantId: t.id, label: "WB", position: 1 }).returning();
+    await db.insert(voteResistances).values([
+      { pollId: pW.id, tenantId: t.id, optionId: wA.id, voterRef: "aw1", wert: 0, warVerifiziert: true },
+      { pollId: pW.id, tenantId: t.id, optionId: wB.id, voterRef: "aw1", wert: 7, warVerifiziert: true },
+    ]);
+
+    const items = await getAllPollsForAdmin(db as never, t.id);
+    const ja = items.find((p) => p.id === pJa.id)!;
+    expect([ja.stimmenGesamt, ja.stimmenVerifiziert, ja.typ]).toEqual([3, 1, "ja_nein_enthaltung"]);
+    const dot = items.find((p) => p.id === pDot.id)!;
+    expect([dot.stimmenGesamt, dot.stimmenVerifiziert, dot.typ]).toEqual([2, 1, "dot_voting"]);
+    const wid = items.find((p) => p.id === pW.id)!;
+    expect([wid.stimmenGesamt, wid.stimmenVerifiziert, wid.typ]).toEqual([1, 1, "widerstandsabfrage"]);
   });
 });

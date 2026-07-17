@@ -53,6 +53,15 @@ export interface WiderstandsOptionErgebnis {
   mittelwert: number | null;
   /** true → diese Option hat den geringsten Gesamtwiderstand (Gewinner; bei Gleichstand mehrere). */
   geringsterWiderstand: boolean;
+  /**
+   * k-Anonymität (defensiv): true → diese Option wurde von WENIGER Personen
+   * bewertet als teilgenommen haben (verletzte Vollständigkeits-Invariante,
+   * z. B. durch einen künftigen Options-Edit-Pfad) und ihre Zahlen sind
+   * serverseitig redigiert — eine 1..k-1-Personen-Option würde sonst
+   * Einzelwerte verraten und eine unbewertete Option (Summe 0) fälschlich
+   * „gewinnen".
+   */
+  maskiert: boolean;
 }
 
 export interface WiderstandsErgebnis {
@@ -84,6 +93,13 @@ export function validateWiderstandsWerte(
   | { ok: false; error: string } {
   if (!Array.isArray(input)) {
     return { ok: false, error: "Ungültige Eingabe." };
+  }
+  // Options-lose Umfrage (nur per DB-Manipulation/Seed-Bug möglich — der
+  // Composer erzwingt ≥2 Optionen): OHNE diesen Guard wäre die leere Abgabe
+  // „vollständig" (0 === 0) und der leere Insert würde erst in der Transaktion
+  // mit einem 500 statt einer sauberen Fehlermeldung scheitern.
+  if (gueltigeOptionIds.size === 0) {
+    return { ok: false, error: "Diese Abstimmung hat keine Optionen." };
   }
   const gesehen = new Set<string>();
   const werte: { optionId: string; wert: number }[] = [];
@@ -127,10 +143,15 @@ export function validateWiderstandsWerte(
  * Aggregiert Widerstands-Zeilen zu einem Widerstandsabfrage-Ergebnis. `beendet`
  * steuert (zusammen mit der k-Schwelle) die Zurückhaltung der Aufschlüsselung.
  *
- * KEINE per-Option-Maskierung/Komplementär-Suppression (anders als Dot-Voting):
- * da jede:r Teilnehmende JEDE Option bewertet (vollständige Abgabe), ist die
- * per-Option-Wählerzahl immer = gesamtWaehler — es gibt keine „kleine Gruppe je
- * Option", das Gesamt-Gate (Mindest-N) erledigt den Schutz vollständig.
+ * Per-Option-Maskierung nur DEFENSIV (anders als Dot-Voting): da jede:r
+ * Teilnehmende JEDE Option bewertet (vollständige Abgabe, von der Action
+ * erzwungen), ist die per-Option-Wählerzahl normal immer = gesamtWaehler —
+ * keine „kleine Gruppe je Option", das Gesamt-Gate (Mindest-N) trägt den
+ * Schutz. Sollte die Invariante je brechen (künftiger Options-Edit-Pfad,
+ * historische Teilabgaben), würde eine Option mit 1..k-1 Zeilen Einzelwerte
+ * verraten und eine unbewertete Option (Summe 0) fälschlich „gewinnen" —
+ * solche Optionen werden deshalb hart maskiert und vom Gewinner-Vergleich
+ * ausgeschlossen (Gate-B Block G).
  */
 export function aggregateWiderstandsVotes(
   rows: readonly WiderstandsWertRow[],
@@ -169,6 +190,7 @@ export function aggregateWiderstandsVotes(
           widerstandsSumme: null,
           mittelwert: null,
           geringsterWiderstand: false,
+          maskiert: false,
         })),
       aufschluesselungZurueckgehalten: true,
       zurueckhaltungsGrund: grund,
@@ -196,13 +218,22 @@ export function aggregateWiderstandsVotes(
       summe,
       // 1 Nachkommastelle; ohne Zeilen (defensiv) 0.
       mittelwert: zeilen > 0 ? Math.round((summe / zeilen) * 10) / 10 : 0,
+      // Defensiv-Maskierung (siehe Funktionskommentar): Option von weniger
+      // Personen bewertet als teilgenommen haben → Zahlen redigieren.
+      maskiert: zeilen < gesamtWaehler,
     };
   });
 
   // Konsens-Sortierung: aufsteigend nach Gesamtwiderstand (geringster zuerst),
-  // bei Gleichstand nach Position. Gewinner = ALLE Optionen mit Minimal-Summe.
-  mitSummen.sort((a, b) => a.summe - b.summe || a.position - b.position);
-  const minSumme = mitSummen.length > 0 ? mitSummen[0].summe : 0;
+  // bei Gleichstand nach Position; maskierte Optionen ans Ende (nach Position).
+  // Gewinner = ALLE nicht-maskierten Optionen mit Minimal-Summe.
+  mitSummen.sort((a, b) => {
+    if (a.maskiert !== b.maskiert) return a.maskiert ? 1 : -1;
+    if (a.maskiert) return a.position - b.position;
+    return a.summe - b.summe || a.position - b.position;
+  });
+  const sichtbar = mitSummen.filter((o) => !o.maskiert);
+  const minSumme = sichtbar.length > 0 ? sichtbar[0].summe : null;
 
   return {
     format: "widerstandsabfrage",
@@ -212,9 +243,10 @@ export function aggregateWiderstandsVotes(
       optionId: o.optionId,
       label: o.label,
       position: o.position,
-      widerstandsSumme: o.summe,
-      mittelwert: o.mittelwert,
-      geringsterWiderstand: o.summe === minSumme,
+      widerstandsSumme: o.maskiert ? null : o.summe,
+      mittelwert: o.maskiert ? null : o.mittelwert,
+      geringsterWiderstand: !o.maskiert && minSumme !== null && o.summe === minSumme,
+      maskiert: o.maskiert,
     })),
     aufschluesselungZurueckgehalten: false,
     zurueckhaltungsGrund: null,

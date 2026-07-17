@@ -899,13 +899,27 @@ export async function pollEntwurfLoeschen(
 
   const result = await ctx.db.transaction(async (tx: Db) => {
     // Sicherheitsnetz: bei vorhandenen Stimmen NIEMALS löschen (sollte bei
-    // einem Entwurf 0 sein — aber wir verlassen uns nicht darauf).
-    const stimmen = await tx
-      .select({ id: votes.id })
-      .from(votes)
-      .where(and(eq(votes.pollId, idParsed.data), eq(votes.tenantId, ctx.tenant.id)))
-      .limit(1);
-    if (stimmen.length > 0) {
+    // einem Entwurf 0 sein — aber wir verlassen uns nicht darauf). Deckt ALLE
+    // Abstimm-Formate ab: Ja/Nein (votes), Dot (vote_allocations), Widerstand
+    // (vote_resistances) — die Format-Actions schreiben keine votes-Zeile.
+    const [stimmen, zuteilungen, widerstaende] = await Promise.all([
+      tx
+        .select({ id: votes.id })
+        .from(votes)
+        .where(and(eq(votes.pollId, idParsed.data), eq(votes.tenantId, ctx.tenant.id)))
+        .limit(1),
+      tx
+        .select({ id: voteAllocations.id })
+        .from(voteAllocations)
+        .where(and(eq(voteAllocations.pollId, idParsed.data), eq(voteAllocations.tenantId, ctx.tenant.id)))
+        .limit(1),
+      tx
+        .select({ id: voteResistances.id })
+        .from(voteResistances)
+        .where(and(eq(voteResistances.pollId, idParsed.data), eq(voteResistances.tenantId, ctx.tenant.id)))
+        .limit(1),
+    ]);
+    if (stimmen.length > 0 || zuteilungen.length > 0 || widerstaende.length > 0) {
       return { ok: false as const, error: "Diese Umfrage hat bereits Stimmen und kann nicht gelöscht werden." };
     }
 

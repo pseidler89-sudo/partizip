@@ -613,21 +613,33 @@ export interface PollAdminItem {
   regionPath: string;
   status: (typeof pollStatusEnum.enumValues)[number];
   verbindlich: boolean;
+  /** Abstimm-Format (ADR-025) — für Format-Kennzeichnung + Zähler-Wortwahl. */
+  typ: "ja_nein_enthaltung" | "dot_voting" | "widerstandsabfrage";
   opensAt: Date | null;
   closesAt: Date | null;
   createdAt: Date;
-  /** Anzahl aller abgegebenen Stimmen (tenant-scoped). */
+  /**
+   * Teilnahme-Zähler: Ja/Nein = Stimmen (votes), Dot/Widerstand = Teilnehmende
+   * (distinct voter_ref — eine Person hat mehrere Zeilen je Option).
+   */
   stimmenGesamt: number;
-  /** Davon Stimmen mit war_verifiziert = true. */
+  /** Davon wohnsitz-verifiziert (war_verifiziert-Snapshot). */
   stimmenVerifiziert: number;
 }
 
 /**
- * Alle Umfragen des Tenants (jeden Status), neu→alt, jeweils mit Stimmenzählern
- * (gesamt + verifiziert). Tenant-scoped. Nur für Admin-Sichten gedacht — die
- * Aufrufer-Seite erzwingt die Admin-Berechtigung serverseitig.
+ * Alle Umfragen des Tenants (jeden Status), neu→alt, jeweils mit Teilnahme-
+ * Zählern (gesamt + verifiziert). Tenant-scoped. Nur für Admin-Sichten gedacht —
+ * die Aufrufer-Seite erzwingt die Admin-Berechtigung serverseitig.
  *
- * Effizient: EINE Aggregations-Query über votes (GROUP BY poll_id) statt N+1.
+ * Deckt ALLE Abstimm-Formate ab (Gate-B MAJOR Block G): Ja/Nein zählt votes-
+ * Zeilen, Dot/Widerstand zählen DISTINCT voter_ref aus vote_allocations bzw.
+ * vote_resistances — sonst zeigt die Verwaltung für diese Formate dauerhaft
+ * „0 Stimmen" und ein Admin schließt eine laufende Umfrage im Glauben, niemand
+ * habe teilgenommen. Je Poll ist genau eine Quelle befüllt (typ-Gates der
+ * Actions), die Summen addieren sich daher verlustfrei.
+ *
+ * Effizient: DREI Aggregations-Queries (GROUP BY poll_id) statt N+1.
  * Anschließend per Map zugeordnet (wie getMeineTeilnahmen). Keine Roh-SQL-Dates —
  * es werden keine Zeit-Parameter gebunden (nur status/tenant-Filter).
  */
@@ -645,6 +657,7 @@ export async function getAllPollsForAdmin(
       regionPath: sql<string>`${regions.path}::text`,
       status: polls.status,
       verbindlich: polls.verbindlich,
+      typ: polls.typ,
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
       createdAt: polls.createdAt,
@@ -656,32 +669,64 @@ export async function getAllPollsForAdmin(
 
   if (pollRows.length === 0) return [];
 
-  // Aggregation in EINEM Rutsch: gesamt + verifiziert je Poll (tenant-scoped).
-  // FILTER (WHERE war_verifiziert) zählt nur verifizierte Stimmen.
-  const aggRows = await db
-    .select({
-      pollId: votes.pollId,
-      gesamt: count(),
-      verifiziert: sql<number>`count(*) filter (where ${votes.warVerifiziert})`.mapWith(
-        Number
-      ),
-    })
-    .from(votes)
-    .where(eq(votes.tenantId, tenantId))
-    .groupBy(votes.pollId);
-
   type AggRow = { pollId: string; gesamt: number; verifiziert: number };
-  const aggByPoll = new Map<string, AggRow>(
-    (aggRows as AggRow[]).map((r) => [r.pollId, r])
-  );
+
+  // Aggregation je Format in EINEM Rutsch (tenant-scoped). FILTER (WHERE
+  // war_verifiziert) zählt nur Verifizierte; bei den Options-Formaten DISTINCT
+  // voter_ref, da eine Person eine Zeile JE OPTION hat.
+  const [voteAgg, allocAgg, resistAgg] = await Promise.all([
+    db
+      .select({
+        pollId: votes.pollId,
+        gesamt: count(),
+        verifiziert: sql<number>`count(*) filter (where ${votes.warVerifiziert})`.mapWith(
+          Number
+        ),
+      })
+      .from(votes)
+      .where(eq(votes.tenantId, tenantId))
+      .groupBy(votes.pollId),
+    db
+      .select({
+        pollId: voteAllocations.pollId,
+        gesamt: sql<number>`count(distinct ${voteAllocations.voterRef})`.mapWith(Number),
+        verifiziert: sql<number>`count(distinct ${voteAllocations.voterRef}) filter (where ${voteAllocations.warVerifiziert})`.mapWith(
+          Number
+        ),
+      })
+      .from(voteAllocations)
+      .where(eq(voteAllocations.tenantId, tenantId))
+      .groupBy(voteAllocations.pollId),
+    db
+      .select({
+        pollId: voteResistances.pollId,
+        gesamt: sql<number>`count(distinct ${voteResistances.voterRef})`.mapWith(Number),
+        verifiziert: sql<number>`count(distinct ${voteResistances.voterRef}) filter (where ${voteResistances.warVerifiziert})`.mapWith(
+          Number
+        ),
+      })
+      .from(voteResistances)
+      .where(eq(voteResistances.tenantId, tenantId))
+      .groupBy(voteResistances.pollId),
+  ]);
+
+  const aggByPoll = new Map<string, AggRow>();
+  for (const r of [...voteAgg, ...allocAgg, ...resistAgg] as AggRow[]) {
+    const bisher = aggByPoll.get(r.pollId);
+    aggByPoll.set(r.pollId, {
+      pollId: r.pollId,
+      gesamt: (bisher?.gesamt ?? 0) + Number(r.gesamt),
+      verifiziert: (bisher?.verifiziert ?? 0) + Number(r.verifiziert),
+    });
+  }
 
   type PollRow = (typeof pollRows)[number];
   return pollRows.map((p: PollRow) => {
     const agg = aggByPoll.get(p.id);
     return {
       ...p,
-      stimmenGesamt: agg ? Number(agg.gesamt) : 0,
-      stimmenVerifiziert: agg ? Number(agg.verifiziert) : 0,
+      stimmenGesamt: agg ? agg.gesamt : 0,
+      stimmenVerifiziert: agg ? agg.verifiziert : 0,
     };
   });
 }

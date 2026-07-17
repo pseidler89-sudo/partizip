@@ -171,4 +171,41 @@ describe("aggregateWiderstandsVotes", () => {
     expect(e.gesamtWaehler).toBe(5);
     expect(e.verifizierteWaehler).toBe(3);
   });
+
+  it("maskiert defensiv Optionen mit weniger Bewertungen als Teilnehmenden (verletzte Vollständigkeit)", () => {
+    // 5 vollständige Wähler über a/b/c; Option d (hypothetischer Options-
+    // Edit-Pfad) nur von EINER Person mit 9 bewertet, Option e von niemandem.
+    // Ohne Maskierung verriete d den Einzelwert und e (Summe 0) würde
+    // fälschlich „gewinnen".
+    const OPTS5 = [
+      ...OPTS,
+      { id: "d", label: "Nachzügler", position: 3 },
+      { id: "e", label: "Unbewertet", position: 4 },
+    ];
+    const r = [
+      ...rows(5, { a: 1, b: 5, c: 7 }),
+      { optionId: "d", wert: 9, voterRef: "v0", warVerifiziert: false },
+    ];
+    const e = aggregateWiderstandsVotes(r, OPTS5, true);
+    const d = e.optionen.find((o) => o.optionId === "d")!;
+    const eOpt = e.optionen.find((o) => o.optionId === "e")!;
+    // Beide maskiert: Zahlen redigiert, kein Gewinner-Flag, ans Ende sortiert.
+    for (const o of [d, eOpt]) {
+      expect(o.maskiert).toBe(true);
+      expect(o.widerstandsSumme).toBeNull();
+      expect(o.mittelwert).toBeNull();
+      expect(o.geringsterWiderstand).toBe(false);
+    }
+    expect(e.optionen.slice(-2).map((o) => o.optionId)).toEqual(["d", "e"]);
+    // Gewinner kommt nur aus den vollständig bewerteten Optionen.
+    expect(e.optionen.filter((o) => o.geringsterWiderstand).map((o) => o.optionId)).toEqual(["a"]);
+    // Reguläre Abgaben (Vollständigkeit intakt) bleiben unmaskiert.
+    expect(e.optionen.find((o) => o.optionId === "a")!.maskiert).toBe(false);
+  });
+
+  it("lehnt die leere Abgabe bei options-loser Umfrage sauber ab (kein leerer Insert/500)", () => {
+    const r = validateWiderstandsWerte([], new Set<string>());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/keine Optionen/);
+  });
 });

@@ -176,7 +176,8 @@ export default function DotMitmachen({
         })}
       </ul>
 
-      {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+      {/* role="alert": Screenreader erfahren die Ablehnung sofort (ADR-025). */}
+      {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
       {demoMode && (
         <p className="mt-3 text-xs" style={{ color: "var(--pz-muted)" }}>
           Demo-Vereinfachung: Ihre Stimme wird über ein Wegwerf-Demo-Konto gezählt; im Echtbetrieb per E-Mail-Link.
@@ -227,7 +228,9 @@ function DotErgebnisAnzeige({
       {ergebnis.aufschluesselungZurueckgehalten ? (
         <p className="mt-3 rounded-lg border border-dashed p-3 text-sm" style={{ borderColor: "var(--pz-line)", color: "var(--pz-muted)" }}>
           {ergebnis.zurueckhaltungsGrund === "zu_wenige_teilnehmende"
-            ? "Die Verteilung wird angezeigt, sobald genügend Personen mitgemacht haben (Schutz kleiner Gruppen)."
+            ? // Tritt nur NACH Abstimmungsende auf — kein „sobald genügend
+              // mitmachen"-Versprechen, das niemand mehr einlösen kann (Gate-B).
+              "Es haben zu wenige Personen teilgenommen — die Verteilung bleibt zum Schutz kleiner Gruppen ausgeblendet."
             : "Die Verteilung der Punkte wird nach Abstimmungsende angezeigt. Die Teilnahme können Sie schon sehen."}
         </p>
       ) : (

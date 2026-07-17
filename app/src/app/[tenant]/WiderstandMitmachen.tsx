@@ -33,11 +33,16 @@ interface Props {
   demoMode?: boolean;
 }
 
-/** Sprechende Slider-Ansage für Screenreader (aria-valuetext). */
+/**
+ * Sprechende Slider-Ansage für Screenreader (aria-valuetext). Benannt sind NUR
+ * die Endpunkte — exakt wie die sichtbare Legende („0 keine Einwände / 10
+ * starker Widerstand"), damit sehende und nicht-sehende Nutzer dieselbe
+ * Skalen-Semantik bekommen (Gate-B-A11y-Fund: 8–9 klangen sonst wie 10).
+ */
 function wertAnsage(wert: number): string {
-  const stufe =
-    wert === 0 ? "keine Einwände" : wert >= 8 ? "starker Widerstand" : `Widerstand ${wert}`;
-  return `${wert} von 10 — ${stufe}`;
+  const endpunkt =
+    wert === 0 ? " — keine Einwände" : wert === 10 ? " — starker Widerstand" : "";
+  return `Widerstand ${wert} von 10${endpunkt}`;
 }
 
 export default function WiderstandMitmachen({
@@ -169,7 +174,8 @@ export default function WiderstandMitmachen({
         })}
       </ul>
 
-      {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+      {/* role="alert": Screenreader erfahren die Ablehnung sofort (ADR-025). */}
+      {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
       {demoMode && (
         <p className="mt-3 text-xs" style={{ color: "var(--pz-muted)" }}>
           Demo-Vereinfachung: Ihre Stimme wird über ein Wegwerf-Demo-Konto gezählt; im Echtbetrieb per E-Mail-Link.
@@ -225,7 +231,9 @@ function WiderstandsErgebnisAnzeige({
       {ergebnis.aufschluesselungZurueckgehalten ? (
         <p className="mt-3 rounded-lg border border-dashed p-3 text-sm" style={{ borderColor: "var(--pz-line)", color: "var(--pz-muted)" }}>
           {ergebnis.zurueckhaltungsGrund === "zu_wenige_teilnehmende"
-            ? "Die Auswertung wird angezeigt, sobald genügend Personen mitgemacht haben (Schutz kleiner Gruppen)."
+            ? // Tritt nur NACH Abstimmungsende auf — kein „sobald genügend
+              // mitmachen"-Versprechen, das niemand mehr einlösen kann (Gate-B).
+              "Es haben zu wenige Personen teilgenommen — die Auswertung bleibt zum Schutz kleiner Gruppen ausgeblendet."
             : "Die Auswertung wird nach Abstimmungsende angezeigt. Die Teilnahme können Sie schon sehen."}
         </p>
       ) : (
@@ -242,7 +250,11 @@ function WiderstandsErgebnisAnzeige({
                   )}
                 </span>
                 <span className="shrink-0 tabular-nums" style={{ color: "var(--pz-muted)" }}>
-                  Gesamtwiderstand {o.widerstandsSumme} · Ø {o.mittelwert}
+                  {o.maskiert ? (
+                    "zum Schutz kleiner Gruppen ausgeblendet"
+                  ) : (
+                    <>Gesamtwiderstand {o.widerstandsSumme} · Ø {o.mittelwert}</>
+                  )}
                 </span>
               </div>
               <div className="mt-1 h-2.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: "var(--pz-neutral-soft)" }}>

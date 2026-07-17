@@ -202,6 +202,12 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
                               Stimmungsbild
                             </span>
                           )}
+                          {/* Format-Kennzeichnung (ADR-025) — Ja/Nein bleibt unmarkiert (Default). */}
+                          {p.typ !== "ja_nein_enthaltung" && (
+                            <span className="pz-badge-neutral inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium">
+                              {p.typ === "dot_voting" ? "Punkte-Voting" : "Widerstandsabfrage"}
+                            </span>
+                          )}
                         </div>
 
                         <p className="mt-2 font-medium" style={{ color: "var(--pz-ink)" }}>
@@ -209,9 +215,16 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
                         </p>
 
                         <p className="mt-1 text-sm" style={{ color: "var(--pz-body)" }}>
+                          {/* Options-Formate zählen Teilnehmende (distinct), Ja/Nein Stimmen. */}
                           <strong>{p.stimmenGesamt}</strong>{" "}
-                          {p.stimmenGesamt === 1 ? "Stimme" : "Stimmen"}, davon{" "}
-                          <strong>{p.stimmenVerifiziert}</strong> verifiziert
+                          {p.typ === "ja_nein_enthaltung"
+                            ? p.stimmenGesamt === 1
+                              ? "Stimme"
+                              : "Stimmen"
+                            : p.stimmenGesamt === 1
+                              ? "Teilnahme"
+                              : "Teilnahmen"}
+                          , davon <strong>{p.stimmenVerifiziert}</strong> verifiziert
                         </p>
 
                         <p className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
