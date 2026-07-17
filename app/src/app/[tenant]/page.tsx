@@ -28,6 +28,7 @@ import {
   getAktivePolls,
   hatBereitsAbgestimmt,
   hatBereitsAbgestimmtBatch,
+  hatBereitsDotAbgestimmt,
   mitErgebnissen,
   type PollMitErgebnis,
 } from "@/lib/polls/queries";
@@ -133,8 +134,14 @@ function PollKarte({
       </h4>
       {/* Dot-Voting hat kein Ja/Nein-Aggregat — Teilnahme-Zeile aus dem
           Dot-Ergebnis (M1-Nachzug Block F) statt fälschlich „Noch keine Stimmen". */}
-      {poll.typ === "dot_voting" && poll.dot ? (
-        <KurzErgebnisDot ergebnis={poll.dot} />
+      {poll.typ === "dot_voting" ? (
+        poll.dot ? (
+          <KurzErgebnisDot ergebnis={poll.dot} />
+        ) : (
+          <div className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
+            Punkte-Voting — verteilen Sie Ihre Punkte auf die Optionen
+          </div>
+        )
       ) : (
         <KurzErgebnis ergebnis={poll.ergebnis} />
       )}
@@ -274,8 +281,13 @@ export default async function TenantLandingPage({ params }: PageProps) {
     featured?.typ === "dot_voting"
       ? featured.dot?.gesamtWaehler ?? 0
       : featuredErgebnis?.gesamt ?? 0;
+  // Teilnahme-Prüfung typ-abhängig: Dot-Teilnahmen liegen NUR in
+  // vote_allocations — die votes-Query wäre bei dot systematisch falsch-negativ
+  // (Gate-B MINOR). Beide Queries liefern nur das OB (Secret Ballot).
   const bereitsAbgestimmt = featured
-    ? await hatBereitsAbgestimmt(db, tenant, featured.id, { userId })
+    ? featured.typ === "dot_voting"
+      ? await hatBereitsDotAbgestimmt(db, tenant, featured.id, { userId })
+      : await hatBereitsAbgestimmt(db, tenant, featured.id, { userId })
     : false;
 
   // Nach Ebene gruppiert, ohne die Featured-Frage doppelt zu zeigen.
@@ -346,16 +358,20 @@ export default async function TenantLandingPage({ params }: PageProps) {
                 {featured.typ === "dot_voting" ? (
                   // Dot-Voting: die Punkte-Verteilung lebt auf der Detailseite
                   // (barrierearmes Stepper-Widget) — im Hero nur der Einstieg.
+                  // Bereits Teilgenommene sehen das ehrlich (kein zweiter
+                  // „Verteilen Sie"-Aufruf, Gate-B MINOR).
                   <div className="text-center">
                     <p className="text-sm" style={{ color: "var(--pz-body)" }}>
-                      Punkte-Voting: Verteilen Sie Ihre Punkte auf die Optionen.
+                      {bereitsAbgestimmt
+                        ? "Sie haben Ihre Punkte bereits verteilt — danke fürs Mitmachen!"
+                        : "Punkte-Voting: Verteilen Sie Ihre Punkte auf die Optionen."}
                     </p>
                     <Link
                       href={`/${slug}/umfrage/${featured.id}`}
                       className="mt-4 inline-block rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
                       style={{ backgroundColor: "var(--tenant-primary)" }}
                     >
-                      Zur Abstimmung
+                      {bereitsAbgestimmt ? "Zum Ergebnis" : "Zur Abstimmung"}
                     </Link>
                   </div>
                 ) : (
