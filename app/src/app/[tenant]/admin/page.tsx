@@ -12,10 +12,10 @@ import { headers, cookies } from "next/headers";
 import { and, eq, count } from "drizzle-orm";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
-import { digests, sessions } from "@/db/schema";
+import { digests, polls, qrCodes, sessions, verificationLocations } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { isAdmin as isAdminCheck, beobachterDarfTenantweitSehen, getUserRolesMitScope } from "@/lib/auth/roles";
+import { isAdmin as isAdminCheck, beobachterDarfTenantweitSehen, canRedaktion, getUserRolesMitScope } from "@/lib/auth/roles";
 import { getAdminKennzahlen, maskTeilnahme } from "@/lib/admin/kennzahlen";
 import Link from "next/link";
 
@@ -105,12 +105,109 @@ export default async function AdminDashboardPage({ params }: PageProps) {
   const kennzahlen = isAdmin ? await getAdminKennzahlen(db, tenant.id) : null;
   const anliegenOffenCount = kennzahlen?.offeneAnliegen ?? 0;
 
+  // „Erste Schritte" (Einrichtungs-Checkliste Fläche C): zustandsbasiert —
+  // ein Schritt gilt als erledigt, sobald das Objekt EINMAL existiert. Bewusst
+  // eigene Existenz-Zähler statt der Kennzahlen-Kacheln: die zählen nur AKTIVE
+  // Objekte (laufende Abstimmungen, gültige QR-Codes) — für „schon eingerichtet"
+  // zählt aber auch Abgelaufenes/Geschlossenes. Nur für Admins (Beobachter =
+  // View-Only, keine Handlungs-CTAs); die Karte verschwindet vollständig,
+  // sobald alles vorhanden ist (kein Dismiss nötig).
+  let ersteSchritte: { label: string; href: string; erledigt: boolean }[] | null = null;
+  if (isAdmin) {
+    const [locRows, qrRows, pollRows, digestRows] = await Promise.all([
+      db.select({ c: count() }).from(verificationLocations).where(eq(verificationLocations.tenantId, tenant.id)),
+      db.select({ c: count() }).from(qrCodes).where(eq(qrCodes.tenantId, tenant.id)),
+      db.select({ c: count() }).from(polls).where(eq(polls.tenantId, tenant.id)),
+      db.select({ c: count() }).from(digests).where(eq(digests.tenantId, tenant.id)),
+    ]);
+    const schritte = [
+      {
+        label: "Verifizierungs-Standort anlegen",
+        href: `/${slugFromPath}/admin/verifizierung`,
+        erledigt: Number(locRows[0]?.c ?? 0) > 0,
+      },
+      {
+        label: "QR-Code erstellen",
+        href: `/${slugFromPath}/admin/verifizierung`,
+        erledigt: Number(qrRows[0]?.c ?? 0) > 0,
+      },
+      {
+        label: "Erste Umfrage stellen",
+        href: `/${slugFromPath}/admin/abstimmungen`,
+        erledigt: Number(pollRows[0]?.c ?? 0) > 0,
+      },
+      // Digest-Schritt nur für Redaktions-Berechtigte (Admins erfüllen das
+      // immer — der Check hält die Bedingung explizit, falls die Karte je
+      // für weitere Rollen geöffnet wird).
+      ...(canRedaktion(roleTypes)
+        ? [
+            {
+              label: "Ersten Digest anlegen",
+              href: `/${slugFromPath}/admin/digests`,
+              erledigt: Number(digestRows[0]?.c ?? 0) > 0,
+            },
+          ]
+        : []),
+    ];
+    ersteSchritte = schritte.some((s) => !s.erledigt) ? schritte : null;
+  }
+
   return (
     <main className="min-h-screen px-6 py-10 max-w-4xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-zinc-900">Admin-Bereich</h1>
         <p className="text-sm text-zinc-500 mt-1">{tenant.name}</p>
       </div>
+
+      {/* „Erste Schritte" (Fläche C): nur solange mindestens ein Baustein fehlt —
+          danach verschwindet die Karte vollständig (keine Dauerpräsenz). */}
+      {ersteSchritte && (
+        <section className="pz-card mb-8 p-5" aria-label="Erste Schritte">
+          <h2 className="text-sm font-semibold" style={{ color: "var(--pz-ink)" }}>
+            Erste Schritte
+          </h2>
+          <p className="mt-0.5 text-xs" style={{ color: "var(--pz-muted)" }}>
+            Diese Bausteine machen Ihre Kommune startklar. Die Karte verschwindet,
+            sobald alles vorhanden ist.
+          </p>
+          <ul className="mt-3 space-y-2.5">
+            {ersteSchritte.map((s) => (
+              <li key={s.label} className="flex items-start gap-2.5 text-sm">
+                {s.erledigt ? (
+                  <>
+                    <span
+                      aria-hidden
+                      className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                      style={{ backgroundColor: "var(--pz-success-soft)", color: "var(--pz-success-ink)" }}
+                    >
+                      ✓
+                    </span>
+                    <span style={{ color: "var(--pz-body)" }}>
+                      <span className="sr-only">Erledigt: </span>
+                      {s.label}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span
+                      aria-hidden
+                      className="mt-0.5 h-5 w-5 shrink-0 rounded-full border-2"
+                      style={{ borderColor: "var(--pz-line)" }}
+                    />
+                    <Link
+                      href={s.href}
+                      className="font-medium underline-offset-4 hover:underline rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
+                      style={{ color: "var(--pz-brand-strong)" }}
+                    >
+                      {s.label} →
+                    </Link>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* Civic-Kennzahlen (P2 §Empf. 5): PII-freie Aggregate auf einen Blick.
           Teilnahmezahlen (Stimmen) werden ab <5 maskiert (Re-Identifikationsschutz). */}

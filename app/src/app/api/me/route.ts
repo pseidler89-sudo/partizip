@@ -18,6 +18,8 @@ import { validateSession } from "@/lib/auth/session";
 import { apiError } from "@/lib/api-error";
 import { getStufe } from "@/lib/eligibility/stufe";
 import { getUserRoleTypes, isAdmin } from "@/lib/auth/roles";
+import { getEinrichtungsStatus } from "@/lib/konto/einrichtung";
+import { isDemoTenant } from "@/lib/demo/config";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const host = getEffectiveHost(request);
@@ -46,6 +48,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // die Admin-Seiten erzwingen die Berechtigung weiterhin serverseitig.
   const roleTypes = await getUserRoleTypes(db, tenant.id, user.id);
 
+  // Einrichtungs-Checkliste (Konto-Seite): eigene Daten des eingeloggten Users —
+  // datensparsam (nur Booleans, Teilnahme nur als Existenz via voter_ref).
+  const einrichtung = await getEinrichtungsStatus(db, tenant, user, user.id);
+
   return NextResponse.json({
     user: {
       id: user.id,
@@ -61,9 +67,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // Admin-Sichtbarkeit (kommune_admin/super_admin) für die Verwaltung-Karte.
       isAdmin: isAdmin(roleTypes),
     },
+    einrichtung,
     tenant: {
       slug: tenant.slug,
       name: tenant.name,
+      // Demo-Mandant (env-basiert, nur serverseitig entscheidbar): die Konto-
+      // Seite blendet dort die Einrichtungs-Checkliste aus — Demo-Konten
+      // erfüllen die Schritte nie (RegionEinstieg-Gate-B-Lehre).
+      istDemo: isDemoTenant(tenant.slug),
     },
   });
 }

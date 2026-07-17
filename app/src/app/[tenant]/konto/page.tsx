@@ -12,7 +12,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { KontoLoeschenSection } from "./KontoLoeschenSection";
 import { BenachrichtigungSection } from "./BenachrichtigungSection";
+import { EinrichtungsCheckliste } from "./EinrichtungsCheckliste";
 import { FEATURE_ANLIEGEN_EINREICHEN } from "@/lib/features";
+import type { EinrichtungsStatus } from "@/lib/konto/einrichtung";
 
 type MeData = {
   user: {
@@ -27,9 +29,13 @@ type MeData = {
     // Admin-Sichtbarkeit (kommune_admin/super_admin) für die Verwaltung-Karte.
     isAdmin?: boolean;
   };
+  // Einrichtungs-Checkliste (Fläche A) — Booleans aus getEinrichtungsStatus.
+  einrichtung?: EinrichtungsStatus;
   tenant: {
     slug: string;
     name: string;
+    // Demo-Mandant: dort keine Checkliste (Demo-Konten erfüllen die Schritte nie).
+    istDemo?: boolean;
   };
 };
 
@@ -180,6 +186,13 @@ export default function KontoPage() {
         <h1 className="text-2xl font-semibold" style={{ color: "var(--pz-ink)" }}>Mein Konto</h1>
         <p className="text-sm mt-1" style={{ color: "var(--pz-muted)" }}>{data.tenant.name}</p>
       </div>
+
+      {/* Einrichtungs-Checkliste (Fläche A): nur solange Schritte offen sind —
+          danach verschwindet sie vollständig. Nicht auf dem Demo-Mandanten
+          (Demo-Konten erfüllen die Schritte nie — die Karte wäre eine Sackgasse). */}
+      {data.einrichtung && !data.einrichtung.alleErledigt && !data.tenant.istDemo && (
+        <EinrichtungsCheckliste einrichtung={data.einrichtung} tenantSlug={data.tenant.slug} />
+      )}
 
       {/* Kontodaten */}
       <div className="pz-card p-4 space-y-3 text-sm mb-6">

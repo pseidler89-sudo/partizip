@@ -40,10 +40,16 @@ import { REGION_COOKIE_NAME, parseRegionCookie } from "@/lib/region/core";
 import { getOrtsteileForTenant } from "@/lib/region/queries";
 import PollMitmachen from "./PollMitmachen";
 import { KurzErgebnisTeilnahme } from "./KurzErgebnisTeilnahme";
-import StufenFortschritt from "./StufenFortschritt";
+import NaechsterSchritt from "./NaechsterSchritt";
 import PollStatusChip from "./PollStatusChip";
 import { PollTypBadge } from "./PollTypBadge";
 import { getStufe } from "@/lib/eligibility/stufe";
+import {
+  getEinrichtungsStatus,
+  naechsterSchritt,
+  type EinrichtungsSchritt,
+} from "@/lib/konto/einrichtung";
+import { EINRICHTUNG_SPAETER_COOKIE } from "@/lib/konto/constants";
 import { TeilenButton } from "./TeilenButton";
 import { LoginForm } from "./LoginForm";
 import { RegionBanner } from "./RegionBanner";
@@ -187,6 +193,9 @@ export default async function TenantLandingPage({ params }: PageProps) {
   let userOrtsteilCode: string | null = null;
   let userHomeRegionId: string | null = null;
   let verifiziert = false;
+  // Ein-Schritt-Nudge (Einrichtungs-Checkliste Fläche B): der eine nächste
+  // offene Schritt — null = nichts zeigen (alles erledigt / „Später" / Demo).
+  let einrichtungsSchritt: EinrichtungsSchritt | null = null;
   if (tenant) {
     const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
     if (rawToken) {
@@ -213,6 +222,8 @@ export default async function TenantLandingPage({ params }: PageProps) {
             residencyVerifiedUntil: users.residencyVerifiedUntil,
             accountStatus: users.accountStatus,
             minAgeConfirmedAt: users.minAgeConfirmedAt,
+            // Einrichtungs-Checkliste (Fläche B): Benachrichtigungs-Opt-in.
+            notifyNewPolls: users.notifyNewPolls,
           })
           .from(users)
           .where(and(eq(users.id, session.userId), eq(users.tenantId, tenant.id)))
@@ -229,6 +240,16 @@ export default async function TenantLandingPage({ params }: PageProps) {
               .where(and(eq(ortsteile.id, user.ortsteilId), eq(ortsteile.tenantId, tenant.id)))
               .limit(1);
             userOrtsteilCode = otRows[0]?.code ?? null;
+          }
+          // Einrichtungs-Nudge nur berechnen, wenn er überhaupt gezeigt würde:
+          // nicht nach „Später" (Cookie) und nicht auf dem Demo-Mandanten
+          // (Demo-Konten erfüllen die Schritte nie — RegionEinstieg-Gate-B-Lehre).
+          const spaeter =
+            cookieStore.get(EINRICHTUNG_SPAETER_COOKIE)?.value === "1";
+          if (!spaeter && !isDemoTenant(tenant.slug)) {
+            einrichtungsSchritt = naechsterSchritt(
+              await getEinrichtungsStatus(db, tenant, user, user.id)
+            );
           }
         }
       }
@@ -337,12 +358,13 @@ export default async function TenantLandingPage({ params }: PageProps) {
         </div>
       )}
 
-      {/* Stufen-Fortschritt (P1): eingeloggt, aber noch nicht wohnsitz-verifiziert →
-          positiver Hinweis auf Stufe 2, statt die Sperre erst am verbindlichen Poll
-          zu erleben. */}
-      {eingeloggt && !verifiziert && (
+      {/* Ein-Schritt-Nudge (Einrichtungs-Checkliste Fläche B): ersetzt den
+          reinen Stufen-Streifen — zeigt den EINEN nächsten Einrichtungs-Schritt
+          (Wohnort → Verifizierung → Benachrichtigung → Teilnahme) und
+          verschwindet vollständig, wenn alles erledigt ist. */}
+      {eingeloggt && einrichtungsSchritt && (
         <div className="mx-auto max-w-3xl px-6 pt-6">
-          <StufenFortschritt stufe={1} tenantSlug={slug} variant="inline" />
+          <NaechsterSchritt schritt={einrichtungsSchritt} tenantSlug={slug} />
         </div>
       )}
 
