@@ -127,7 +127,9 @@ export default async function AdminDashboardPage({ params }: PageProps) {
     const schritte = [
       {
         label: "Verifizierungs-Standort anlegen",
-        href: `/${slugFromPath}/admin/verifizierung`,
+        // Block K1: direkt zur Standort-/Sprechzeiten-Verwaltung (vorher gab es
+        // keine UI dafür — der Link zeigte nur auf die Verifizierungs-Übersicht).
+        href: `/${slugFromPath}/admin/verifizierung/standorte`,
         erledigt: Number(locRows[0]?.c ?? 0) > 0,
       },
       {
