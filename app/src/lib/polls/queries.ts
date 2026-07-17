@@ -185,8 +185,13 @@ export async function hatBereitsAbgestimmt(
  * abgestimmt hat — als Set, in EINER Query statt N (kein N+1 im Listing).
  *
  * SECRET BALLOT: selektiert NUR die poll_id (das OB der Teilnahme), NIE `choice`
- * (das WIE). Damit verrät der „Sie haben abgestimmt"-Chip nie die getroffene Wahl.
+ * oder Punkte-Zuteilungen (das WIE). Damit verrät der „Sie haben abgestimmt"-Chip
+ * nie die getroffene Wahl.
  * Tenant-scoped + voter_ref-gebunden; ohne userId (nicht eingeloggt) leeres Set.
+ *
+ * Deckt BEIDE Abstimm-Formate ab: Ja/Nein liegt in `votes`, Dot-Voting NUR in
+ * `vote_allocations` (dotAbstimmen schreibt keine votes-Zeile) — ohne den
+ * zweiten Blick bliebe der Teilnahme-Chip bei Dot-Polls fälschlich „Noch offen".
  */
 export async function hatBereitsAbgestimmtBatch(
   db: Db,
@@ -203,17 +208,31 @@ export async function hatBereitsAbgestimmtBatch(
     return new Set();
   }
 
-  const rows = await db
-    .select({ pollId: votes.pollId })
-    .from(votes)
-    .where(
-      and(
-        eq(votes.tenantId, tenant.id),
-        eq(votes.voterRef, voterRef),
-        inArray(votes.pollId, pollIds)
-      )
-    );
-  return new Set(rows.map((r: { pollId: string }) => r.pollId));
+  const [voteRows, allocRows] = await Promise.all([
+    db
+      .select({ pollId: votes.pollId })
+      .from(votes)
+      .where(
+        and(
+          eq(votes.tenantId, tenant.id),
+          eq(votes.voterRef, voterRef),
+          inArray(votes.pollId, pollIds)
+        )
+      ),
+    db
+      .select({ pollId: voteAllocations.pollId })
+      .from(voteAllocations)
+      .where(
+        and(
+          eq(voteAllocations.tenantId, tenant.id),
+          eq(voteAllocations.voterRef, voterRef),
+          inArray(voteAllocations.pollId, pollIds)
+        )
+      ),
+  ]);
+  return new Set(
+    [...voteRows, ...allocRows].map((r: { pollId: string }) => r.pollId)
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +259,40 @@ export interface PollListItem {
 
 export interface PollMitErgebnis extends PollListItem {
   ergebnis: PollErgebnis;
+  /**
+   * Nur bei typ=dot_voting gesetzt: aggregiertes Dot-Ergebnis für die
+   * Karten-Teilnahmezeile. Kommt aus getDotErgebnis und ist damit serverseitig
+   * k-maskiert (ADR-025); gesamtWaehler/verifizierteWaehler sind immer sichtbar.
+   */
+  dot?: DotVotingErgebnis | null;
+}
+
+/** Neutrales Leer-Ergebnis (Fallback, wenn getPollErgebnis null liefert). */
+const LEERES_ERGEBNIS: PollErgebnis = {
+  gesamt: 0,
+  verifiziert: 0,
+  optionen: [],
+  aufschluesselungNachSchluss: false,
+};
+
+/**
+ * Reichert Listen-Items um ihr Ergebnis an (Startseite/Listing): Ja/Nein-Polls
+ * bekommen das votes-Aggregat, dot_voting-Polls ZUSÄTZLICH das Dot-Aggregat —
+ * sonst zeigt die Karte „Noch keine Stimmen", obwohl Punkte verteilt wurden
+ * (M1-Nachzug Block F). Tenant-scoped über die aufgerufenen Einzel-Queries.
+ */
+export async function mitErgebnissen(
+  db: Db,
+  tenantId: string,
+  items: PollListItem[]
+): Promise<PollMitErgebnis[]> {
+  return Promise.all(
+    items.map(async (p) => ({
+      ...p,
+      ergebnis: (await getPollErgebnis(db, tenantId, p.id)) ?? LEERES_ERGEBNIS,
+      dot: p.typ === "dot_voting" ? await getDotErgebnis(db, tenantId, p.id) : undefined,
+    }))
+  );
 }
 
 /**
@@ -341,6 +394,11 @@ export async function getAktivePolls(
  * Umfragen, für die der eingeloggte User (voter_ref user-Domain) eine Stimme
  * abgegeben hat — neu→alt, jeweils mit Ergebnis-Aggregat. Tenant-scoped.
  *
+ * Deckt BEIDE Abstimm-Formate ab: Ja/Nein-Stimmen liegen in `votes`,
+ * Dot-Voting-Teilnahmen NUR in `vote_allocations` — ohne den zweiten Blick
+ * fehlten Dot-Polls dauerhaft in „Bereits teilgenommen". Dot-Polls tragen ihr
+ * Dot-Aggregat im `dot`-Feld (k-maskiert via getDotErgebnis, ADR-025).
+ *
  * Einschluss bewusst unabhängig vom Status/Zeitfenster: bereits beendete oder
  * geschlossene Umfragen sollen in "Bereits teilgenommen" sichtbar bleiben.
  *
@@ -359,14 +417,24 @@ export async function getMeineTeilnahmen(
     return [];
   }
 
-  // poll_ids mit einer Stimme dieses voter_ref (tenant-scoped).
-  const voteRows = await db
-    .select({ pollId: votes.pollId })
-    .from(votes)
-    .where(and(eq(votes.tenantId, tenantId), eq(votes.voterRef, voterRef)));
+  // poll_ids mit einer Teilnahme dieses voter_ref (tenant-scoped): Ja/Nein-
+  // Stimmen aus votes + Dot-Zuteilungen aus vote_allocations. Beide Queries
+  // selektieren NUR poll_id (Secret Ballot: das OB, nie das WIE).
+  const [voteRows, allocRows] = await Promise.all([
+    db
+      .select({ pollId: votes.pollId })
+      .from(votes)
+      .where(and(eq(votes.tenantId, tenantId), eq(votes.voterRef, voterRef))),
+    db
+      .select({ pollId: voteAllocations.pollId })
+      .from(voteAllocations)
+      .where(
+        and(eq(voteAllocations.tenantId, tenantId), eq(voteAllocations.voterRef, voterRef))
+      ),
+  ]);
 
   const pollIds: string[] = Array.from(
-    new Set(voteRows.map((r: { pollId: string }) => r.pollId))
+    new Set([...voteRows, ...allocRows].map((r: { pollId: string }) => r.pollId))
   );
   if (pollIds.length === 0) return [];
 
@@ -396,6 +464,15 @@ export async function getMeineTeilnahmen(
     .from(votes)
     .where(and(eq(votes.tenantId, tenantId), inArray(votes.pollId, pollIds)));
 
+  // Dot-Aggregat je dot_voting-Poll (Teilnahmen sind wenige — Einzel-Query je
+  // Poll ist ok; getDotErgebnis kapselt die k-Maskierung zentral).
+  const dotErgebnisse = new Map<string, DotVotingErgebnis | null>();
+  for (const p of pollRows as PollListItem[]) {
+    if (p.typ === "dot_voting") {
+      dotErgebnisse.set(p.id, await getDotErgebnis(db, tenantId, p.id));
+    }
+  }
+
   type VoteAggRow = { pollId: string; choice: string; warVerifiziert: boolean };
   const now = new Date();
   return pollRows.map((p: PollListItem) => {
@@ -406,6 +483,7 @@ export async function getMeineTeilnahmen(
       ...p,
       // ADR-022: laufende Umfragen ohne per-Option-Aufschlüsselung.
       ergebnis: istBeendet(p, now) ? ergebnis : ohneAufschluesselung(ergebnis),
+      dot: p.typ === "dot_voting" ? dotErgebnisse.get(p.id) : undefined,
     };
   });
 }

@@ -219,6 +219,7 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
         <PollTypBadge
           verbindlich={poll.verbindlich}
           scope={regionTypLabel(poll.regionTyp)}
+          typ={poll.typ}
         />
         <h1 className="mt-3 text-2xl font-semibold" style={{ color: "var(--pz-ink)" }}>
           {poll.frage}

@@ -23,9 +23,8 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import {
   getAktivePolls,
   getMeineTeilnahmen,
-  getPollErgebnis,
   hatBereitsAbgestimmtBatch,
-  type PollListItem,
+  mitErgebnissen,
   type PollMitErgebnis,
 } from "@/lib/polls/queries";
 import { gruppiereNachEbene } from "@/lib/polls/gruppierung";
@@ -38,6 +37,7 @@ import { getOrtsteileForTenant } from "@/lib/region/queries";
 import { resolveOrtsteilRegionId } from "@/lib/region/scope";
 import { RegionBanner } from "../RegionBanner";
 import { PollTypBadge } from "../PollTypBadge";
+import { KurzErgebnisDot } from "../KurzErgebnisDot";
 
 export const dynamic = "force-dynamic";
 
@@ -92,12 +92,10 @@ function KurzErgebnis({ ergebnis }: { ergebnis: PollErgebnis }) {
 function PollKarte({
   slug,
   poll,
-  ergebnis,
   cta,
 }: {
   slug: string;
-  poll: PollListItem;
-  ergebnis: PollErgebnis;
+  poll: PollMitErgebnis;
   cta: string;
 }) {
   return (
@@ -108,18 +106,23 @@ function PollKarte({
       <PollTypBadge
         verbindlich={poll.verbindlich}
         scope={REGION_TYP_LABEL[poll.regionTyp]}
+        typ={poll.typ}
       />
       <h3 className="mt-3 text-base font-semibold" style={{ color: "var(--pz-ink)" }}>
         {poll.frage}
       </h3>
       {poll.typ === "dot_voting" ? (
-        // Dot-Voting: die Punkte-Verteilung lebt auf der Detailseite (barrierearmes
-        // Stepper-Widget) — in der Liste nur ein neutraler Hinweis + Link.
-        <div className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
-          Punkte-Voting — verteilen Sie Ihre Punkte auf die Optionen
-        </div>
+        // Dot-Voting: Teilnahme-Zeile aus dem Dot-Aggregat (M1-Nachzug Block F);
+        // die Punkte-Verteilung selbst lebt auf der Detailseite (Stepper-Widget).
+        poll.dot ? (
+          <KurzErgebnisDot ergebnis={poll.dot} mitVerifiziert />
+        ) : (
+          <div className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
+            Punkte-Voting — verteilen Sie Ihre Punkte auf die Optionen
+          </div>
+        )
       ) : (
-        <KurzErgebnis ergebnis={ergebnis} />
+        <KurzErgebnis ergebnis={poll.ergebnis} />
       )}
       <p className="mt-3 text-xs font-medium" style={{ color: "var(--pz-brand-strong)" }}>
         {cta} →
@@ -152,7 +155,7 @@ function GruppierteListe({
           <ul className="space-y-4">
             {g.polls.map((p) => (
               <li key={p.id}>
-                <PollKarte slug={slug} poll={p} ergebnis={p.ergebnis} cta={cta} />
+                <PollKarte slug={slug} poll={p} cta={cta} />
               </li>
             ))}
           </ul>
@@ -221,19 +224,10 @@ export default async function UmfragenListePage({ params }: PageProps) {
       ? await resolveOrtsteilRegionId(db, tenant.id, cookieOrtsteilCode)
       : null;
 
-  // Aktive Polls (vertikale Scheibe), Ergebnis je Poll.
+  // Aktive Polls (vertikale Scheibe), Ergebnis je Poll (Ja/Nein-Aggregat +
+  // Dot-Aggregat für dot_voting — M1-Nachzug Block F).
   const aktive = await getAktivePolls(db, tenant.id, { viewerRegionId });
-  const aktiveMitErgebnis: PollMitErgebnis[] = await Promise.all(
-    aktive.map(async (p) => ({
-      ...p,
-      ergebnis: (await getPollErgebnis(db, tenant.id, p.id)) ?? {
-        gesamt: 0,
-        verifiziert: 0,
-        optionen: [],
-        aufschluesselungNachSchluss: false,
-      },
-    }))
-  );
+  const aktiveMitErgebnis: PollMitErgebnis[] = await mitErgebnissen(db, tenant.id, aktive);
 
   // Region-Banner (nur wenn eine Region gemerkt ist).
   const ortsteilOptionen = region != null ? await getOrtsteileForTenant(db, tenant.id) : [];
@@ -343,7 +337,7 @@ export default async function UmfragenListePage({ params }: PageProps) {
           <ul className="space-y-4">
             {teilnahmen.map((p) => (
               <li key={p.id}>
-                <PollKarte slug={slugFromPath} poll={p} ergebnis={p.ergebnis} cta="Ergebnis ansehen" />
+                <PollKarte slug={slugFromPath} poll={p} cta="Ergebnis ansehen" />
               </li>
             ))}
           </ul>

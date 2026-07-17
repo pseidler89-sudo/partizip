@@ -12,13 +12,21 @@ import { ShieldCheck } from "lucide-react";
 export function PollTypBadge({
   verbindlich,
   scope,
+  typ,
 }: {
   verbindlich: boolean;
   /** Bereits aufgelöster Ebenen-Text (z. B. „Kommune" oder „für Ihre Kommune"). */
   scope: string;
+  /** Abstimm-Format — dot_voting trägt ein eigenes „Punkte-Voting"-Badge (ADR-025). */
+  typ?: "ja_nein_enthaltung" | "dot_voting";
 }) {
   return (
     <span className="inline-flex flex-wrap items-center justify-center gap-1.5">
+      {typ === "dot_voting" && (
+        <span className="pz-badge-neutral inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium">
+          Punkte-Voting
+        </span>
+      )}
       {verbindlich ? (
         <span className="pz-badge-info inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium">
           <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
