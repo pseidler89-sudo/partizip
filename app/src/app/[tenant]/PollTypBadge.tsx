@@ -17,14 +17,19 @@ export function PollTypBadge({
   verbindlich: boolean;
   /** Bereits aufgelöster Ebenen-Text (z. B. „Kommune" oder „für Ihre Kommune"). */
   scope: string;
-  /** Abstimm-Format — dot_voting trägt ein eigenes „Punkte-Voting"-Badge (ADR-025). */
-  typ?: "ja_nein_enthaltung" | "dot_voting";
+  /** Abstimm-Format — Nicht-binär-Formate tragen ein eigenes Format-Badge (ADR-025). */
+  typ?: "ja_nein_enthaltung" | "dot_voting" | "widerstandsabfrage";
 }) {
   return (
     <span className="inline-flex flex-wrap items-center justify-center gap-1.5">
       {typ === "dot_voting" && (
         <span className="pz-badge-neutral inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium">
           Punkte-Voting
+        </span>
+      )}
+      {typ === "widerstandsabfrage" && (
+        <span className="pz-badge-neutral inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium">
+          Widerstandsabfrage
         </span>
       )}
       {verbindlich ? (

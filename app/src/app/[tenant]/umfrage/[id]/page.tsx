@@ -25,6 +25,8 @@ import {
   getDotOptions,
   getDotErgebnis,
   hatBereitsDotAbgestimmt,
+  getWiderstandsErgebnis,
+  hatBereitsWiderstandAbgestimmt,
 } from "@/lib/polls/queries";
 import { istBeendet } from "@/lib/polls/ergebnis";
 import { getStufe } from "@/lib/eligibility/stufe";
@@ -32,6 +34,7 @@ import { istGebietsZustaendig, waehleAnkerRegionId } from "@/lib/polls/gebiet";
 import { regionTypLabel } from "@/lib/region/ebenen";
 import PollMitmachen from "../../PollMitmachen";
 import DotMitmachen from "../../DotMitmachen";
+import WiderstandMitmachen from "../../WiderstandMitmachen";
 import { TeilenButton } from "../../TeilenButton";
 import { PollTypBadge } from "../../PollTypBadge";
 import { isDemoTenant } from "@/lib/demo/config";
@@ -138,13 +141,20 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
   const belegeVerfuegbar = beendet;
 
   const istDot = poll.typ === "dot_voting";
-  // Ja/Nein-Ergebnis nur für das binäre Format laden; dot_voting hat ein eigenes
-  // Aggregat (getDotErgebnis) + eigene Optionen.
-  const ergebnis = istDot ? null : await getPollErgebnis(db, tenant.id, poll.id);
-  if (!istDot && !ergebnis) notFound();
-  const dotOptionen = istDot ? await getDotOptions(db, tenant.id, poll.id) : [];
+  const istWiderstand = poll.typ === "widerstandsabfrage";
+  // Ja/Nein-Ergebnis nur für das binäre Format laden; die Options-Formate haben
+  // eigene Aggregate (getDotErgebnis/getWiderstandsErgebnis) + eigene Optionen
+  // (getDotOptions ist format-neutral).
+  const ergebnis = istDot || istWiderstand ? null : await getPollErgebnis(db, tenant.id, poll.id);
+  if (!istDot && !istWiderstand && !ergebnis) notFound();
+  const dotOptionen =
+    istDot || istWiderstand ? await getDotOptions(db, tenant.id, poll.id) : [];
   const dotErgebnis = istDot ? await getDotErgebnis(db, tenant.id, poll.id) : null;
   if (istDot && !dotErgebnis) notFound();
+  const widerstandsErgebnis = istWiderstand
+    ? await getWiderstandsErgebnis(db, tenant.id, poll.id)
+    : null;
+  if (istWiderstand && !widerstandsErgebnis) notFound();
 
   // Optionale Session für voter_ref / bereits-abgestimmt
   let userId: string | null = null;
@@ -203,7 +213,9 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
 
   const bereitsAbgestimmt = istDot
     ? await hatBereitsDotAbgestimmt(db, tenant, poll.id, { userId })
-    : await hatBereitsAbgestimmt(db, tenant, poll.id, { userId });
+    : istWiderstand
+      ? await hatBereitsWiderstandAbgestimmt(db, tenant, poll.id, { userId })
+      : await hatBereitsAbgestimmt(db, tenant, poll.id, { userId });
 
   return (
     <main className="min-h-screen px-4 py-10 max-w-lg mx-auto">
@@ -235,6 +247,18 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
             budget={poll.punkteBudget ?? 0}
             optionen={dotOptionen.map((o) => ({ id: o.id, label: o.label }))}
             ergebnis={dotErgebnis!}
+            tenantSlug={slugFromPath}
+            eingeloggt={userId != null}
+            verifiziert={verifiziert}
+            verbindlich={poll.verbindlich}
+            bereitsAbgestimmt={bereitsAbgestimmt || !istOffen || !gebietsZustaendig}
+            demoMode={isDemoTenant(tenant.slug)}
+          />
+        ) : istWiderstand ? (
+          <WiderstandMitmachen
+            pollId={poll.id}
+            optionen={dotOptionen.map((o) => ({ id: o.id, label: o.label }))}
+            ergebnis={widerstandsErgebnis!}
             tenantSlug={slugFromPath}
             eingeloggt={userId != null}
             verifiziert={verifiziert}

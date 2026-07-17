@@ -37,7 +37,7 @@ import { getOrtsteileForTenant } from "@/lib/region/queries";
 import { resolveOrtsteilRegionId } from "@/lib/region/scope";
 import { RegionBanner } from "../RegionBanner";
 import { PollTypBadge } from "../PollTypBadge";
-import { KurzErgebnisDot } from "../KurzErgebnisDot";
+import { KurzErgebnisTeilnahme } from "../KurzErgebnisTeilnahme";
 
 export const dynamic = "force-dynamic";
 
@@ -112,13 +112,21 @@ function PollKarte({
         {poll.frage}
       </h3>
       {poll.typ === "dot_voting" ? (
-        // Dot-Voting: Teilnahme-Zeile aus dem Dot-Aggregat (M1-Nachzug Block F);
-        // die Punkte-Verteilung selbst lebt auf der Detailseite (Stepper-Widget).
+        // Options-Formate: Teilnahme-Zeile aus dem Format-Aggregat (M1-Nachzug
+        // Block F); das Abstimm-Widget selbst lebt auf der Detailseite.
         poll.dot ? (
-          <KurzErgebnisDot ergebnis={poll.dot} mitVerifiziert />
+          <KurzErgebnisTeilnahme ergebnis={poll.dot} mitVerifiziert />
         ) : (
           <div className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
             Punkte-Voting — verteilen Sie Ihre Punkte auf die Optionen
+          </div>
+        )
+      ) : poll.typ === "widerstandsabfrage" ? (
+        poll.widerstand ? (
+          <KurzErgebnisTeilnahme ergebnis={poll.widerstand} mitVerifiziert />
+        ) : (
+          <div className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
+            Widerstandsabfrage — bewerten Sie jede Option von 0 bis 10
           </div>
         )
       ) : (

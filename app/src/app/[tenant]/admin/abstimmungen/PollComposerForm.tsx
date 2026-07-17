@@ -25,7 +25,7 @@ interface Props {
 }
 
 type ScopeLevel = "stadt" | "ortsteil";
-type PollTyp = "ja_nein_enthaltung" | "dot_voting";
+type PollTyp = "ja_nein_enthaltung" | "dot_voting" | "widerstandsabfrage";
 
 const DOT_MIN = 2;
 const DOT_MAX = 12;
@@ -58,7 +58,8 @@ export default function PollComposerForm({ ortsteile }: Props) {
       return;
     }
     const sauberOptionen = optionen.map((o) => o.trim()).filter((o) => o.length > 0);
-    if (typ === "dot_voting") {
+    // Optionen-Validierung für beide Nicht-binär-Formate; Budget nur dot_voting.
+    if (typ !== "ja_nein_enthaltung") {
       if (sauberOptionen.length < DOT_MIN) {
         setError(`Bitte mindestens ${DOT_MIN} Optionen angeben.`);
         return;
@@ -67,6 +68,8 @@ export default function PollComposerForm({ ortsteile }: Props) {
         setError("Die Optionen müssen sich unterscheiden.");
         return;
       }
+    }
+    if (typ === "dot_voting") {
       if (!Number.isInteger(punkteBudget) || punkteBudget < 1 || punkteBudget > 100) {
         setError("Das Punktebudget muss zwischen 1 und 100 liegen.");
         return;
@@ -78,7 +81,9 @@ export default function PollComposerForm({ ortsteile }: Props) {
       const result = await pollErstellen({
         frage: frage.trim(),
         typ,
-        ...(typ === "dot_voting" ? { optionen: sauberOptionen, punkteBudget } : {}),
+        // Optionen für beide Nicht-binär-Formate; Punktebudget nur dot_voting.
+        ...(typ !== "ja_nein_enthaltung" ? { optionen: sauberOptionen } : {}),
+        ...(typ === "dot_voting" ? { punkteBudget } : {}),
         scopeLevel,
         scopeCode: scopeLevel === "ortsteil" ? scopeCode : null,
         verbindlich,
@@ -159,16 +164,19 @@ export default function PollComposerForm({ ortsteile }: Props) {
           >
             <option value="ja_nein_enthaltung">Ja / Nein / Enthaltung</option>
             <option value="dot_voting">Punkte-Voting (Prioritäten setzen)</option>
+            <option value="widerstandsabfrage">Widerstandsabfrage (geringster Widerstand gewinnt)</option>
           </select>
           <p className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
             {typ === "dot_voting"
               ? "Teilnehmende verteilen ein festes Punktebudget auf mehrere Optionen — Ergebnis ist eine Prioritätenverteilung."
-              : "Klassisches Stimmungsbild mit drei Antwortmöglichkeiten."}
+              : typ === "widerstandsabfrage"
+                ? "Teilnehmende bewerten jede Option mit Widerstand 0–10; es gewinnt die Option mit dem geringsten Gesamtwiderstand."
+                : "Klassisches Stimmungsbild mit drei Antwortmöglichkeiten."}
           </p>
         </div>
 
-        {/* Dot-Voting: Optionen + Budget */}
-        {typ === "dot_voting" && (
+        {/* Nicht-binäre Formate: Optionen (Budget nur bei Punkte-Voting) */}
+        {typ !== "ja_nein_enthaltung" && (
           <div className="rounded-lg border p-4" style={{ borderColor: "var(--pz-line)" }}>
             <span className="text-sm font-medium" style={{ color: "var(--pz-ink)" }}>
               Optionen ({DOT_MIN}–{DOT_MAX})
@@ -213,24 +221,26 @@ export default function PollComposerForm({ ortsteile }: Props) {
               </button>
             )}
 
-            <div className="mt-4">
-              <label htmlFor="punkteBudget" className={labelCls} style={{ color: "var(--pz-ink)" }}>
-                Punkte je Teilnehmer:in
-              </label>
-              <input
-                id="punkteBudget"
-                type="number"
-                min={1}
-                max={100}
-                value={punkteBudget}
-                onChange={(e) => setPunkteBudget(Math.floor(Number(e.target.value) || 0))}
-                className={inputCls}
-                style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)", maxWidth: "8rem" }}
-              />
-              <p className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
-                Wie viele Punkte jede:r auf die Optionen verteilen darf (1–100).
-              </p>
-            </div>
+            {typ === "dot_voting" && (
+              <div className="mt-4">
+                <label htmlFor="punkteBudget" className={labelCls} style={{ color: "var(--pz-ink)" }}>
+                  Punkte je Teilnehmer:in
+                </label>
+                <input
+                  id="punkteBudget"
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={punkteBudget}
+                  onChange={(e) => setPunkteBudget(Math.floor(Number(e.target.value) || 0))}
+                  className={inputCls}
+                  style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)", maxWidth: "8rem" }}
+                />
+                <p className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
+                  Wie viele Punkte jede:r auf die Optionen verteilen darf (1–100).
+                </p>
+              </div>
+            )}
           </div>
         )}
 
