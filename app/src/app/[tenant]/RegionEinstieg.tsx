@@ -138,8 +138,7 @@ export function RegionEinstieg({
           <button
             type="submit"
             disabled={busy}
-            className="shrink-0 rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
-            style={{ backgroundColor: "var(--tenant-primary)" }}
+            className="pz-btn pz-btn-primary shrink-0"
           >
             {pending ? "…" : "Weiter"}
           </button>

@@ -43,12 +43,11 @@ export function DemoVerwaltungStart({ slug }: { slug: string }) {
         type="button"
         onClick={handleStart}
         disabled={busy}
-        className="inline-flex min-h-[48px] items-center rounded-lg px-6 py-3 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-        style={{ backgroundColor: "var(--pz-brand)" }}
+        className="pz-btn pz-btn-primary pz-btn-lg min-h-[48px]"
       >
         {busy ? "Wird gestartet …" : "Verwaltungs-Perspektive starten"}
       </button>
-      {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="mt-2 text-sm" style={{ color: "var(--pz-danger)" }}>{error}</p>}
     </div>
   );
 }

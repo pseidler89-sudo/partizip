@@ -114,27 +114,25 @@ export default function BestaetigungsDialog({
     }
   }
 
-  const bestaetigenFarbe =
-    variante === "gefahr"
-      ? "border border-red-300 bg-red-600 text-white hover:bg-red-700"
-      : "text-white hover:opacity-90";
-
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/40 p-4 sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-[2px] sm:items-center"
       onMouseDown={(e) => {
         // Backdrop-Klick (nur direkt auf das Overlay, nicht aufs Panel) = Abbrechen.
         if (e.target === e.currentTarget && !busy) onAbbrechen();
       }}
       onKeyDown={onKeyDown}
     >
+      {/* Entrance-Animation via tw-animate-css; prefers-reduced-motion nullt
+          Animationen global (globals.css). Dialog-Schatten = Elevation 4. */}
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titelId}
         aria-describedby={beschreibung ? beschreibungId : undefined}
-        className="pz-card w-full max-w-md p-6 shadow-xl"
+        className="pz-card animate-in fade-in zoom-in-95 w-full max-w-md p-6 duration-150"
+        style={{ boxShadow: "var(--pz-shadow-4)" }}
       >
         <h2 id={titelId} className="text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
           {titel}
@@ -169,8 +167,7 @@ export default function BestaetigungsDialog({
             type="button"
             disabled={busy}
             onClick={onAbbrechen}
-            className="inline-flex items-center rounded-lg border bg-white px-4 py-2 text-sm font-semibold transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-1 disabled:opacity-50"
-            style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
+            className="pz-btn pz-btn-secondary"
           >
             {abbrechenLabel}
           </button>
@@ -178,8 +175,7 @@ export default function BestaetigungsDialog({
             type="button"
             disabled={busy || !tippOk}
             onClick={onBestaetigen}
-            className={`inline-flex items-center rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 ${bestaetigenFarbe}`}
-            style={variante === "normal" ? { backgroundColor: "var(--tenant-primary)" } : undefined}
+            className={`pz-btn ${variante === "gefahr" ? "pz-btn-danger" : "pz-btn-primary"}`}
           >
             {busy ? "…" : bestaetigenLabel}
           </button>

@@ -118,9 +118,6 @@ export default function PollAdminActions({ pollId, status, demo, istBeispiel }: 
     }
   }
 
-  const btnBase =
-    "inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-semibold shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed";
-
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
@@ -130,8 +127,7 @@ export default function PollAdminActions({ pollId, status, demo, istBeispiel }: 
               type="button"
               disabled={busy !== null}
               onClick={() => setConfirm("aktivieren")}
-              className={`${btnBase} text-white hover:opacity-90`}
-              style={{ backgroundColor: "var(--tenant-primary)" }}
+              className="pz-btn pz-btn-sm pz-btn-primary"
             >
               Aktivieren
             </button>
@@ -139,7 +135,8 @@ export default function PollAdminActions({ pollId, status, demo, istBeispiel }: 
               type="button"
               disabled={busy !== null}
               onClick={() => setConfirm("loeschen")}
-              className={`${btnBase} border border-red-200 bg-white text-red-700 hover:bg-red-50`}
+              className="pz-btn pz-btn-sm pz-btn-secondary"
+              style={{ color: "var(--pz-danger)" }}
             >
               Entwurf löschen
             </button>
@@ -151,15 +148,14 @@ export default function PollAdminActions({ pollId, status, demo, istBeispiel }: 
             type="button"
             disabled={busy !== null}
             onClick={() => setConfirm("schliessen")}
-            className={`${btnBase} border bg-white`}
-            style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
+            className="pz-btn pz-btn-sm pz-btn-secondary"
           >
             Schließen
           </button>
         )}
       </div>
 
-      {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="mt-2 text-sm" style={{ color: "var(--pz-danger)" }}>{error}</p>}
 
       <BestaetigungsDialog
         offen={confirm !== null}

@@ -131,8 +131,8 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-lg font-medium text-zinc-900">Mitwirkende einladen</h2>
-        <p className="mt-1 text-sm text-zinc-500">
+        <h2 className="text-lg font-medium text-pz-ink">Mitwirkende einladen</h2>
+        <p className="mt-1 text-sm text-pz-muted">
           Laden Sie Personen per E-Mail ein. Die eingeladene Person meldet sich mit
           der eingeladenen Adresse an und erhält die Rolle nach Annahme. Jede
           Einladung wird im Protokoll PII-frei erfasst.
@@ -140,17 +140,17 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
       </div>
 
       {/* Formular: einladen */}
-      <section className="rounded-lg border border-zinc-200 p-5">
-        <h3 className="text-base font-medium text-zinc-900">Neue Einladung</h3>
+      <section className="rounded-lg border border-pz-line p-5">
+        <h3 className="text-base font-medium text-pz-ink">Neue Einladung</h3>
 
         {erlaubteRollen.length === 0 ? (
-          <p className="mt-4 text-sm text-amber-700">
+          <p className="mt-4 text-sm" style={{ color: "var(--pz-warning-ink)" }}>
             Ihre Rolle erlaubt keine Einladungen.
           </p>
         ) : (
           <form onSubmit={handleEinladen} className="mt-4 space-y-4">
             <div>
-              <label htmlFor="inviteEmail" className="block text-xs font-medium text-zinc-600">
+              <label htmlFor="inviteEmail" className="block text-xs font-medium text-pz-muted">
                 E-Mail der einzuladenden Person
               </label>
               <input
@@ -160,23 +160,23 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
                 value={email}
                 onChange={(ev) => setEmail(ev.target.value)}
                 autoComplete="off"
-                className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm
-                           focus:border-zinc-400 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-pz-line px-3 py-1.5 text-sm
+                           focus:border-pz-brand focus:outline-none"
                 placeholder="person@beispiel.de"
               />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label htmlFor="inviteRole" className="block text-xs font-medium text-zinc-600">
+                <label htmlFor="inviteRole" className="block text-xs font-medium text-pz-muted">
                   Rolle
                 </label>
                 <select
                   id="inviteRole"
                   value={roleType}
                   onChange={(ev) => setRoleType(ev.target.value)}
-                  className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm
-                             focus:border-zinc-400 focus:outline-none"
+                  className="mt-1 w-full rounded-md border border-pz-line px-3 py-1.5 text-sm
+                             focus:border-pz-brand focus:outline-none"
                 >
                   {erlaubteRollen.map((r) => (
                     <option key={r} value={r}>
@@ -187,15 +187,15 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
               </div>
 
               <div>
-                <label htmlFor="inviteScope" className="block text-xs font-medium text-zinc-600">
+                <label htmlFor="inviteScope" className="block text-xs font-medium text-pz-muted">
                   Geltungsbereich
                 </label>
                 <select
                   id="inviteScope"
                   value={scopeLevel}
                   onChange={(ev) => setScopeLevel(ev.target.value as ScopeLevel)}
-                  className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm
-                             focus:border-zinc-400 focus:outline-none"
+                  className="mt-1 w-full rounded-md border border-pz-line px-3 py-1.5 text-sm
+                             focus:border-pz-brand focus:outline-none"
                 >
                   {SCOPE_LEVELS.map((s) => (
                     <option key={s} value={s}>
@@ -207,7 +207,7 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
             </div>
 
             {formMsg && (
-              <p className={`text-sm ${formMsg.ok ? "text-green-700" : "text-red-600"}`}>
+              <p className="text-sm" style={{ color: formMsg.ok ? "var(--pz-success)" : "var(--pz-danger)" }}>
                 {formMsg.text}
               </p>
             )}
@@ -215,8 +215,7 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
             <button
               type="submit"
               disabled={isPending || !email.trim()}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white
-                         hover:bg-zinc-700 disabled:opacity-50"
+              className="pz-btn pz-btn-sm pz-btn-primary"
             >
               {isPending ? "Wird gesendet…" : "Einladung senden"}
             </button>
@@ -226,26 +225,26 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
 
       {/* Liste: Einladungen */}
       <section>
-        <h3 className="text-base font-medium text-zinc-900">Einladungen</h3>
-        <p className="mt-1 text-sm text-zinc-500">
+        <h3 className="text-base font-medium text-pz-ink">Einladungen</h3>
+        <p className="mt-1 text-sm text-pz-muted">
           {einladungen.length} Einladung{einladungen.length !== 1 ? "en" : ""}.
         </p>
 
         {einladungen.length === 0 ? (
-          <p className="mt-4 text-sm text-zinc-400">Noch keine Einladungen.</p>
+          <p className="mt-4 text-sm text-pz-muted">Noch keine Einladungen.</p>
         ) : (
           <div className="mt-4 space-y-3">
             {einladungen.map((e) => {
               const offen = e.status === "pending" && !istAbgelaufen(e);
               const darfVerwalten = erlaubteRollen.includes(e.roleType);
               return (
-                <div key={e.id} className="rounded-lg border border-zinc-200 px-5 py-4">
+                <div key={e.id} className="rounded-lg border border-pz-line px-5 py-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-medium text-zinc-900 truncate">{e.email}</p>
-                      <p className="mt-0.5 text-sm text-zinc-500">
+                      <p className="font-medium text-pz-ink truncate">{e.email}</p>
+                      <p className="mt-0.5 text-sm text-pz-muted">
                         <span className="font-medium">{ROLE_LABELS[e.roleType] ?? e.roleType}</span>
-                        <span className="text-zinc-400">
+                        <span className="text-pz-muted">
                           {" "}· {regionTypLabel(e.regionTyp)}
                           {e.regionTyp === "ortsteil" ? ` (${e.regionName})` : ""}
                         </span>
@@ -254,10 +253,10 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
                     <span
                       className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
                         offen
-                          ? "bg-amber-50 text-amber-700"
+                          ? "pz-badge-warning"
                           : e.status === "accepted"
-                            ? "bg-green-50 text-green-700"
-                            : "bg-zinc-100 text-zinc-500"
+                            ? "pz-badge-success"
+                            : "pz-badge-neutral"
                       }`}
                     >
                       {anzeigeStatus(e)}
@@ -270,8 +269,7 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
                         type="button"
                         onClick={() => handleErneutSenden(e.id)}
                         disabled={isPending}
-                        className="rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs
-                                   font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                        className="pz-btn pz-btn-sm pz-btn-secondary"
                       >
                         Erneut senden
                       </button>
@@ -279,8 +277,8 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
                         type="button"
                         onClick={() => handleZurueckziehen(e.id)}
                         disabled={isPending}
-                        className="rounded-md border border-red-300 bg-white px-2.5 py-1 text-xs
-                                   font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        className="pz-btn pz-btn-sm pz-btn-secondary"
+                        style={{ color: "var(--pz-danger)" }}
                       >
                         Zurückziehen
                       </button>
@@ -288,7 +286,7 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
                   )}
 
                   {rowError[e.id] && (
-                    <p className="mt-2 text-sm text-red-600">{rowError[e.id]}</p>
+                    <p className="mt-2 text-sm" style={{ color: "var(--pz-danger)" }}>{rowError[e.id]}</p>
                   )}
                 </div>
               );

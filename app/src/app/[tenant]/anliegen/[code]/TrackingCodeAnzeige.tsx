@@ -49,7 +49,7 @@ export function TrackingCodeAnzeige({ trackingCode }: Props) {
       </div>
 
       {/* Wichtiger Hinweis */}
-      <div className="rounded-md bg-amber-100 border border-amber-200 px-4 py-3 text-xs text-amber-900 leading-relaxed">
+      <div className="pz-badge-warning rounded-md border border-[color:var(--pz-warning)]/30 px-4 py-3 text-xs leading-relaxed">
         <strong>Wichtig: Notieren Sie diesen Code jetzt.</strong>{" "}
         Aus Datenschutzgründen ist Ihr Anliegen nicht mit Ihrem Konto verknüpft — der Code wird nur dieses eine Mal angezeigt und kann nicht wiederhergestellt werden.
       </div>

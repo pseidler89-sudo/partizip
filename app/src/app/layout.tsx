@@ -19,6 +19,16 @@ export const metadata: Metadata = {
   },
   description:
     "Überparteiliche Plattform für kommunale Beteiligung: verständliche Ratsinformationen und nachvollziehbare Anliegen.",
+  // Vorschaukarten für geteilte Links (das Bild kommt aus opengraph-image.tsx
+  // — App-Router-Konvention, Next verdrahtet og:image automatisch).
+  openGraph: {
+    siteName: "Partizip",
+    locale: "de_DE",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
 };
 
 export default function RootLayout({
@@ -36,7 +46,7 @@ export default function RootLayout({
           href="#main-content"
           className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50
                      focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm
-                     focus:font-medium focus:text-zinc-900 focus:shadow focus:ring-2 focus:ring-[color:var(--pz-brand)]"
+                     focus:font-medium focus:text-pz-ink focus:shadow focus:ring-2 focus:ring-[color:var(--pz-brand)]"
         >
           Zum Inhalt springen
         </a>

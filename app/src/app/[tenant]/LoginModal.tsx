@@ -12,6 +12,7 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { BrandMark } from "@/components/BrandMark";
 import { LoginForm } from "./LoginForm";
 
 const FOCUSABLE =
@@ -107,13 +108,17 @@ export function LoginModal({
           >
             {/* Sticky-Kopf: Titel + Schließen bleiben sichtbar, egal wie weit gescrollt. */}
             <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b border-[color:var(--pz-line)] bg-white px-6 pb-4 pt-5">
-              <div>
-                <h2 id="login-modal-title" className="text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
-                  Anmelden
-                </h2>
-                <p className="mt-1 text-sm" style={{ color: "var(--pz-muted)" }}>
-                  Per E-Mail-Link, ohne Passwort. Mit Konto stimmen Sie mit.
-                </p>
+              <div className="flex items-start gap-2.5">
+                {/* Bildzeichen: verortet den Dialog als Partizip (bleibt Teal). */}
+                <BrandMark className="mt-0.5 h-6 w-6 shrink-0" />
+                <div>
+                  <h2 id="login-modal-title" className="text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
+                    Anmelden
+                  </h2>
+                  <p className="mt-1 text-sm" style={{ color: "var(--pz-muted)" }}>
+                    Per E-Mail-Link, ohne Passwort. Mit Konto stimmen Sie mit.
+                  </p>
+                </div>
               </div>
               <button
                 type="button"

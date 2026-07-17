@@ -408,8 +408,7 @@ export default async function TenantLandingPage({ params }: PageProps) {
                     </p>
                     <Link
                       href={`/${slug}/umfrage/${featured.id}`}
-                      className="mt-4 inline-block rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
-                      style={{ backgroundColor: "var(--tenant-primary)" }}
+                      className="pz-btn pz-btn-primary mt-4"
                     >
                       {bereitsAbgestimmt ? "Zum Ergebnis" : "Zur Abstimmung"}
                     </Link>
