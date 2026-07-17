@@ -159,8 +159,8 @@ export default async function AdminDashboardPage({ params }: PageProps) {
   return (
     <main className="min-h-screen px-6 py-10 max-w-4xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-zinc-900">Admin-Bereich</h1>
-        <p className="text-sm text-zinc-500 mt-1">{tenant.name}</p>
+        <h1 className="text-2xl font-semibold text-pz-ink">Admin-Bereich</h1>
+        <p className="text-sm text-pz-muted mt-1">{tenant.name}</p>
       </div>
 
       {/* „Erste Schritte" (Fläche C): nur solange mindestens ein Baustein fehlt —
@@ -233,7 +233,7 @@ export default async function AdminDashboardPage({ params }: PageProps) {
       )}
 
       {!isAdmin && (
-        <div className="mb-8 rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
+        <div className="mb-8 rounded-lg border border-pz-line bg-pz-surface p-4 text-sm text-pz-muted">
           Lesender Zugriff: Sie können Ergebnisse und Digest-Entwürfe in Ihrem
           Bereich einsehen. Bearbeitung, Freigabe und Verwaltung übernehmen
           Administrator:innen.
@@ -245,10 +245,10 @@ export default async function AdminDashboardPage({ params }: PageProps) {
         {zeigeDigestKarte && (
           <Link
             href={`/${slugFromPath}/admin/digests`}
-            className="group rounded-lg border border-zinc-200 p-6 hover:border-zinc-300 hover:bg-zinc-50 transition-colors"
+            className="group rounded-lg border border-pz-line p-6 hover:border-pz-line hover:bg-pz-brand-soft transition-colors"
           >
             <div className="flex items-start justify-between mb-3">
-              <h2 className="text-lg font-medium text-zinc-900 group-hover:text-zinc-700">
+              <h2 className="text-lg font-medium text-pz-ink group-hover:text-pz-body">
                 Digests
               </h2>
               {digestEntwurfCount > 0 && (
@@ -257,7 +257,7 @@ export default async function AdminDashboardPage({ params }: PageProps) {
                 </span>
               )}
             </div>
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-pz-muted">
               {isAdmin
                 ? "Sitzungszusammenfassungen verwalten, freigeben und veröffentlichen."
                 : "Sitzungszusammenfassungen und Entwürfe einsehen."}
@@ -272,10 +272,10 @@ export default async function AdminDashboardPage({ params }: PageProps) {
         {isAdmin && (
         <Link
           href={`/${slugFromPath}/admin/anliegen`}
-          className="group rounded-lg border border-zinc-200 p-6 hover:border-zinc-300 hover:bg-zinc-50 transition-colors"
+          className="group rounded-lg border border-pz-line p-6 hover:border-pz-line hover:bg-pz-brand-soft transition-colors"
         >
           <div className="flex items-start justify-between mb-3">
-            <h2 className="text-lg font-medium text-zinc-900 group-hover:text-zinc-700">
+            <h2 className="text-lg font-medium text-pz-ink group-hover:text-pz-body">
               Anliegen
             </h2>
             {anliegenOffenCount > 0 && (
@@ -284,7 +284,7 @@ export default async function AdminDashboardPage({ params }: PageProps) {
               </span>
             )}
           </div>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-pz-muted">
             Eingereichte Bürgeranliegen einsehen und bearbeiten.
           </p>
           <p className="mt-3 text-sm font-medium text-[var(--tenant-primary,var(--pz-brand))] group-hover:underline">
@@ -297,14 +297,14 @@ export default async function AdminDashboardPage({ params }: PageProps) {
         {isAdmin && (
         <Link
           href={`/${slugFromPath}/admin/rollen`}
-          className="group rounded-lg border border-zinc-200 p-6 hover:border-zinc-300 hover:bg-zinc-50 transition-colors"
+          className="group rounded-lg border border-pz-line p-6 hover:border-pz-line hover:bg-pz-brand-soft transition-colors"
         >
           <div className="flex items-start justify-between mb-3">
-            <h2 className="text-lg font-medium text-zinc-900 group-hover:text-zinc-700">
+            <h2 className="text-lg font-medium text-pz-ink group-hover:text-pz-body">
               Rollen
             </h2>
           </div>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-pz-muted">
             Rollen zuweisen und entziehen. Jede Änderung wird PII-frei protokolliert.
           </p>
           <p className="mt-3 text-sm font-medium text-[var(--tenant-primary,var(--pz-brand))] group-hover:underline">
@@ -317,14 +317,14 @@ export default async function AdminDashboardPage({ params }: PageProps) {
         {isAdmin && (
         <Link
           href={`/${slugFromPath}/admin/protokoll`}
-          className="group rounded-lg border border-zinc-200 p-6 hover:border-zinc-300 hover:bg-zinc-50 transition-colors"
+          className="group rounded-lg border border-pz-line p-6 hover:border-pz-line hover:bg-pz-brand-soft transition-colors"
         >
           <div className="flex items-start justify-between mb-3">
-            <h2 className="text-lg font-medium text-zinc-900 group-hover:text-zinc-700">
+            <h2 className="text-lg font-medium text-pz-ink group-hover:text-pz-body">
               Protokoll
             </h2>
           </div>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-pz-muted">
             Technisches Audit-Log (PII-frei, ohne E-Mail) der letzten Ereignisse.
           </p>
           <p className="mt-3 text-sm font-medium text-[var(--tenant-primary,var(--pz-brand))] group-hover:underline">
@@ -337,14 +337,14 @@ export default async function AdminDashboardPage({ params }: PageProps) {
         {isAdmin && (
         <Link
           href={`/${slugFromPath}/admin/verifizierung`}
-          className="group rounded-lg border border-zinc-200 p-6 hover:border-zinc-300 hover:bg-zinc-50 transition-colors"
+          className="group rounded-lg border border-pz-line p-6 hover:border-pz-line hover:bg-pz-brand-soft transition-colors"
         >
           <div className="flex items-start justify-between mb-3">
-            <h2 className="text-lg font-medium text-zinc-900 group-hover:text-zinc-700">
+            <h2 className="text-lg font-medium text-pz-ink group-hover:text-pz-body">
               QR-Verifizierung
             </h2>
           </div>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-pz-muted">
             QR-Codes erzeugen, mit denen sich Bürger:innen vor Ort
             wohnsitz-verifizieren (Stufe 2).
           </p>
@@ -357,14 +357,14 @@ export default async function AdminDashboardPage({ params }: PageProps) {
         {/* Karte: Abstimmungen (M5 Composer + Lebenszyklus; Beobachter: Lese-Ansicht) */}
         <Link
           href={`/${slugFromPath}/admin/abstimmungen`}
-          className="group rounded-lg border border-zinc-200 p-6 hover:border-zinc-300 hover:bg-zinc-50 transition-colors"
+          className="group rounded-lg border border-pz-line p-6 hover:border-pz-line hover:bg-pz-brand-soft transition-colors"
         >
           <div className="flex items-start justify-between mb-3">
-            <h2 className="text-lg font-medium text-zinc-900 group-hover:text-zinc-700">
+            <h2 className="text-lg font-medium text-pz-ink group-hover:text-pz-body">
               Abstimmungen
             </h2>
           </div>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-pz-muted">
             {isAdmin
               ? "Abstimmungen für Kommune oder Ortsteil erstellen, aktivieren und schließen. Verbindliche Abstimmungen nur für verifizierte Bürger:innen."
               : "Abstimmungen und Ergebnisse in Ihrem Bereich einsehen."}

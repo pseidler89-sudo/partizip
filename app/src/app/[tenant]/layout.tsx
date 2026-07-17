@@ -30,7 +30,9 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getUserRoleTypes, isAdmin } from "@/lib/auth/roles";
 import { FEATURE_ANLIEGEN_EINREICHEN } from "@/lib/features";
 import { PLATFORM_NAME, regionDisplayName } from "@/lib/brand";
+import { BrandMark } from "@/components/BrandMark";
 import { StandortChip } from "./StandortChip";
+import { NavLink } from "./NavLink";
 import { LoginEntry } from "./LoginEntry";
 
 interface TenantLayoutProps {
@@ -163,11 +165,9 @@ function TenantLayoutInner({
               href="/"
               className="flex items-center gap-2 transition-opacity hover:opacity-80"
             >
-              <span
-                aria-hidden
-                className="h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: "var(--tenant-primary)" }}
-              />
+              {/* Bildzeichen bleibt IMMER Plattform-Teal (Marken-Regel);
+                  Tenant-Farbe trägt nur der Standort-Chip. */}
+              <BrandMark className="h-6 w-6 shrink-0" />
               <span className="text-base font-semibold" style={{ color: "var(--tenant-primary)" }}>
                 {PLATFORM_NAME}
               </span>
@@ -175,44 +175,49 @@ function TenantLayoutInner({
             <StandortChip slug={slugFromPath} label={kommuneName} />
           </div>
 
-          {/* Haupt-Navigation */}
+          {/* Haupt-Navigation — NavLink setzt aria-current="page" für den
+              aktiven Abschnitt (A11y) und hebt ihn dezent hervor. */}
           <div className="flex items-center gap-1 sm:gap-3 text-sm">
-            <Link
+            <NavLink
               href={`/${slugFromPath}/umfragen`}
-              className="rounded-md px-2.5 py-1.5 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors whitespace-nowrap"
+              className="rounded-md px-2.5 py-1.5 text-pz-muted hover:bg-pz-brand-soft hover:text-pz-ink transition-colors whitespace-nowrap"
+              activeClassName="font-medium text-pz-ink"
             >
               Abstimmungen
-            </Link>
-            <Link
+            </NavLink>
+            <NavLink
               href={`/${slugFromPath}/digest`}
-              className="rounded-md px-2.5 py-1.5 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors whitespace-nowrap"
+              className="rounded-md px-2.5 py-1.5 text-pz-muted hover:bg-pz-brand-soft hover:text-pz-ink transition-colors whitespace-nowrap"
+              activeClassName="font-medium text-pz-ink"
             >
               Ratsinfos
-            </Link>
+            </NavLink>
             {FEATURE_ANLIEGEN_EINREICHEN && (
-              <Link
+              <NavLink
                 href={`/${slugFromPath}/anliegen`}
-                className="rounded-md px-2.5 py-1.5 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors whitespace-nowrap"
+                className="rounded-md px-2.5 py-1.5 text-pz-muted hover:bg-pz-brand-soft hover:text-pz-ink transition-colors whitespace-nowrap"
+                activeClassName="font-medium text-pz-ink"
               >
                 Anliegen
-              </Link>
+              </NavLink>
             )}
             {admin && (
-              <Link
+              <NavLink
                 href={`/${slugFromPath}/admin`}
-                className="rounded-md px-2.5 py-1.5 font-medium transition-colors whitespace-nowrap hover:opacity-80"
-                style={{ color: "var(--pz-brand-strong)" }}
+                className="rounded-md px-2.5 py-1.5 font-medium text-pz-brand-strong hover:bg-pz-brand-soft transition-colors whitespace-nowrap"
+                activeClassName="bg-pz-brand-soft"
               >
                 Verwaltung
-              </Link>
+              </NavLink>
             )}
             {eingeloggt ? (
-              <Link
+              <NavLink
                 href={`/${slugFromPath}/konto`}
-                className="rounded-md px-2.5 py-1.5 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors whitespace-nowrap"
+                className="rounded-md px-2.5 py-1.5 text-pz-muted hover:bg-pz-brand-soft hover:text-pz-ink transition-colors whitespace-nowrap"
+                activeClassName="font-medium text-pz-ink"
               >
                 Konto
-              </Link>
+              </NavLink>
             ) : (
               <LoginEntry tenantSlug={slugFromPath} />
             )}
@@ -231,46 +236,52 @@ function TenantLayoutInner({
 
       {/* Footer — dauerhaft erreichbare Einstiege (FAQ/Für-Kommunen lebten sonst
           nur auf der Landing, die mit dem Region-Cookie verschwindet) */}
-      <footer className="border-t border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-x-4 gap-y-2 px-4 py-4 text-xs text-zinc-600">
+      <footer className="border-t border-pz-line bg-pz-surface">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-x-4 gap-y-2 px-4 py-4 text-xs text-pz-muted">
+          {/* Markenzeile: Bildzeichen + Plattformname (bleibt Teal, s. Header). */}
+          <span className="inline-flex items-center gap-1.5">
+            <BrandMark className="h-4 w-4 shrink-0" />
+            <span className="font-medium">{PLATFORM_NAME}</span>
+          </span>
+          <span aria-hidden>·</span>
           <Link
             href={`/${slugFromPath}/impressum`}
-            className="hover:text-zinc-900 transition-colors"
+            className="hover:text-pz-ink transition-colors"
           >
             Impressum
           </Link>
           <span aria-hidden>·</span>
           <Link
             href={`/${slugFromPath}/datenschutz`}
-            className="hover:text-zinc-900 transition-colors"
+            className="hover:text-pz-ink transition-colors"
           >
             Datenschutz
           </Link>
           <span aria-hidden>·</span>
           <Link
             href={`/${slugFromPath}/transparenz`}
-            className="hover:text-zinc-900 transition-colors"
+            className="hover:text-pz-ink transition-colors"
           >
             Transparenz
           </Link>
           <span aria-hidden>·</span>
           <Link
             href={`/${slugFromPath}/faq`}
-            className="hover:text-zinc-900 transition-colors"
+            className="hover:text-pz-ink transition-colors"
           >
             Häufige Fragen
           </Link>
           <span aria-hidden>·</span>
           <Link
             href={`/${slugFromPath}/fuer-kommunen`}
-            className="hover:text-zinc-900 transition-colors"
+            className="hover:text-pz-ink transition-colors"
           >
             Für Kommunen
           </Link>
           <span aria-hidden>·</span>
           <a
             href="https://github.com/pseidler89-sudo/partizip"
-            className="hover:text-zinc-900 transition-colors"
+            className="hover:text-pz-ink transition-colors"
           >
             Quellcode (GitHub)
           </a>

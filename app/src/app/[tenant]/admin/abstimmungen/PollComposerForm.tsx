@@ -316,7 +316,9 @@ export default function PollComposerForm({ ortsteile, demo = false }: Props) {
               <span className="mt-0.5 block text-xs" style={{ color: "var(--pz-muted)" }}>
                 Es stimmen nur wohnsitz-verifizierte Bürger:innen ab (Stufe 2). Ohne
                 Haken ist es ein unverbindliches Stimmungsbild — alle angemeldeten
-                Bürger:innen können teilnehmen.
+                Bürger:innen können teilnehmen. Auch dann zeigt das Ergebnis
+                transparent, wie viele Stimmen von wohnsitz-verifizierten
+                Bürger:innen stammen.
               </span>
             </span>
           </label>

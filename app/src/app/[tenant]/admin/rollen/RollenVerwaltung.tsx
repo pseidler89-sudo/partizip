@@ -100,20 +100,20 @@ export function RollenVerwaltung({ users, erlaubteRollen }: Props) {
   return (
     <div className="space-y-10">
       {/* Formular: Rolle zuweisen */}
-      <section className="rounded-lg border border-zinc-200 p-5">
-        <h2 className="text-lg font-medium text-zinc-900">Rolle zuweisen</h2>
-        <p className="mt-1 text-sm text-zinc-500">
+      <section className="rounded-lg border border-pz-line p-5">
+        <h2 className="text-lg font-medium text-pz-ink">Rolle zuweisen</h2>
+        <p className="mt-1 text-sm text-pz-muted">
           Die Person muss bereits ein Konto in dieser Kommune haben.
         </p>
 
         {erlaubteRollen.length === 0 ? (
-          <p className="mt-4 text-sm text-amber-700">
+          <p className="mt-4 text-sm" style={{ color: "var(--pz-warning-ink)" }}>
             Ihre Rolle erlaubt keine Rollen-Vergabe.
           </p>
         ) : (
           <form onSubmit={handleAssign} className="mt-4 space-y-4">
             <div>
-              <label htmlFor="targetEmail" className="block text-xs font-medium text-zinc-600">
+              <label htmlFor="targetEmail" className="block text-xs font-medium text-pz-muted">
                 E-Mail der Zielperson
               </label>
               <input
@@ -123,23 +123,23 @@ export function RollenVerwaltung({ users, erlaubteRollen }: Props) {
                 value={targetEmail}
                 onChange={(e) => setTargetEmail(e.target.value)}
                 autoComplete="off"
-                className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm
-                           focus:border-zinc-400 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-pz-line px-3 py-1.5 text-sm
+                           focus:border-pz-brand focus:outline-none"
                 placeholder="person@beispiel.de"
               />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label htmlFor="roleType" className="block text-xs font-medium text-zinc-600">
+                <label htmlFor="roleType" className="block text-xs font-medium text-pz-muted">
                   Rolle
                 </label>
                 <select
                   id="roleType"
                   value={roleType}
                   onChange={(e) => setRoleType(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm
-                             focus:border-zinc-400 focus:outline-none"
+                  className="mt-1 w-full rounded-md border border-pz-line px-3 py-1.5 text-sm
+                             focus:border-pz-brand focus:outline-none"
                 >
                   {erlaubteRollen.map((r) => (
                     <option key={r} value={r}>
@@ -150,15 +150,15 @@ export function RollenVerwaltung({ users, erlaubteRollen }: Props) {
               </div>
 
               <div>
-                <label htmlFor="scopeLevel" className="block text-xs font-medium text-zinc-600">
+                <label htmlFor="scopeLevel" className="block text-xs font-medium text-pz-muted">
                   Geltungsbereich
                 </label>
                 <select
                   id="scopeLevel"
                   value={scopeLevel}
                   onChange={(e) => setScopeLevel(e.target.value as ScopeLevel)}
-                  className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm
-                             focus:border-zinc-400 focus:outline-none"
+                  className="mt-1 w-full rounded-md border border-pz-line px-3 py-1.5 text-sm
+                             focus:border-pz-brand focus:outline-none"
                 >
                   {SCOPE_LEVELS.map((s) => (
                     <option key={s} value={s}>
@@ -170,7 +170,7 @@ export function RollenVerwaltung({ users, erlaubteRollen }: Props) {
             </div>
 
             {formMsg && (
-              <p className={`text-sm ${formMsg.ok ? "text-green-700" : "text-red-600"}`}>
+              <p className="text-sm" style={{ color: formMsg.ok ? "var(--pz-success)" : "var(--pz-danger)" }}>
                 {formMsg.text}
               </p>
             )}
@@ -178,8 +178,7 @@ export function RollenVerwaltung({ users, erlaubteRollen }: Props) {
             <button
               type="submit"
               disabled={isPending || !targetEmail.trim()}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white
-                         hover:bg-zinc-700 disabled:opacity-50"
+              className="pz-btn pz-btn-sm pz-btn-primary"
             >
               {isPending ? "Wird gespeichert…" : "Rolle zuweisen"}
             </button>
@@ -189,25 +188,25 @@ export function RollenVerwaltung({ users, erlaubteRollen }: Props) {
 
       {/* Liste: User mit Rollen */}
       <section>
-        <h2 className="text-lg font-medium text-zinc-900">Konten &amp; Rollen</h2>
-        <p className="mt-1 text-sm text-zinc-500">
+        <h2 className="text-lg font-medium text-pz-ink">Konten &amp; Rollen</h2>
+        <p className="mt-1 text-sm text-pz-muted">
           {users.length} Konto{users.length !== 1 ? "en" : ""} in dieser Kommune.
         </p>
 
         <div className="mt-4 space-y-3">
           {users.map((u) => (
-            <div key={u.userId} className="rounded-lg border border-zinc-200 px-5 py-4">
+            <div key={u.userId} className="rounded-lg border border-pz-line px-5 py-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="font-medium text-zinc-900 truncate">{u.email}</p>
+                  <p className="font-medium text-pz-ink truncate">{u.email}</p>
                   {u.accountStatus !== "active" && (
-                    <span className="text-xs text-zinc-400">Status: {u.accountStatus}</span>
+                    <span className="text-xs text-pz-muted">Status: {u.accountStatus}</span>
                   )}
                 </div>
               </div>
 
               {u.roles.length === 0 ? (
-                <p className="mt-2 text-sm text-zinc-400">Keine Rollen.</p>
+                <p className="mt-2 text-sm text-pz-muted">Keine Rollen.</p>
               ) : (
                 <ul className="mt-3 space-y-2">
                   {u.roles.map((r) => {
@@ -215,11 +214,11 @@ export function RollenVerwaltung({ users, erlaubteRollen }: Props) {
                     return (
                       <li
                         key={r.roleId}
-                        className="flex items-center justify-between gap-3 rounded-md bg-zinc-50 px-3 py-2"
+                        className="flex items-center justify-between gap-3 rounded-md bg-pz-page px-3 py-2"
                       >
-                        <span className="text-sm text-zinc-700">
+                        <span className="text-sm text-pz-body">
                           <span className="font-medium">{ROLE_LABELS[r.roleType] ?? r.roleType}</span>
-                          <span className="text-zinc-400">
+                          <span className="text-pz-muted">
                             {" "}· {regionTypLabel(r.regionTyp)}
                             {r.regionTyp === "ortsteil" ? ` (${r.regionName})` : ""}
                           </span>
@@ -229,13 +228,13 @@ export function RollenVerwaltung({ users, erlaubteRollen }: Props) {
                             type="button"
                             onClick={() => handleRevoke(r.roleId)}
                             disabled={isPending}
-                            className="rounded-md border border-red-300 bg-white px-2.5 py-1 text-xs
-                                       font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            className="pz-btn pz-btn-sm pz-btn-secondary"
+                            style={{ color: "var(--pz-danger)" }}
                           >
                             Entziehen
                           </button>
                         ) : (
-                          <span className="text-xs text-zinc-400">nicht verwaltbar</span>
+                          <span className="text-xs text-pz-muted">nicht verwaltbar</span>
                         )}
                       </li>
                     );
@@ -246,7 +245,7 @@ export function RollenVerwaltung({ users, erlaubteRollen }: Props) {
               {/* Entzug-Fehler je Rolle anzeigen */}
               {u.roles.map((r) =>
                 revokeError[r.roleId] ? (
-                  <p key={`err-${r.roleId}`} className="mt-2 text-sm text-red-600">
+                  <p key={`err-${r.roleId}`} className="mt-2 text-sm" style={{ color: "var(--pz-danger)" }}>
                     {revokeError[r.roleId]}
                   </p>
                 ) : null

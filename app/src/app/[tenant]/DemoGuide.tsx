@@ -184,28 +184,29 @@ export function DemoGuide({
   const vs = VERWALTUNG_SCHRITTE[schritt - 1];
 
   const segmentBase =
-    "rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-colors focus:outline-none " +
+    "rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors focus:outline-none " +
     "focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-1 " +
     "disabled:cursor-not-allowed disabled:opacity-60";
-  const knopfBase =
-    "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold transition-colors " +
-    "focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] " +
-    "focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40";
 
   return (
     <nav
       aria-label="Demo-Rundgang"
       className="border-b px-4 py-2"
-      style={{ borderColor: "var(--pz-line)", backgroundColor: "var(--pz-card)" }}
+      style={{
+        borderColor: "var(--pz-line)",
+        // Leicht marken-getönte Fläche — hebt den Tour-Streifen dezent vom
+        // Header ab (Fix: das früher referenzierte --pz-card existiert nicht).
+        backgroundColor: "color-mix(in srgb, var(--pz-brand) 4%, var(--pz-surface))",
+      }}
     >
       <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-x-4 gap-y-1">
         {/* Perspektiv-Umschalter — beide Knöpfe tastaturbedienbar (aria-pressed). */}
         <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: "var(--pz-muted)" }}>
           <span className="hidden sm:inline">Ansehen als:</span>
-          <span
-            className="inline-flex items-center gap-0.5 rounded-full border p-0.5"
-            style={{ borderColor: "var(--pz-line)" }}
-          >
+          {/* Echter Segmented Control: Soft-Fläche als Schiene, aktives Segment
+              als weiße Pille mit flachem Schatten. Beide Knöpfe bleiben immer
+              klickbar (nur während der laufenden Aktion kurz gesperrt). */}
+          <span className="inline-flex items-center gap-0.5 rounded-full bg-[color:var(--pz-brand-soft)] p-0.5">
             <button
               type="button"
               aria-pressed={!verwaltung}
@@ -214,8 +215,12 @@ export function DemoGuide({
               className={segmentBase}
               style={
                 !verwaltung
-                  ? { backgroundColor: "var(--pz-brand-soft)", color: "var(--pz-brand-strong)" }
-                  : { color: "var(--pz-muted)" }
+                  ? {
+                      backgroundColor: "#fff",
+                      color: "var(--pz-brand-strong)",
+                      boxShadow: "var(--pz-shadow-1)",
+                    }
+                  : { backgroundColor: "transparent", color: "var(--pz-muted)" }
               }
             >
               Bürger:in
@@ -228,8 +233,12 @@ export function DemoGuide({
               className={segmentBase}
               style={
                 verwaltung
-                  ? { backgroundColor: "var(--pz-brand-soft)", color: "var(--pz-brand-strong)" }
-                  : { color: "var(--pz-muted)" }
+                  ? {
+                      backgroundColor: "#fff",
+                      color: "var(--pz-brand-strong)",
+                      boxShadow: "var(--pz-shadow-1)",
+                    }
+                  : { backgroundColor: "transparent", color: "var(--pz-muted)" }
               }
             >
               {busy ? "Startet …" : "Verwaltung"}
@@ -243,19 +252,16 @@ export function DemoGuide({
               className="inline-flex items-center gap-2 text-xs sm:text-sm"
               style={{ color: "var(--pz-body)" }}
             >
-              <span
-                className="inline-flex h-5 items-center rounded-full px-2 text-[11px] font-semibold"
-                style={{ backgroundColor: "var(--pz-brand-soft)", color: "var(--pz-brand-strong)" }}
-              >
-                Schritt {schritt} von {VERWALTUNG_SCHRITTE.length}
+              <FortschrittsPunkte aktuell={schritt} gesamt={VERWALTUNG_SCHRITTE.length} />
+              <span className="sr-only">
+                Schritt {schritt} von {VERWALTUNG_SCHRITTE.length}:
               </span>
               {vs.label}
             </span>
             <span className="inline-flex items-center gap-3">
               <Link
                 href={`/${slug}${vs.ctaPfad}`}
-                className="inline-flex items-center gap-1 text-xs font-semibold underline-offset-2 hover:underline sm:text-sm"
-                style={{ color: "var(--pz-brand-strong)" }}
+                className="pz-btn pz-btn-sm pz-btn-primary pz-btn-pill"
               >
                 {vs.ctaLabel}
                 <ArrowRight aria-hidden className="h-3.5 w-3.5" strokeWidth={2} />
@@ -265,8 +271,7 @@ export function DemoGuide({
                   type="button"
                   onClick={() => geheZuSchritt(schritt - 1)}
                   disabled={schritt <= 1}
-                  className={knopfBase}
-                  style={{ color: "var(--pz-body)" }}
+                  className="pz-btn pz-btn-sm pz-btn-secondary pz-btn-pill"
                 >
                   <ArrowLeft aria-hidden className="h-3.5 w-3.5" strokeWidth={2} />
                   Zurück
@@ -275,8 +280,7 @@ export function DemoGuide({
                   type="button"
                   onClick={() => geheZuSchritt(schritt + 1)}
                   disabled={schritt >= VERWALTUNG_SCHRITTE.length}
-                  className={knopfBase}
-                  style={{ color: "var(--pz-brand-strong)" }}
+                  className="pz-btn pz-btn-sm pz-btn-secondary pz-btn-pill"
                 >
                   Weiter
                   <ArrowRight aria-hidden className="h-3.5 w-3.5" strokeWidth={2} />
@@ -291,19 +295,14 @@ export function DemoGuide({
                 className="inline-flex items-center gap-2 text-xs sm:text-sm"
                 style={{ color: "var(--pz-body)" }}
               >
-                <span
-                  className="inline-flex h-5 items-center rounded-full px-2 text-[11px] font-semibold"
-                  style={{ backgroundColor: "var(--pz-brand-soft)", color: "var(--pz-brand-strong)" }}
-                >
-                  Schritt {step.n} von 5
-                </span>
+                <FortschrittsPunkte aktuell={step.n} gesamt={5} />
+                <span className="sr-only">Schritt {step.n} von 5:</span>
                 {step.label}
               </span>
               {step.next && (
                 <Link
                   href={step.next.href}
-                  className="inline-flex items-center gap-1 text-xs font-semibold underline-offset-2 hover:underline sm:text-sm"
-                  style={{ color: "var(--pz-brand-strong)" }}
+                  className="pz-btn pz-btn-sm pz-btn-primary pz-btn-pill"
                 >
                   {step.next.label}
                   <ArrowRight aria-hidden className="h-3.5 w-3.5" strokeWidth={2} />
@@ -314,10 +313,32 @@ export function DemoGuide({
         )}
       </div>
       {error && (
-        <p className="mx-auto mt-1 max-w-3xl text-xs text-red-700" role="alert">
+        <p className="mx-auto mt-1 max-w-3xl text-xs" style={{ color: "var(--pz-danger)" }} role="alert">
           {error}
         </p>
       )}
     </nav>
+  );
+}
+
+/**
+ * Punktreihe als visueller Fortschritt (rein dekorativ, aria-hidden — der
+ * Text „Schritt n von m" steht sr-only daneben): erledigt/aktuell = Marke,
+ * aktuell als gestreckte Pille, kommend = Linienfarbe.
+ */
+function FortschrittsPunkte({ aktuell, gesamt }: { aktuell: number; gesamt: number }) {
+  return (
+    <span aria-hidden className="inline-flex shrink-0 items-center gap-1">
+      {Array.from({ length: gesamt }, (_, i) => {
+        const n = i + 1;
+        const klasse =
+          n === aktuell
+            ? "h-1.5 w-4 rounded-full bg-[var(--pz-brand)]"
+            : n < aktuell
+              ? "h-1.5 w-1.5 rounded-full bg-[var(--pz-brand)]"
+              : "h-1.5 w-1.5 rounded-full bg-[var(--pz-line)]";
+        return <span key={n} className={klasse} />;
+      })}
+    </span>
   );
 }

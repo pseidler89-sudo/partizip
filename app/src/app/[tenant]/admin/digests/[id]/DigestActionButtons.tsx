@@ -99,8 +99,8 @@ export function DigestActionButtons({
           title={statementGeprueft ? "Als ungeprüft markieren" : "Als quellen-geprüft markieren"}
           className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
             statementGeprueft
-              ? "bg-green-100 text-green-800 hover:bg-green-200"
-              : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+              ? "pz-badge-success hover:opacity-80"
+              : "pz-badge-neutral hover:opacity-80"
           }`}
         >
           ✓ {statementGeprueft ? "Geprüft" : "Prüfen"}
@@ -111,8 +111,8 @@ export function DigestActionButtons({
           title={statementHighlight ? "Highlight entfernen" : "Als Highlight markieren"}
           className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
             statementHighlight
-              ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
-              : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+              ? "pz-badge-warning hover:opacity-80"
+              : "pz-badge-neutral hover:opacity-80"
           }`}
         >
           {statementHighlight ? "★ Highlight" : "☆ Als Highlight"}

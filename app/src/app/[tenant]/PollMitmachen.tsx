@@ -331,8 +331,7 @@ function AnmeldeCta({ tenantSlug }: { tenantSlug: string }) {
           e.preventDefault();
           window.dispatchEvent(new Event(OPEN_LOGIN_EVENT));
         }}
-        className="mt-3 inline-block rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
-        style={{ backgroundColor: "var(--tenant-primary)" }}
+        className="pz-btn pz-btn-primary mt-3"
       >
         Zum Mitstimmen anmelden
       </Link>

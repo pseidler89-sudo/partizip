@@ -83,8 +83,7 @@ export function LoginForm({ tenantSlug }: { tenantSlug: string }) {
             setEmail("");
             setMinAgeConfirmed(false);
           }}
-          className="mt-3.5 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[color:var(--pz-line)] px-4 py-3 text-sm font-semibold"
-          style={{ backgroundColor: "var(--pz-surface)", color: "var(--pz-ink)" }}
+          className="pz-btn pz-btn-secondary mt-3.5 w-full"
         >
           <Pencil aria-hidden className="h-4 w-4" strokeWidth={2} /> Andere E-Mail verwenden
         </button>
@@ -139,13 +138,16 @@ export function LoginForm({ tenantSlug }: { tenantSlug: string }) {
         </label>
       </div>
 
-      {status === "error" && <p role="alert" className="text-sm text-red-600">{errorMessage}</p>}
+      {status === "error" && (
+        <p role="alert" className="text-sm" style={{ color: "var(--pz-danger)" }}>
+          {errorMessage}
+        </p>
+      )}
 
       <button
         type="submit"
         disabled={status === "loading"}
-        style={{ backgroundColor: "var(--tenant-primary, var(--pz-brand))" }}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3.5 text-base font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+        className="pz-btn pz-btn-primary pz-btn-lg w-full"
       >
         {status === "loading" ? "Sende Link…" : "Anmeldelink senden"}
         {status !== "loading" && <ArrowRight aria-hidden className="h-[18px] w-[18px]" strokeWidth={2} />}

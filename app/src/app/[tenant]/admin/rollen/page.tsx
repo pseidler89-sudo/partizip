@@ -134,12 +134,12 @@ export default async function AdminRollenPage({ params }: PageProps) {
       <div className="mb-8">
         <Link
           href={`/${slugFromPath}/admin`}
-          className="text-sm text-zinc-500 hover:text-zinc-700"
+          className="text-sm text-pz-muted hover:text-pz-body"
         >
           ← Admin-Bereich
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Rollen verwalten</h1>
-        <p className="text-sm text-zinc-500 mt-1">
+        <h1 className="mt-2 text-2xl font-semibold text-pz-ink">Rollen verwalten</h1>
+        <p className="text-sm text-pz-muted mt-1">
           Rollen zuweisen und entziehen. Jede Änderung wird im Protokoll PII-frei
           erfasst. {tenant.name}
         </p>
@@ -151,7 +151,7 @@ export default async function AdminRollenPage({ params }: PageProps) {
         erlaubteRollen={erlaubteRollen}
       />
 
-      <div className="mt-12 border-t border-zinc-200 pt-10">
+      <div className="mt-12 border-t border-pz-line pt-10">
         {/* Demo-Spielwiese: das Einladungs-Formular entfällt — die Server-Actions
             lehnen den Versand auf dem Demo-Mandanten ohnehin ab (Side-Effect-
             Fence gegen Spam über den echten SMTP-Server); die UI erklärt es

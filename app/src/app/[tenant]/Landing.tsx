@@ -117,7 +117,7 @@ export function Landing({ tenantName, slug }: { tenantName: string; slug: string
             >
               <span aria-hidden>●</span> Kommunale Beteiligung · überparteilich
             </span>
-            <h1 className="mt-4 text-4xl font-semibold tracking-tight sm:text-5xl" style={{ color: "var(--pz-ink)" }}>
+            <h1 className="mt-4 text-4xl font-bold tracking-tight sm:text-5xl" style={{ color: "var(--pz-ink)" }}>
               Worüber wird gerade bei Ihnen abgestimmt?
             </h1>
             <p className="mx-auto mt-4 max-w-xl text-lg leading-relaxed lg:mx-0" style={{ color: "var(--pz-body)" }}>

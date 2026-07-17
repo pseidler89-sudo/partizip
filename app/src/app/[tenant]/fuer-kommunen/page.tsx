@@ -98,8 +98,7 @@ export default async function FuerKommunenPage({
             {!inDemo && (
               <a
                 href={DEMO_URL}
-                className="inline-flex min-h-[48px] items-center rounded-lg px-6 py-3 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
-                style={{ backgroundColor: "var(--pz-brand)" }}
+                className="pz-btn pz-btn-primary pz-btn-lg min-h-[48px]"
               >
                 Demo sofort ausprobieren
               </a>
@@ -109,24 +108,21 @@ export default async function FuerKommunenPage({
             {inDemo ? (
               <Link
                 href={`/${slug}/demo-verwaltung`}
-                className="inline-flex min-h-[48px] items-center rounded-lg border px-6 py-3 text-sm font-semibold transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
-                style={{ borderColor: "var(--pz-brand)", color: "var(--pz-brand-strong)" }}
+                className="pz-btn pz-btn-secondary pz-btn-lg min-h-[48px]"
               >
                 Verwaltungs-Demo ausprobieren
               </Link>
             ) : (
               <a
                 href={DEMO_VERWALTUNG_URL}
-                className="inline-flex min-h-[48px] items-center rounded-lg border px-6 py-3 text-sm font-semibold transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
-                style={{ borderColor: "var(--pz-brand)", color: "var(--pz-brand-strong)" }}
+                className="pz-btn pz-btn-secondary pz-btn-lg min-h-[48px]"
               >
                 Verwaltungs-Demo ausprobieren
               </a>
             )}
             <a
               href={DEMO_MAILTO}
-              className="inline-flex min-h-[48px] items-center rounded-lg border px-6 py-3 text-sm font-semibold transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
-              style={{ borderColor: "var(--pz-brand)", color: "var(--pz-brand-strong)" }}
+              className="pz-btn pz-btn-secondary pz-btn-lg min-h-[48px]"
             >
               Persönliche Demo anfragen
             </a>

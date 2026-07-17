@@ -207,7 +207,7 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
                             </span>
                           )}
                           {p.verbindlich ? (
-                            <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+                            <span className="pz-badge-warning inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium">
                               Verbindlich (nur verifiziert)
                             </span>
                           ) : (

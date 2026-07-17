@@ -124,12 +124,12 @@ function StatementListItem({
   return (
     <li className="flex gap-3">
       {showPosition && (
-        <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-zinc-100 text-xs font-medium text-zinc-600 mt-0.5">
+        <span className="pz-badge-neutral shrink-0 flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium mt-0.5">
           {stmt.position}
         </span>
       )}
       {!showPosition && (
-        <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-amber-100 text-xs font-medium text-amber-700 mt-0.5">
+        <span className="pz-badge-warning shrink-0 flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium mt-0.5">
           ★
         </span>
       )}
