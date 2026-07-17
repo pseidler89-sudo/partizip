@@ -106,7 +106,7 @@ export function LoginForm({ tenantSlug }: { tenantSlug: string }) {
         <label htmlFor="email" className="mb-1.5 block text-sm font-medium" style={{ color: "var(--pz-ink)" }}>
           E-Mail-Adresse
         </label>
-        <div className="flex items-center gap-2.5 rounded-md border border-[color:var(--pz-line)] bg-white px-3 transition-colors focus-within:border-[color:var(--pz-brand)] focus-within:ring-2 focus-within:ring-[color:var(--pz-brand)]/30">
+        <div className="flex items-center gap-2.5 rounded-md border border-[color:var(--pz-line)] bg-pz-surface px-3 transition-colors focus-within:border-[color:var(--pz-brand)] focus-within:ring-2 focus-within:ring-[color:var(--pz-brand)]/30">
           <Mail aria-hidden className="h-[18px] w-[18px] shrink-0" style={{ color: "var(--pz-muted)" }} strokeWidth={2} />
           <input
             id="email"
@@ -116,7 +116,7 @@ export function LoginForm({ tenantSlug }: { tenantSlug: string }) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="ihre@email.de"
-            className="h-12 w-full border-0 bg-transparent text-base outline-none placeholder:text-zinc-400"
+            className="h-12 w-full border-0 bg-transparent text-base outline-none placeholder:text-pz-muted"
             style={{ color: "var(--pz-ink)" }}
           />
         </div>
@@ -131,7 +131,7 @@ export function LoginForm({ tenantSlug }: { tenantSlug: string }) {
           type="checkbox"
           checked={minAgeConfirmed}
           onChange={(e) => setMinAgeConfirmed(e.target.checked)}
-          className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-[color:var(--pz-brand)] accent-[color:var(--pz-brand)] focus:ring-[color:var(--pz-brand)]"
+          className="mt-0.5 h-4 w-4 rounded border-pz-line text-[color:var(--pz-brand)] accent-[color:var(--pz-brand)] focus:ring-[color:var(--pz-brand)]"
         />
         <label htmlFor="minAge" className="text-sm" style={{ color: "var(--pz-body)" }}>
           Ich bestätige, dass ich mindestens 16 Jahre alt bin. (Erforderlich bei der Erstregistrierung)

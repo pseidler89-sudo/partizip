@@ -104,10 +104,10 @@ export function LoginModal({
             aria-modal="true"
             aria-labelledby="login-modal-title"
             onKeyDown={handleKeyDown}
-            className="pointer-events-auto relative w-full max-w-md rounded-t-2xl bg-white shadow-xl sm:rounded-2xl"
+            className="pointer-events-auto relative w-full max-w-md rounded-t-2xl bg-pz-surface shadow-xl sm:rounded-2xl"
           >
             {/* Sticky-Kopf: Titel + Schließen bleiben sichtbar, egal wie weit gescrollt. */}
-            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b border-[color:var(--pz-line)] bg-white px-6 pb-4 pt-5">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b border-[color:var(--pz-line)] bg-pz-surface px-6 pb-4 pt-5">
               <div className="flex items-start gap-2.5">
                 {/* Bildzeichen: verortet den Dialog als Partizip (bleibt Teal). */}
                 <BrandMark className="mt-0.5 h-6 w-6 shrink-0" />
@@ -124,7 +124,7 @@ export function LoginModal({
                 type="button"
                 onClick={onClose}
                 aria-label="Schließen"
-                className="-mr-1 shrink-0 rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
+                className="-mr-1 shrink-0 rounded-md p-1.5 text-pz-muted transition-colors hover:bg-pz-brand-soft hover:text-pz-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
               >
                 <span aria-hidden className="text-xl leading-none">×</span>
               </button>

@@ -146,14 +146,14 @@ export default async function AdminAnliegenPage({ params, searchParams }: PagePr
     <main className="min-h-screen px-6 py-10 max-w-4xl mx-auto">
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-900">Anliegen verwalten</h1>
-          <p className="text-sm text-zinc-500 mt-1">
+          <h1 className="text-2xl font-semibold text-pz-ink">Anliegen verwalten</h1>
+          <p className="text-sm text-pz-muted mt-1">
             Alle eingereichten Anliegen — {anliegenRows.length} gesamt.
           </p>
         </div>
         <Link
           href={`/${slugFromPath}/admin`}
-          className="text-sm text-zinc-500 hover:text-zinc-700"
+          className="text-sm text-pz-muted hover:text-pz-body"
         >
           ← Admin-Bereich
         </Link>
@@ -164,7 +164,7 @@ export default async function AdminAnliegenPage({ params, searchParams }: PagePr
         <Link
           href={`/${slugFromPath}/admin/anliegen`}
           className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-            !statusFilter ? "bg-zinc-800 text-white" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+            !statusFilter ? "bg-[color:var(--pz-brand)] text-white" : "pz-badge-neutral hover:opacity-80"
           }`}
         >
           Alle
@@ -175,7 +175,7 @@ export default async function AdminAnliegenPage({ params, searchParams }: PagePr
             href={`/${slugFromPath}/admin/anliegen?status=${key}`}
             className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
               statusFilter === key
-                ? "bg-zinc-800 text-white"
+                ? "bg-[color:var(--pz-brand)] text-white"
                 : `${STATUS_COLORS[key]} hover:opacity-80`
             }`}
           >
@@ -185,7 +185,7 @@ export default async function AdminAnliegenPage({ params, searchParams }: PagePr
       </div>
 
       {anliegenRows.length === 0 ? (
-        <div className="rounded-lg border border-zinc-200 p-8 text-center text-zinc-500">
+        <div className="rounded-lg border border-pz-line p-8 text-center text-pz-muted">
           <p>Keine Anliegen gefunden.</p>
         </div>
       ) : (
@@ -194,13 +194,13 @@ export default async function AdminAnliegenPage({ params, searchParams }: PagePr
             <Link
               key={a.id}
               href={`/${slugFromPath}/admin/anliegen/${a.id}`}
-              className="block rounded-lg border border-zinc-200 px-5 py-4 hover:border-zinc-300 hover:bg-zinc-50 transition-colors"
+              className="block rounded-lg border border-pz-line px-5 py-4 hover:border-pz-line hover:bg-pz-brand-soft transition-colors"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="font-medium text-zinc-900 truncate">{a.titel}</p>
-                  <p className="text-sm text-zinc-400 mt-0.5 font-mono">{a.trackingCode}</p>
-                  <p className="text-xs text-zinc-400 mt-0.5">
+                  <p className="font-medium text-pz-ink truncate">{a.titel}</p>
+                  <p className="text-sm text-pz-muted mt-0.5 font-mono">{a.trackingCode}</p>
+                  <p className="text-xs text-pz-muted mt-0.5">
                     {a.createdAt.toLocaleDateString("de-DE")}
                     {a.ortsteilId && ortsteilMap.has(a.ortsteilId) && (
                       <> · {ortsteilMap.get(a.ortsteilId)}</>
@@ -213,7 +213,7 @@ export default async function AdminAnliegenPage({ params, searchParams }: PagePr
                       Verborgen
                     </span>
                   )}
-                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[a.status] ?? "bg-zinc-100 text-zinc-600"}`}>
+                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[a.status] ?? "pz-badge-neutral"}`}>
                     {STATUS_LABELS[a.status] ?? a.status}
                   </span>
                 </div>

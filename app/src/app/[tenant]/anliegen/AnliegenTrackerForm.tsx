@@ -47,7 +47,7 @@ export default function AnliegenTrackerForm({ tenantSlug }: Props) {
           autoCapitalize="characters"
           spellCheck={false}
           className="w-full rounded-md border border-[color:var(--pz-line)] px-4 py-2.5 text-sm
-                     font-mono tracking-wider text-zinc-900 placeholder-zinc-400
+                     font-mono tracking-wider text-pz-ink placeholder:text-pz-muted
                      focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus:border-[color:var(--pz-brand)]"
         />
         {error && (

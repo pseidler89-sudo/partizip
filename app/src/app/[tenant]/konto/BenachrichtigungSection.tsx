@@ -71,10 +71,10 @@ export function BenachrichtigungSection({ initial }: { initial: boolean }) {
             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full
                         transition-colors focus-visible:outline-none focus-visible:ring-2
                         focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2
-                        disabled:opacity-50 ${aktiv ? "bg-[color:var(--pz-brand)]" : "bg-zinc-300"}`}
+                        disabled:opacity-50 ${aktiv ? "bg-[color:var(--pz-brand)]" : "bg-pz-line"}`}
           >
             <span
-              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform
+              className={`inline-block h-5 w-5 transform rounded-full bg-pz-surface shadow transition-transform
                           ${aktiv ? "translate-x-5" : "translate-x-0.5"}`}
             />
           </button>

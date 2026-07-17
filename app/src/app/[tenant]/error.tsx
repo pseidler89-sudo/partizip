@@ -25,8 +25,8 @@ export default function TenantError({
   return (
     <main className="mx-auto flex min-h-[60vh] max-w-md flex-col items-center justify-center px-6 py-12 text-center">
       <div className="text-4xl" aria-hidden>⚠️</div>
-      <h1 className="mt-3 text-xl font-semibold text-zinc-900">Etwas ist schiefgelaufen</h1>
-      <p className="mt-2 text-sm text-zinc-600">
+      <h1 className="mt-3 text-xl font-semibold text-pz-ink">Etwas ist schiefgelaufen</h1>
+      <p className="mt-2 text-sm text-pz-muted">
         Beim Laden dieser Seite ist ein Fehler aufgetreten. Das liegt nicht an Ihnen.
         Bitte versuchen Sie es noch einmal — wenn es weiterhin nicht klappt, schauen Sie
         später erneut vorbei.
@@ -41,7 +41,7 @@ export default function TenantError({
         </button>
         <Link
           href="/"
-          className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50"
+          className="pz-btn pz-btn-secondary"
         >
           Zur Startseite
         </Link>

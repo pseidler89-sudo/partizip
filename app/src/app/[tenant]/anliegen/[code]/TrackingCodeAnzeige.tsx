@@ -35,13 +35,13 @@ export function TrackingCodeAnzeige({ trackingCode }: Props) {
 
       {/* Code-Block */}
       <div className="flex items-center gap-3 mb-3">
-        <code className="flex-1 rounded-md bg-white border border-amber-200 px-4 py-3 text-2xl font-mono font-bold tracking-widest text-zinc-900 text-center select-all">
+        <code className="flex-1 rounded-md bg-pz-surface border border-amber-200 px-4 py-3 text-2xl font-mono font-bold tracking-widest text-pz-ink text-center select-all">
           {trackingCode}
         </code>
         <button
           type="button"
           onClick={handleKopieren}
-          className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-50 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-1 transition-colors"
+          className="shrink-0 rounded-md border border-amber-300 bg-pz-surface px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-50 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-1 transition-colors"
           aria-label="Code kopieren"
         >
           {kopiert ? "✓ Kopiert" : "Kopieren"}

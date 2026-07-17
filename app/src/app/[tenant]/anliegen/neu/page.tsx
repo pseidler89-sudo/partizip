@@ -57,7 +57,7 @@ export default async function AnliegenNeuPage({ params }: PageProps) {
           </Link>
           <Link
             href={`/${slugFromPath}/digest`}
-            className="rounded-lg border border-[color:var(--pz-line)] bg-white px-5 py-2.5 text-sm font-semibold transition-colors hover:bg-zinc-50"
+            className="pz-btn pz-btn-secondary"
             style={{ color: "var(--pz-ink)" }}
           >
             Ratsinfos lesen

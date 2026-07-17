@@ -139,7 +139,7 @@ function StatementListItem({
           href={stmt.sourceUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-block mt-1 text-xs text-zinc-400 hover:text-zinc-600 underline rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
+          className="inline-block mt-1 text-xs text-pz-muted hover:text-pz-muted underline rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
         >
           Quelle: {stmt.docType ?? "Dokument"}{stmt.docTitle ? ` – ${decodeHtmlEntities(stmt.docTitle)}` : ""}
         </a>

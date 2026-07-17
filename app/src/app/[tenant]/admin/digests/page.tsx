@@ -105,20 +105,20 @@ export default async function AdminDigestsPage({ params }: PageProps) {
   return (
     <main className="min-h-screen px-6 py-10 max-w-4xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-zinc-900">Digests verwalten</h1>
-        <p className="text-sm text-zinc-500 mt-1">
+        <h1 className="text-2xl font-semibold text-pz-ink">Digests verwalten</h1>
+        <p className="text-sm text-pz-muted mt-1">
           Alle Sitzungszusammenfassungen — Entwürfe, Freigegebene und Veröffentlichte.
         </p>
       </div>
 
       {data.digests.length === 0 ? (
-        <div className="rounded-lg border border-zinc-200 p-8 text-center text-zinc-500">
+        <div className="rounded-lg border border-pz-line p-8 text-center text-pz-muted">
           <p>Noch keine Digests vorhanden.</p>
           <p className="text-sm mt-2">
             Importiere zuerst Sitzungen mit{" "}
-            <code className="bg-zinc-100 px-1 py-0.5 rounded text-xs">npm run ris:import</code>
+            <code className="bg-pz-brand-soft px-1 py-0.5 rounded text-xs">npm run ris:import</code>
             {" "}und erzeuge dann Digests mit{" "}
-            <code className="bg-zinc-100 px-1 py-0.5 rounded text-xs">npm run digest:generate</code>.
+            <code className="bg-pz-brand-soft px-1 py-0.5 rounded text-xs">npm run digest:generate</code>.
           </p>
         </div>
       ) : (
@@ -127,19 +127,19 @@ export default async function AdminDigestsPage({ params }: PageProps) {
             <Link
               key={d.id}
               href={`/${slugFromPath}/admin/digests/${d.id}`}
-              className="block rounded-lg border border-zinc-200 px-5 py-4 hover:border-zinc-300 hover:bg-zinc-50 transition-colors"
+              className="block rounded-lg border border-pz-line px-5 py-4 hover:border-pz-line hover:bg-pz-brand-soft transition-colors"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="font-medium text-zinc-900 truncate">{d.title}</p>
-                  <p className="text-sm text-zinc-500 mt-0.5">
+                  <p className="font-medium text-pz-ink truncate">{d.title}</p>
+                  <p className="text-sm text-pz-muted mt-0.5">
                     Erstellt: {d.createdAt.toLocaleDateString("de-DE")}
                     {d.approvedAt && ` · Freigegeben: ${d.approvedAt.toLocaleDateString("de-DE")}`}
                     {d.publishedAt && ` · Veröffentlicht: ${d.publishedAt.toLocaleDateString("de-DE")}`}
                   </p>
                 </div>
                 <span
-                  className={`shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadge[d.status] ?? "bg-zinc-100 text-zinc-800"}`}
+                  className={`shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadge[d.status] ?? "pz-badge-neutral"}`}
                 >
                   {statusLabel[d.status] ?? d.status}
                 </span>

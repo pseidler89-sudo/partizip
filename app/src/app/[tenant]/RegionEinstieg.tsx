@@ -131,7 +131,7 @@ export function RegionEinstieg({
             value={plz}
             onChange={(e) => setPlz(e.target.value)}
             disabled={busy}
-            className="w-full rounded-lg border border-[color:var(--pz-line)] bg-white px-3 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
+            className="w-full rounded-lg border border-[color:var(--pz-line)] bg-pz-surface px-3 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
             style={{ color: "var(--pz-ink)" }}
             aria-describedby={`plz-funktion${fehler ? " plz-fehler" : hinweis ? " plz-hinweis" : ""}`}
           />
@@ -155,7 +155,7 @@ export function RegionEinstieg({
         type="button"
         onClick={handleStandort}
         disabled={busy}
-        className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-[color:var(--pz-line)] bg-white px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-zinc-50 disabled:opacity-60"
+        className="pz-btn pz-btn-secondary mt-3 w-full disabled:opacity-60"
         style={{ color: "var(--pz-ink)" }}
       >
         <span aria-hidden>📍</span> {geoBusy ? "Standort wird ermittelt…" : "Meinen Standort verwenden"}
@@ -167,7 +167,7 @@ export function RegionEinstieg({
         </p>
       )}
       {hinweis && (
-        <div id="plz-hinweis" className="mt-3 rounded-lg border border-dashed border-[color:var(--pz-line)] bg-zinc-50/60 p-3">
+        <div id="plz-hinweis" className="mt-3 rounded-lg border border-dashed border-[color:var(--pz-line)] bg-pz-surface p-3">
           <p className="text-sm" style={{ color: "var(--pz-body)" }}>{hinweis}</p>
           <button
             type="button"

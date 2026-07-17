@@ -153,22 +153,22 @@ export default async function AdminDigestDetailPage({ params }: PageProps) {
   return (
     <main className="min-h-screen px-6 py-10 max-w-3xl mx-auto">
       <div className="mb-2">
-        <Link href={`/${slugFromPath}/admin/digests`} className="text-sm text-zinc-500 hover:text-zinc-700">
+        <Link href={`/${slugFromPath}/admin/digests`} className="text-sm text-pz-muted hover:text-pz-body">
           ← Alle Digests
         </Link>
       </div>
 
       <div className="flex items-start justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-900">{digest.title}</h1>
-          <p className="text-sm text-zinc-500 mt-1">
+          <h1 className="text-2xl font-semibold text-pz-ink">{digest.title}</h1>
+          <p className="text-sm text-pz-muted mt-1">
             Generator: {digest.generator}
             {digest.approvedAt && ` · Freigegeben: ${digest.approvedAt.toLocaleDateString("de-DE")}`}
             {digest.publishedAt && ` · Veröffentlicht: ${digest.publishedAt.toLocaleDateString("de-DE")}`}
           </p>
         </div>
         <span
-          className={`shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadge[digest.status] ?? "bg-zinc-100 text-zinc-800"}`}
+          className={`shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadge[digest.status] ?? "pz-badge-neutral"}`}
         >
           {statusLabel[digest.status] ?? digest.status}
         </span>
@@ -185,10 +185,10 @@ export default async function AdminDigestDetailPage({ params }: PageProps) {
 
       {/* Prüffortschritt */}
       {gesamtAnzahl > 0 && (
-        <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+        <div className="mb-4 rounded-lg border border-pz-line bg-pz-surface p-4">
           <div className="flex items-center justify-between gap-4">
-            <p className="text-sm text-zinc-700">
-              <span className={alleGeprueft ? "text-green-700 font-medium" : "text-zinc-700"}>
+            <p className="text-sm text-pz-body">
+              <span className={alleGeprueft ? "text-green-700 font-medium" : "text-pz-body"}>
                 {geprueftAnzahl} von {gesamtAnzahl} Aussagen quellen-geprüft
               </span>
               {alleGeprueft && (
@@ -208,7 +208,7 @@ export default async function AdminDigestDetailPage({ params }: PageProps) {
             )}
           </div>
           {/* Fortschrittsbalken */}
-          <div className="mt-2 h-2 w-full rounded-full bg-zinc-200">
+          <div className="mt-2 h-2 w-full rounded-full bg-pz-line">
             <div
               className={`h-2 rounded-full transition-all ${alleGeprueft ? "bg-[var(--pz-success)]" : "bg-[var(--pz-info)]"}`}
               style={{ width: gesamtAnzahl > 0 ? `${Math.round((geprueftAnzahl / gesamtAnzahl) * 100)}%` : "0%" }}
@@ -231,7 +231,7 @@ export default async function AdminDigestDetailPage({ params }: PageProps) {
           sodGesperrt={sodGesperrt}
         />
       ) : (
-        <div className="rounded-md bg-zinc-50 border border-zinc-200 p-3 text-sm text-zinc-600">
+        <div className="rounded-md bg-pz-surface border border-pz-line p-3 text-sm text-pz-muted">
           Lesender Zugriff: Sie können diesen Entwurf einsehen, aber nicht
           bearbeiten, freigeben oder veröffentlichen.
         </div>
@@ -239,21 +239,21 @@ export default async function AdminDigestDetailPage({ params }: PageProps) {
 
       {/* Aussagen */}
       <section className="mt-8">
-        <h2 className="text-lg font-medium text-zinc-900 mb-4">
+        <h2 className="text-lg font-medium text-pz-ink mb-4">
           Aussagen ({statements?.length ?? 0})
         </h2>
 
         {!statements || statements.length === 0 ? (
-          <p className="text-zinc-500 text-sm">Keine Aussagen vorhanden.</p>
+          <p className="text-pz-muted text-sm">Keine Aussagen vorhanden.</p>
         ) : (
           <ol className="space-y-4">
             {statements.map((stmt: typeof statements[number]) => (
               <li
                 key={stmt.id}
-                className={`rounded-lg border p-4 ${stmt.geprueftAt ? "border-green-200 bg-green-50/30" : "border-zinc-200"}`}
+                className={`rounded-lg border p-4 ${stmt.geprueftAt ? "border-green-200 bg-green-50/30" : "border-pz-line"}`}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <p className="text-zinc-900 text-sm leading-relaxed flex-1">{stmt.text}</p>
+                  <p className="text-pz-ink text-sm leading-relaxed flex-1">{stmt.text}</p>
                   {/* Toggle-Buttons: nur im Entwurf UND mit Redaktionsrecht aktiv */}
                   {digest.status === "entwurf" && kannRedigieren ? (
                     <DigestActionButtons
@@ -285,14 +285,14 @@ export default async function AdminDigestDetailPage({ params }: PageProps) {
                     </div>
                   )}
                 </div>
-                <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
+                <div className="mt-2 flex items-center gap-2 text-xs text-pz-muted">
                   <span>{stmt.docType ?? "Dokument"}{stmt.docTitle ? `: ${decodeHtmlEntities(stmt.docTitle)}` : ""}</span>
                   <span>·</span>
                   <a
                     href={stmt.sourceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="underline hover:text-zinc-700"
+                    className="underline hover:text-pz-body"
                   >
                     Quelldokument öffnen
                   </a>
