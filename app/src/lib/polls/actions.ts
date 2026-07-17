@@ -30,6 +30,8 @@ import { type Db } from "@/db/client";
 import {
   polls,
   votes,
+  pollOptions,
+  voteAllocations,
   auditEvents,
 } from "@/db/schema";
 import { SCOPE_INPUT_LEVELS } from "@/lib/region/ebenen";
@@ -45,6 +47,14 @@ import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { insertBelegCode } from "@/lib/polls/beleg";
 import { checkVoteRateLimit } from "@/lib/polls/rate-limit";
 import { isValidChoice } from "@/lib/polls/ergebnis";
+import {
+  validateDotAllocations,
+  DOT_OPTIONEN_MIN,
+  DOT_OPTIONEN_MAX,
+  DOT_BUDGET_MIN,
+  DOT_BUDGET_MAX,
+  DOT_OPTION_LABEL_MAX,
+} from "@/lib/polls/dot";
 import { notifyNewPoll } from "@/lib/polls/notify";
 import {
   createDefaultTransport,
@@ -265,6 +275,166 @@ export async function abstimmen(
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// dotAbstimmen — Punkte-/Budget-Verteilung (ADR-025)
+// ---------------------------------------------------------------------------
+
+const dotAbstimmenSchema = z.object({
+  pollId: z.string().uuid(),
+  allocations: z
+    .array(z.object({ optionId: z.string().uuid(), punkte: z.number().int() }))
+    .max(DOT_OPTIONEN_MAX),
+});
+
+/**
+ * Gibt eine Dot-Voting-Stimme ab: der Wähler verteilt Punkte auf Optionen.
+ * Spiegelt die Sicherheits-Gates von abstimmen() (Stufe, Verbindlich, Gebiet,
+ * Rate-Limit, Beleg, PII-freies Audit) und schreibt eine vote_allocations-Zeile
+ * je Option. Secret Ballot: weder Punkte noch Optionen gehen ins Audit; ein
+ * Advisory-Lock je (Umfrage, voter_ref) verhindert Teil-Doppelabgaben race-frei.
+ */
+export async function dotAbstimmen(
+  pollId: string,
+  allocations: unknown,
+): Promise<AbstimmenResult> {
+  const ctx = await getOptionalAuthContext();
+  if (!ctx) return { ok: false, error: "Diese Seite ist nicht erreichbar." };
+  if (!ctx.userId) {
+    return { ok: false, needLogin: true, error: "Bitte melden Sie sich an, um mitzustimmen." };
+  }
+
+  const parsed = dotAbstimmenSchema.safeParse({ pollId, allocations });
+  if (!parsed.success) return { ok: false, error: "Ungültige Eingabe." };
+
+  // Poll tenant-scoped laden (inkl. typ + Budget).
+  const pollRows = await ctx.db
+    .select({
+      id: polls.id,
+      typ: polls.typ,
+      status: polls.status,
+      verbindlich: polls.verbindlich,
+      regionId: polls.regionId,
+      punkteBudget: polls.punkteBudget,
+      opensAt: polls.opensAt,
+      closesAt: polls.closesAt,
+    })
+    .from(polls)
+    .where(and(eq(polls.id, parsed.data.pollId), eq(polls.tenantId, ctx.tenant.id)))
+    .limit(1);
+  const poll = pollRows[0];
+  if (!poll) return { ok: false, error: "Diese Frage gibt es nicht." };
+  if (poll.typ !== "dot_voting" || poll.punkteBudget == null) {
+    return { ok: false, error: "Diese Abstimmung ist kein Punkte-Voting." };
+  }
+
+  const now = new Date();
+  if (poll.status !== "aktiv") return { ok: false, error: "Diese Abstimmung ist derzeit nicht offen." };
+  if (poll.opensAt && poll.opensAt > now) return { ok: false, error: "Diese Abstimmung hat noch nicht begonnen." };
+  if (poll.closesAt && poll.closesAt <= now) return { ok: false, error: "Diese Abstimmung ist bereits beendet." };
+
+  // Optionen der Umfrage laden → gültige optionIds.
+  const optionRows = await ctx.db
+    .select({ id: pollOptions.id })
+    .from(pollOptions)
+    .where(and(eq(pollOptions.pollId, poll.id), eq(pollOptions.tenantId, ctx.tenant.id)));
+  const gueltigeOptionIds = new Set<string>(optionRows.map((o: { id: string }) => o.id));
+
+  // Zuteilungen serverseitig validieren (Budget, gültige Optionen, ≥1 Punkt).
+  const val = validateDotAllocations(parsed.data.allocations, gueltigeOptionIds, poll.punkteBudget);
+  if (!val.ok) return { ok: false, error: val.error };
+
+  const stufe = getStufe(ctx.user);
+  const warVerifiziert = stufe >= 2;
+  if (stufe < 1) return { ok: false, needLogin: true, error: "Bitte melden Sie sich an, um mitzustimmen." };
+  if (poll.verbindlich && stufe < 2) {
+    return { ok: false, error: "Diese verbindliche Abstimmung ist verifizierten Bürger:innen vorbehalten." };
+  }
+
+  // Gebiets-Zuständigkeit (Audit M2), identisch zu abstimmen().
+  const ankerRegionId = ctx.user ? waehleAnkerRegionId(ctx.user, poll.verbindlich) : null;
+  if (!(await istGebietsZustaendig(ctx.db, ctx.tenant.id, poll.regionId, ankerRegionId))) {
+    return { ok: false, error: "Diese Abstimmung gehört nicht zu Ihrem Gebiet." };
+  }
+
+  let voterRef: string;
+  try {
+    voterRef = computeVoterRefForUser(ctx.userId);
+  } catch (err) {
+    console.error("[dotAbstimmen] Fehler bei voter_ref:", err);
+    return { ok: false, error: "Konfigurationsfehler — bitte später erneut versuchen." };
+  }
+
+  const ipAddress = await getClientIp();
+  const rl = await checkVoteRateLimit(ctx.db, {
+    tenantId: ctx.tenant.id,
+    actorRef: voterRef,
+    ipAddress,
+    deviceToken: null,
+  });
+  if (!rl.allowed) {
+    return { ok: false, error: "Zu viele Stimmen in kurzer Zeit. Bitte versuchen Sie es später erneut." };
+  }
+
+  const result = await ctx.db.transaction(async (tx: Db) => {
+    // Advisory-Lock je (Umfrage, Wähler) → serialisiert nebenläufige Abgaben
+    // desselben Wählers (verhindert Teil-Doppelabgabe über verschiedene Options-
+    // Mengen; die UNIQUE je Option allein reicht dafür nicht).
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${poll.id + ":" + voterRef}))`);
+
+    // Live-Status atomar prüfen (TOCTOU).
+    const liveRows = await tx
+      .select({ status: polls.status, opensAt: polls.opensAt, closesAt: polls.closesAt })
+      .from(polls)
+      .where(and(eq(polls.id, poll.id), eq(polls.tenantId, ctx.tenant.id)))
+      .for("update")
+      .limit(1);
+    const live = liveRows[0];
+    if (!live || live.status !== "aktiv" || (live.opensAt && live.opensAt > now) || (live.closesAt && live.closesAt <= now)) {
+      return { ok: false as const, error: "Diese Abstimmung ist derzeit nicht offen." };
+    }
+
+    // Schon abgestimmt? (irgendeine Zuteilung dieses Wählers für die Umfrage)
+    const bestehend = await tx
+      .select({ id: voteAllocations.id })
+      .from(voteAllocations)
+      .where(and(eq(voteAllocations.pollId, poll.id), eq(voteAllocations.voterRef, voterRef)))
+      .limit(1);
+    if (bestehend.length > 0) {
+      return { ok: true as const, alreadyVoted: true };
+    }
+
+    await tx.insert(voteAllocations).values(
+      val.allocations.map((a) => ({
+        pollId: poll.id,
+        tenantId: ctx.tenant.id,
+        optionId: a.optionId,
+        voterRef,
+        punkte: a.punkte,
+        warVerifiziert,
+      })),
+    );
+
+    // EIN Beleg je Wähler (nicht je Option) — Invariante bleibt „ein Beleg je
+    // Stimme"; die Tabelle kennt weder voter_ref noch Punkte/Option.
+    const beleg = await insertBelegCode(tx, ctx.tenant.id, poll.id);
+
+    // SECRET BALLOT: weder Punkte noch Optionen ins Audit. Nur pollId + Flag.
+    await tx.insert(auditEvents).values({
+      tenantId: ctx.tenant.id,
+      actorType: "user",
+      actorRef: voterRef,
+      action: "poll.voted",
+      targetType: "poll",
+      targetId: poll.id,
+      metadata: { pollId: poll.id, warVerifiziert, format: "dot_voting" },
+    });
+
+    return { ok: true as const, alreadyVoted: false, beleg };
+  });
+
+  return result;
+}
+
 // Lese-Funktionen (getPollErgebnis / getAktiveFeaturedPoll / hatBereitsAbgestimmt)
 // liegen bewusst in @/lib/polls/queries (OHNE "use server"), damit sie nicht als
 // client-aufrufbare RPC-Endpunkte exponiert werden (Gate-B MAJOR-G).
@@ -281,6 +451,13 @@ const pollErstellenSchema = z.object({
   scopeCode: z.string().trim().max(100).optional().nullable(),
   verbindlich: z.boolean().optional(),
   closesAt: z.coerce.date().optional().nullable(),
+  // Beteiligungsformat (ADR-025). Default = binäres Ja/Nein.
+  typ: z.enum(["ja_nein_enthaltung", "dot_voting"]).optional(),
+  // Nur dot_voting: Optionen (Labels) + Punktebudget je Wähler.
+  optionen: z
+    .array(z.string().trim().min(1, "Leere Option.").max(DOT_OPTION_LABEL_MAX, "Option zu lang."))
+    .optional(),
+  punkteBudget: z.coerce.number().int().optional(),
 });
 
 export async function pollErstellen(
@@ -296,6 +473,31 @@ export async function pollErstellen(
     return { ok: false, error: msg };
   }
   const { frage, scopeLevel, scopeCode, verbindlich, closesAt } = parsed.data;
+  const typ = parsed.data.typ ?? "ja_nein_enthaltung";
+
+  // dot_voting: Optionen + Budget serverseitig validieren (Client nie vertrauen).
+  let dotOptionen: string[] = [];
+  let punkteBudget: number | null = null;
+  if (typ === "dot_voting") {
+    dotOptionen = (parsed.data.optionen ?? []).map((s) => s.trim()).filter((s) => s.length > 0);
+    if (dotOptionen.length < DOT_OPTIONEN_MIN || dotOptionen.length > DOT_OPTIONEN_MAX) {
+      return {
+        ok: false,
+        error: `Bitte ${DOT_OPTIONEN_MIN}–${DOT_OPTIONEN_MAX} Optionen angeben.`,
+      };
+    }
+    if (new Set(dotOptionen.map((s) => s.toLowerCase())).size !== dotOptionen.length) {
+      return { ok: false, error: "Die Optionen müssen sich unterscheiden." };
+    }
+    const budget = parsed.data.punkteBudget ?? 0;
+    if (!Number.isInteger(budget) || budget < DOT_BUDGET_MIN || budget > DOT_BUDGET_MAX) {
+      return {
+        ok: false,
+        error: `Das Punktebudget muss zwischen ${DOT_BUDGET_MIN} und ${DOT_BUDGET_MAX} liegen.`,
+      };
+    }
+    punkteBudget = budget;
+  }
 
   // ADR-024 contract: die Composer-Scope-Eingabe wird via Baum zu region_id
   // aufgelöst — der EINZIGE geschriebene Gebietsbezug (scope_level/scope_code sind
@@ -314,13 +516,25 @@ export async function pollErstellen(
         tenantId: ctx.tenant.id,
         regionId,
         frage,
-        typ: "ja_nein_enthaltung",
+        typ,
+        punkteBudget,
         status: "entwurf",
         verbindlich: verbindlich ?? false,
         erstelltVon: ctx.userId,
         closesAt: closesAt ?? null,
       })
       .returning({ id: polls.id });
+
+    if (typ === "dot_voting") {
+      await tx.insert(pollOptions).values(
+        dotOptionen.map((label, position) => ({
+          pollId: row.id,
+          tenantId: ctx.tenant.id,
+          label,
+          position,
+        })),
+      );
+    }
 
     await tx.insert(auditEvents).values({
       tenantId: ctx.tenant.id,
@@ -329,7 +543,14 @@ export async function pollErstellen(
       action: "poll.created",
       targetType: "poll",
       targetId: row.id,
-      metadata: { pollId: row.id, verbindlich: verbindlich ?? false, scopeLevel },
+      // PII-/inhaltsarm: nur Metadaten, keine Options-Labels ins Audit.
+      metadata: {
+        pollId: row.id,
+        verbindlich: verbindlich ?? false,
+        scopeLevel,
+        typ,
+        ...(typ === "dot_voting" ? { optionenAnzahl: dotOptionen.length, punkteBudget } : {}),
+      },
     });
 
     return row.id;

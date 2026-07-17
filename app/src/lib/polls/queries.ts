@@ -14,7 +14,12 @@
 
 import { and, eq, or, isNull, lte, gt, desc, inArray, count, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { polls, votes, regions, pollStatusEnum } from "@/db/schema";
+import { polls, votes, pollOptions, voteAllocations, regions, pollStatusEnum } from "@/db/schema";
+import {
+  aggregateDotVotes,
+  type DotOption,
+  type DotVotingErgebnis,
+} from "@/lib/polls/dot";
 import type { RegionTyp } from "@/lib/region/ebenen";
 import type { TenantRow } from "@/lib/tenant";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
@@ -54,6 +59,90 @@ export async function getPollErgebnis(
 
   const ergebnis = aggregateVotes(rows);
   return istBeendet(poll) ? ergebnis : ohneAufschluesselung(ergebnis);
+}
+
+/**
+ * Optionen einer dot_voting-Umfrage (tenant-scoped, nach Position sortiert).
+ */
+export async function getDotOptions(
+  db: Db,
+  tenantId: string,
+  pollId: string,
+): Promise<DotOption[]> {
+  const rows = await db
+    .select({ id: pollOptions.id, label: pollOptions.label, position: pollOptions.position })
+    .from(pollOptions)
+    .where(and(eq(pollOptions.pollId, pollId), eq(pollOptions.tenantId, tenantId)))
+    .orderBy(pollOptions.position);
+  return rows;
+}
+
+/**
+ * Dot-Voting-Ergebnis (tenant-scoped). Hält die per-Option-Aufschlüsselung
+ * zurück, solange die Umfrage läuft ODER < k Teilnehmende (ADR-025, siehe
+ * lib/polls/dot.ts). Teilnehmerzahl bleibt sichtbar.
+ */
+export async function getDotErgebnis(
+  db: Db,
+  tenantId: string,
+  pollId: string,
+): Promise<DotVotingErgebnis | null> {
+  const pollRows = await db
+    .select({
+      id: polls.id,
+      status: polls.status,
+      closesAt: polls.closesAt,
+      punkteBudget: polls.punkteBudget,
+    })
+    .from(polls)
+    .where(and(eq(polls.id, pollId), eq(polls.tenantId, tenantId)))
+    .limit(1);
+  const poll = pollRows[0];
+  if (!poll) return null;
+
+  const optionen = await getDotOptions(db, tenantId, pollId);
+  const rows = await db
+    .select({
+      optionId: voteAllocations.optionId,
+      punkte: voteAllocations.punkte,
+      voterRef: voteAllocations.voterRef,
+      warVerifiziert: voteAllocations.warVerifiziert,
+    })
+    .from(voteAllocations)
+    .where(and(eq(voteAllocations.pollId, pollId), eq(voteAllocations.tenantId, tenantId)));
+
+  return aggregateDotVotes(rows, optionen, poll.punkteBudget ?? 0, istBeendet(poll));
+}
+
+/**
+ * Hat der eingeloggte User bei einer dot_voting-Umfrage bereits abgestimmt?
+ * (irgendeine Zuteilung für die Umfrage). Tenant-scoped, ohne userId → false.
+ */
+export async function hatBereitsDotAbgestimmt(
+  db: Db,
+  tenant: TenantRow,
+  pollId: string,
+  ctx: { userId: string | null },
+): Promise<boolean> {
+  if (!ctx.userId) return false;
+  let voterRef: string;
+  try {
+    voterRef = computeVoterRefForUser(ctx.userId);
+  } catch {
+    return false;
+  }
+  const rows = await db
+    .select({ id: voteAllocations.id })
+    .from(voteAllocations)
+    .where(
+      and(
+        eq(voteAllocations.pollId, pollId),
+        eq(voteAllocations.tenantId, tenant.id),
+        eq(voteAllocations.voterRef, voterRef),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }
 
 /**
@@ -134,7 +223,7 @@ export async function hatBereitsAbgestimmtBatch(
 export interface PollListItem {
   id: string;
   frage: string;
-  typ: "ja_nein_enthaltung";
+  typ: "ja_nein_enthaltung" | "dot_voting";
   status: (typeof pollStatusEnum.enumValues)[number];
   verbindlich: boolean;
   // ADR-024 contract: Gebietsknoten der Umfrage + abgeleitete Anzeigefelder.

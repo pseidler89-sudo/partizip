@@ -112,7 +112,15 @@ function PollKarte({
       <h3 className="mt-3 text-base font-semibold" style={{ color: "var(--pz-ink)" }}>
         {poll.frage}
       </h3>
-      <KurzErgebnis ergebnis={ergebnis} />
+      {poll.typ === "dot_voting" ? (
+        // Dot-Voting: die Punkte-Verteilung lebt auf der Detailseite (barrierearmes
+        // Stepper-Widget) — in der Liste nur ein neutraler Hinweis + Link.
+        <div className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
+          Punkte-Voting — verteilen Sie Ihre Punkte auf die Optionen
+        </div>
+      ) : (
+        <KurzErgebnis ergebnis={ergebnis} />
+      )}
       <p className="mt-3 text-xs font-medium" style={{ color: "var(--pz-brand-strong)" }}>
         {cta} →
       </p>

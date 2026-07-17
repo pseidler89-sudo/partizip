@@ -1057,9 +1057,12 @@ export const pollStatusEnum = pgEnum("poll_status", [
   "geschlossen",
 ]);
 
-// Vorerst nur ja/nein/enthaltung — Enum bewusst erweiterbar gehalten.
+// Beteiligungsformate (ADR-025). ja_nein_enthaltung = binäres Stimmungsbild;
+// dot_voting = Punkte-/Budget-Verteilung auf mehrere Optionen (Ergebnis =
+// Verteilung, kein Einzelsieger). Bewusst erweiterbar (Widerstandsabfrage folgt).
 export const pollTypeEnum = pgEnum("poll_type", [
   "ja_nein_enthaltung",
+  "dot_voting",
 ]);
 
 export const polls = pgTable(
@@ -1078,6 +1081,9 @@ export const polls = pgTable(
       .references(() => regions.id, { onDelete: "restrict" }),
     frage: text("frage").notNull(),
     typ: pollTypeEnum("typ").notNull().default("ja_nein_enthaltung"),
+    // Nur dot_voting: Punktekontingent je Wähler (Budget), das auf die Optionen
+    // verteilt wird. NULL für ja_nein_enthaltung. Validierung serverseitig.
+    punkteBudget: integer("punkte_budget"),
     status: pollStatusEnum("status").notNull().default("entwurf"),
     // Verbindlich = nur Stufe≥2 dürfen abstimmen (sonst unverbindliches Stimmungsbild)
     verbindlich: boolean("verbindlich").notNull().default(false),
@@ -1134,6 +1140,74 @@ export const votes = pgTable(
       "votes_choice_check",
       sql`${t.choice} IN ('ja', 'nein', 'enthaltung')`
     ),
+  ]
+);
+
+// ---------------------------------------------------------------------------
+// Dot-/Budget-Voting (ADR-025). Bewusst SEPARATE Tabellen, damit der bestehende
+// Ja/Nein-Pfad (votes) unangetastet bleibt und das Secret-Ballot-Muster
+// (voter_ref-Pseudonym, kein User-FK) 1:1 gespiegelt wird.
+// ---------------------------------------------------------------------------
+
+// Antwort-Optionen einer dot_voting-Umfrage (bei ja/nein sind die Optionen
+// implizit → keine Zeilen). Löschung der Umfrage löscht ihre Optionen.
+export const pollOptions = pgTable(
+  "poll_options",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    pollId: uuid("poll_id")
+      .notNull()
+      .references(() => polls.id, { onDelete: "cascade" }),
+    // Tenant-Redundanz für direkte Tenant-Isolation in JEDER Query
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    label: text("label").notNull(),
+    // Anzeige-/Eingabereihenfolge (stabil, 0-basiert).
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (t) => [
+    // Reihenfolge je Umfrage eindeutig → stabile, deterministische Anzeige.
+    unique("poll_options_poll_position_unique").on(t.pollId, t.position),
+    index("idx_poll_options_poll_id").on(t.pollId),
+    index("idx_poll_options_tenant_poll").on(t.tenantId, t.pollId),
+  ]
+);
+
+// Punkte-Verteilung eines Wählers auf eine Option (dot_voting). EINE Zeile je
+// (Wähler, Option). Wie votes: voter_ref-Pseudonym (kein User-FK), Tenant-
+// Redundanz, immutable. UNIQUE(poll, voter, option) → Doppelabgabe je Option
+// über onConflictDoNothing idempotent (kein Ändern der abgegebenen Stimme).
+export const voteAllocations = pgTable(
+  "vote_allocations",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    pollId: uuid("poll_id")
+      .notNull()
+      .references(() => polls.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    optionId: uuid("option_id")
+      .notNull()
+      .references(() => pollOptions.id, { onDelete: "cascade" }),
+    // Pseudonym: HMAC(SALT, domain) — kein User-FK (Secret Ballot).
+    voterRef: text("voter_ref").notNull(),
+    // Zugeteilte Punkte auf diese Option (> 0; 0-Zuteilungen werden nicht gespeichert).
+    punkte: integer("punkte").notNull(),
+    // Snapshot Stufe≥2 bei Abgabe (wie votes.war_verifiziert).
+    warVerifiziert: boolean("war_verifiziert").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (t) => [
+    // Genau eine Zuteilung je (Umfrage, Wähler, Option).
+    unique("vote_allocations_poll_voter_option_unique").on(t.pollId, t.voterRef, t.optionId),
+    index("idx_vote_allocations_poll").on(t.pollId),
+    index("idx_vote_allocations_tenant_poll").on(t.tenantId, t.pollId),
+    index("idx_vote_allocations_tenant_voter").on(t.tenantId, t.voterRef),
+    // Punkte müssen positiv sein (0-Zuteilungen gar nicht erst speichern).
+    check("vote_allocations_punkte_positiv", sql`${t.punkte} > 0`),
   ]
 );
 
