@@ -61,19 +61,19 @@ export default async function DigestListPage({ params }: PageProps) {
   return (
     <main className="min-h-screen px-4 py-8 max-w-2xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-zinc-900">
+        <h1 className="text-2xl font-semibold text-pz-ink">
           {tenant.name} in 90 Sekunden
         </h1>
-        <p className="text-sm text-zinc-500 mt-1">
+        <p className="text-sm text-pz-muted mt-1">
           Zusammenfassungen der Ratssitzungen — mit Quellenangaben.
         </p>
       </div>
 
       {digestList.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50/50 p-8 text-center">
+        <div className="rounded-lg border border-dashed border-pz-line bg-pz-surface p-8 text-center">
           <div className="text-3xl" aria-hidden>📋</div>
-          <p className="mt-3 font-medium text-zinc-700">Noch keine Zusammenfassungen veröffentlicht</p>
-          <p className="mx-auto mt-1 max-w-md text-sm text-zinc-500">
+          <p className="mt-3 font-medium text-pz-body">Noch keine Zusammenfassungen veröffentlicht</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-pz-muted">
             Sobald die nächste Sitzung aufbereitet, von der Redaktion gegen die
             Originalprotokolle geprüft und freigegeben ist, erscheint sie hier — mit
             Quellenangaben zu jeder Aussage.
@@ -96,7 +96,7 @@ export default async function DigestListPage({ params }: PageProps) {
               >
                 <p className="font-medium" style={{ color: "var(--pz-ink)" }}>{d.title}</p>
                 {d.publishedAt && (
-                  <p className="text-sm text-zinc-500 mt-0.5">
+                  <p className="text-sm text-pz-muted mt-0.5">
                     Veröffentlicht: {d.publishedAt.toLocaleDateString("de-DE")}
                   </p>
                 )}
@@ -106,7 +106,7 @@ export default async function DigestListPage({ params }: PageProps) {
         </ul>
       )}
 
-      <p className="mt-8 text-xs text-zinc-400 text-center">
+      <p className="mt-8 text-xs text-pz-muted text-center">
         RSS-Feed:{" "}
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
         <a href="/api/digest/rss" rel="noopener" className="underline">

@@ -312,7 +312,7 @@ export function QrVerwaltung({ liste }: Props) {
                   width={240}
                   height={240}
                   unoptimized
-                  className="rounded-md bg-white p-2"
+                  className="rounded-md bg-pz-surface p-2"
                 />
               </div>
             )}
@@ -326,7 +326,7 @@ export function QrVerwaltung({ liste }: Props) {
               readOnly
               value={erstellt.redeemUrl}
               onFocus={(e) => e.currentTarget.select()}
-              className="mt-1 w-full rounded-md border bg-white px-3 py-1.5 font-mono text-xs"
+              className="mt-1 w-full rounded-md border bg-pz-surface px-3 py-1.5 font-mono text-xs"
               style={{ borderColor: "var(--pz-line)" }}
             />
           </div>
@@ -378,7 +378,7 @@ export function QrVerwaltung({ liste }: Props) {
                           type="button"
                           onClick={() => handleWiderrufen(q.id)}
                           disabled={isPending}
-                          className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] disabled:opacity-50"
+                          className="pz-btn pz-btn-secondary pz-btn-sm"
                           style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
                         >
                           Widerrufen

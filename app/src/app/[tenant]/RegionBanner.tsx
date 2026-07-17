@@ -56,7 +56,7 @@ export function RegionBanner({
             value={currentOrtsteilCode ?? ""}
             onChange={handleOrtsteilChange}
             disabled={pending}
-            className="rounded-md border border-[color:var(--pz-line)] bg-white px-2 py-1 text-sm disabled:opacity-60"
+            className="rounded-md border border-[color:var(--pz-line)] bg-pz-surface px-2 py-1 text-sm disabled:opacity-60"
             style={{ color: "var(--pz-ink)" }}
           >
             <option value="">Ganze Kommune</option>

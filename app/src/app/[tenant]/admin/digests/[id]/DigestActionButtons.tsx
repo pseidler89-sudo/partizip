@@ -146,7 +146,7 @@ export function DigestActionButtons({
           <button
             onClick={handleAlleGeprueft}
             disabled={isPending}
-            className="rounded-md bg-zinc-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+            className="pz-btn pz-btn-primary pz-btn-sm"
           >
             {isPending ? "Wird gespeichert…" : "Alle als geprüft markieren"}
           </button>
@@ -186,7 +186,7 @@ export function DigestActionButtons({
   // H1: Redakteure dürfen prüfen/markieren, aber nicht freigeben/veröffentlichen.
   if (!canFreigeben) {
     return (
-      <div className="rounded-md bg-zinc-50 border border-zinc-200 p-3 text-sm text-zinc-600">
+      <div className="rounded-md bg-pz-surface border border-pz-line p-3 text-sm text-pz-muted">
         Als Redakteur:in kannst du Aussagen quellen-prüfen und als Highlight markieren.
         Die <strong>Freigabe und Veröffentlichung</strong> übernimmt ein:e Administrator:in
         (Vier-Augen-Prinzip).

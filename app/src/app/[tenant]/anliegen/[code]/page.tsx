@@ -133,7 +133,7 @@ export default async function AnliegenCodePage({ params, searchParams }: PagePro
     return (
       <main className="min-h-screen px-4 py-10 max-w-2xl mx-auto">
         <div className="mb-6">
-          <p className="text-xs font-mono text-zinc-400 mb-1">{a.trackingCode}</p>
+          <p className="text-xs font-mono text-pz-muted mb-1">{a.trackingCode}</p>
         </div>
         <div className="pz-card p-6">
           <p className="text-sm" style={{ color: "var(--pz-body)" }}>
@@ -226,7 +226,7 @@ export default async function AnliegenCodePage({ params, searchParams }: PagePro
 
       {/* Header */}
       <div className="mb-6">
-        <p className="text-xs font-mono text-zinc-400 mb-1">{a.trackingCode}</p>
+        <p className="text-xs font-mono text-pz-muted mb-1">{a.trackingCode}</p>
         <h1 className="text-xl font-semibold leading-snug" style={{ color: "var(--pz-ink)" }}>{a.titel}</h1>
         {ortsteilName && (
           <p className="text-sm mt-1" style={{ color: "var(--pz-muted)" }}>{ortsteilName}</p>
@@ -236,7 +236,7 @@ export default async function AnliegenCodePage({ params, searchParams }: PagePro
       {/* Status-Badge */}
       <div className="flex items-center gap-3 mb-6">
         <span
-          className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${STATUS_COLORS[a.status] ?? "bg-zinc-100 text-zinc-700"}`}
+          className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${STATUS_COLORS[a.status] ?? "pz-badge-neutral"}`}
         >
           {STATUS_LABELS[a.status] ?? a.status}
         </span>
@@ -248,14 +248,14 @@ export default async function AnliegenCodePage({ params, searchParams }: PagePro
       {/* Zeitleiste */}
       <div className="mt-6">
         <h2 className="text-sm font-medium mb-4" style={{ color: "var(--pz-ink)" }}>Verlauf</h2>
-        <ol className="relative border-l border-zinc-200 space-y-6 ml-3">
+        <ol className="relative border-l border-pz-line space-y-6 ml-3">
           {events.map((ev) => (
             <li key={ev.id} className="ml-4">
-              <div className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border border-white bg-zinc-400" />
+              <div className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border border-white bg-pz-muted" />
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[ev.status] ?? "bg-zinc-100 text-zinc-700"}`}
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[ev.status] ?? "pz-badge-neutral"}`}
                   >
                     {STATUS_LABELS[ev.status] ?? ev.status}
                   </span>
@@ -276,7 +276,7 @@ export default async function AnliegenCodePage({ params, searchParams }: PagePro
                 </div>
                 <time
                   dateTime={ev.createdAt.toISOString()}
-                  className="shrink-0 text-xs text-zinc-400"
+                  className="shrink-0 text-xs text-pz-muted"
                 >
                   {ev.createdAt.toLocaleDateString("de-DE", {
                     day: "2-digit",

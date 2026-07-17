@@ -123,7 +123,7 @@ export default function KontoPage() {
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center">
-        <p className="text-zinc-400 text-sm">Lädt…</p>
+        <p className="text-pz-muted text-sm">Lädt…</p>
       </main>
     );
   }
@@ -209,22 +209,22 @@ export default function KontoPage() {
       <div className="pz-card p-4 space-y-3 text-sm mb-6">
         <div className="flex justify-between">
           <span style={{ color: "var(--pz-muted)" }}>E-Mail</span>
-          <span className="font-medium text-zinc-900">{data.user.email}</span>
+          <span className="font-medium text-pz-ink">{data.user.email}</span>
         </div>
         <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-start">
           <span className="shrink-0" style={{ color: "var(--pz-muted)" }}>Status</span>
           <div className="text-right">
-            <span className="inline-block rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700">
+            <span className="pz-badge-neutral inline-block rounded-full px-2.5 py-0.5 text-xs font-medium">
               {verificationInfo.badge}
             </span>
-            <p className="mt-1 text-xs text-zinc-400 max-w-xs sm:text-right">
+            <p className="mt-1 text-xs text-pz-muted max-w-xs sm:text-right">
               {verificationInfo.hint}
             </p>
           </div>
         </div>
         <div className="flex justify-between">
           <span style={{ color: "var(--pz-muted)" }}>Stufe</span>
-          <span className="font-medium text-zinc-900">{stufeLabel} ({data.user.stufe})</span>
+          <span className="font-medium text-pz-ink">{stufeLabel} ({data.user.stufe})</span>
         </div>
       </div>
 
@@ -267,10 +267,10 @@ export default function KontoPage() {
         </div>
 
         {followed.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50/50 p-6 text-center">
+          <div className="rounded-lg border border-dashed border-pz-line bg-pz-surface p-6 text-center">
             <div className="text-2xl" aria-hidden>📨</div>
-            <p className="mt-2 text-sm font-medium text-zinc-700">Noch kein Anliegen eingereicht</p>
-            <p className="mx-auto mt-1 max-w-sm text-sm text-zinc-500">
+            <p className="mt-2 text-sm font-medium text-pz-body">Noch kein Anliegen eingereicht</p>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-pz-muted">
               Sobald Sie ein Anliegen einreichen, erscheint es hier und Sie können
               seinen Status verfolgen. Den Tracking-Code schicken wir Ihnen zusätzlich
               per E-Mail.
@@ -294,9 +294,9 @@ export default function KontoPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate" style={{ color: "var(--pz-ink)" }}>{a.titel}</p>
-                    <p className="text-xs text-zinc-400 font-mono mt-0.5">{a.trackingCode}</p>
+                    <p className="text-xs text-pz-muted font-mono mt-0.5">{a.trackingCode}</p>
                   </div>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[a.status] ?? "bg-zinc-100 text-zinc-600"}`}>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[a.status] ?? "pz-badge-neutral"}`}>
                     {STATUS_LABELS[a.status] ?? a.status}
                   </span>
                 </div>
@@ -316,13 +316,11 @@ export default function KontoPage() {
         <a
           href={`/${data.tenant.slug}/konto/export`}
           download
-          className="inline-block rounded-md border border-[color:var(--pz-line)] bg-white px-4 py-2 text-sm
-                     font-medium text-zinc-700 hover:bg-zinc-50 transition-colors
-                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
+          className="pz-btn pz-btn-secondary"
         >
           Meine Daten exportieren
         </a>
-        <p className="mt-1 text-xs text-zinc-400">
+        <p className="mt-1 text-xs text-pz-muted">
           Lädt alle zu Ihrem Konto gespeicherten Daten als JSON-Datei herunter
           (Auskunftsrecht, Art. 15 DSGVO).
         </p>
@@ -330,9 +328,7 @@ export default function KontoPage() {
 
       <button
         onClick={handleLogout}
-        className="w-full rounded-md border border-[color:var(--pz-line)] bg-white px-4 py-2 text-sm
-                   font-medium text-zinc-700 hover:bg-zinc-50 focus:outline-none
-                   focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2 transition-colors"
+        className="pz-btn pz-btn-secondary w-full"
       >
         Abmelden
       </button>

@@ -491,7 +491,7 @@ export default function PollMitmachen({
               onClick={() => handleVote(c)}
               disabled={submitting !== null}
               aria-busy={submitting === c}
-              className="flex w-full items-center gap-3 rounded-xl border-2 bg-white px-[18px] py-[18px] text-left text-lg font-semibold shadow-sm transition-colors hover:bg-[color:var(--pz-brand-soft)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex w-full items-center gap-3 rounded-xl border-2 bg-pz-surface px-[18px] py-[18px] text-left text-lg font-semibold shadow-sm transition-colors hover:bg-[color:var(--pz-brand-soft)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
               style={{ borderColor: "var(--pz-brand)", color: "var(--pz-brand-strong)" }}
             >
               <span

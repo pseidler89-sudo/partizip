@@ -250,7 +250,7 @@ export function Landing({ tenantName, slug }: { tenantName: string; slug: string
           </p>
           <Link
             href={`/${slug}/fuer-kommunen`}
-            className="mt-7 inline-flex min-h-[48px] items-center rounded-lg bg-white px-6 py-3 text-sm font-semibold shadow-sm transition-opacity hover:opacity-90"
+            className="mt-7 inline-flex min-h-[48px] items-center rounded-lg bg-pz-surface px-6 py-3 text-sm font-semibold shadow-sm transition-opacity hover:opacity-90"
             style={{ color: "var(--pz-brand-strong)" }}
           >
             Für Kommunen & Vereine →

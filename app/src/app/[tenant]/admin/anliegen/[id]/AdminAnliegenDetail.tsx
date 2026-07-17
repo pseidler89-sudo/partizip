@@ -216,14 +216,14 @@ export default function AdminAnliegenDetail({
       {/* Header */}
       <div>
         <div className="flex items-center gap-3 mb-1">
-          <a href={`/${tenantSlug}/admin/anliegen`} className="text-sm text-zinc-500 hover:text-zinc-700">
+          <a href={`/${tenantSlug}/admin/anliegen`} className="text-sm text-pz-muted hover:text-pz-body">
             ← Zurück zur Liste
           </a>
         </div>
-        <p className="text-xs font-mono text-zinc-400 mb-1">{a.trackingCode}</p>
-        <h1 className="text-xl font-semibold text-zinc-900">{a.titel}</h1>
+        <p className="text-xs font-mono text-pz-muted mb-1">{a.trackingCode}</p>
+        <h1 className="text-xl font-semibold text-pz-ink">{a.titel}</h1>
         <div className="flex items-center gap-3 mt-2">
-          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[a.status] ?? "bg-zinc-100 text-zinc-600"}`}>
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[a.status] ?? "pz-badge-neutral"}`}>
             {STATUS_OPTIONS.find(s => s.value === a.status)?.label ?? a.status}
           </span>
           {istVerborgen && (
@@ -231,25 +231,25 @@ export default function AdminAnliegenDetail({
               Verborgen
             </span>
           )}
-          {a.ortsteilName && <span className="text-xs text-zinc-400">{a.ortsteilName}</span>}
-          <span className="text-xs text-zinc-400">{followerCount} Follower</span>
+          {a.ortsteilName && <span className="text-xs text-pz-muted">{a.ortsteilName}</span>}
+          <span className="text-xs text-pz-muted">{followerCount} Follower</span>
         </div>
         {a.beschreibung && (
-          <p className="text-sm text-zinc-600 mt-3 leading-relaxed">{a.beschreibung}</p>
+          <p className="text-sm text-pz-muted mt-3 leading-relaxed">{a.beschreibung}</p>
         )}
       </div>
 
       {/* Status ändern */}
-      <section className="rounded-lg border border-zinc-200 p-5">
-        <h2 className="text-sm font-semibold text-zinc-800 mb-4">Status ändern</h2>
+      <section className="rounded-lg border border-pz-line p-5">
+        <h2 className="text-sm font-semibold text-pz-body mb-4">Status ändern</h2>
         <form onSubmit={handleStatusChange} className="space-y-4">
           <div>
-            <label htmlFor="anl-neuer-status" className="block text-xs font-medium text-zinc-600 mb-1">Neuer Status</label>
+            <label htmlFor="anl-neuer-status" className="block text-xs font-medium text-pz-muted mb-1">Neuer Status</label>
             <select
               id="anl-neuer-status"
               value={newStatus}
               onChange={(e) => setNewStatus(e.target.value)}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm bg-white
+              className="w-full rounded-md border border-pz-line px-3 py-2 text-sm bg-pz-surface
                          focus:border-[color:var(--pz-brand)] focus:outline-none focus:ring-1 focus:ring-[color:var(--pz-brand)]"
             >
               {STATUS_OPTIONS.map(opt => (
@@ -258,7 +258,7 @@ export default function AdminAnliegenDetail({
             </select>
           </div>
           <div>
-            <label htmlFor="anl-quelle" className="block text-xs font-medium text-zinc-600 mb-1">
+            <label htmlFor="anl-quelle" className="block text-xs font-medium text-pz-muted mb-1">
               Quelle (optional, http/https)
             </label>
             <input
@@ -267,12 +267,12 @@ export default function AdminAnliegenDetail({
               value={quelleUrl}
               onChange={(e) => setQuelleUrl(e.target.value)}
               placeholder="https://…"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm
+              className="w-full rounded-md border border-pz-line px-3 py-2 text-sm
                          focus:border-[color:var(--pz-brand)] focus:outline-none focus:ring-1 focus:ring-[color:var(--pz-brand)]"
             />
           </div>
           <div>
-            <label htmlFor="anl-notiz" className="block text-xs font-medium text-zinc-600 mb-1">
+            <label htmlFor="anl-notiz" className="block text-xs font-medium text-pz-muted mb-1">
               Notiz (optional)
             </label>
             <textarea
@@ -282,7 +282,7 @@ export default function AdminAnliegenDetail({
               rows={2}
               maxLength={1000}
               placeholder="Interne Anmerkung zum Statuswechsel"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm resize-none
+              className="w-full rounded-md border border-pz-line px-3 py-2 text-sm resize-none
                          focus:border-[color:var(--pz-brand)] focus:outline-none focus:ring-1 focus:ring-[color:var(--pz-brand)]"
             />
           </div>
@@ -306,9 +306,9 @@ export default function AdminAnliegenDetail({
       </section>
 
       {/* H2b: Moderation (Verbergen / Wiederherstellen) */}
-      <section className="rounded-lg border border-zinc-200 p-5">
-        <h2 className="text-sm font-semibold text-zinc-800 mb-1">Moderation</h2>
-        <p className="text-xs text-zinc-500 mb-4">
+      <section className="rounded-lg border border-pz-line p-5">
+        <h2 className="text-sm font-semibold text-pz-body mb-1">Moderation</h2>
+        <p className="text-xs text-pz-muted mb-4">
           Ein verborgenes Anliegen ist öffentlich nicht mehr einsehbar (nur ein neutraler Hinweis).
           Der Grund wird intern gespeichert, nicht im Audit-Log.
         </p>
@@ -320,7 +320,7 @@ export default function AdminAnliegenDetail({
                 Dieses Anliegen ist verborgen.
               </p>
               {a.verborgenGrund && (
-                <p className="text-sm text-zinc-700 mt-1">
+                <p className="text-sm text-pz-body mt-1">
                   Grund: {a.verborgenGrund}
                 </p>
               )}
@@ -330,8 +330,7 @@ export default function AdminAnliegenDetail({
               type="button"
               onClick={handleWiederherstellen}
               disabled={modSubmitting}
-              className="rounded-md bg-zinc-800 px-4 py-2 text-sm font-medium text-white
-                         hover:bg-zinc-900 disabled:opacity-50"
+              className="pz-btn pz-btn-primary"
             >
               {modSubmitting ? "Wird wiederhergestellt…" : "Wiederherstellen"}
             </button>
@@ -339,7 +338,7 @@ export default function AdminAnliegenDetail({
         ) : (
           <form onSubmit={handleVerbergen} className="space-y-3">
             <div>
-              <label htmlFor="anl-verbergen-grund" className="block text-xs font-medium text-zinc-600 mb-1">
+              <label htmlFor="anl-verbergen-grund" className="block text-xs font-medium text-pz-muted mb-1">
                 Grund (intern, 1–1000 Zeichen)
               </label>
               <textarea
@@ -349,7 +348,7 @@ export default function AdminAnliegenDetail({
                 rows={2}
                 maxLength={1000}
                 placeholder="z. B. beleidigender Inhalt, Spam, personenbezogene Daten"
-                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm resize-none
+                className="w-full rounded-md border border-pz-line px-3 py-2 text-sm resize-none
                            focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
               />
             </div>
@@ -368,26 +367,26 @@ export default function AdminAnliegenDetail({
 
       {/* Match-Vorschläge */}
       {matches.length > 0 && (
-        <section className="rounded-lg border border-zinc-200 p-5">
-          <h2 className="text-sm font-semibold text-zinc-800 mb-4">
+        <section className="rounded-lg border border-pz-line p-5">
+          <h2 className="text-sm font-semibold text-pz-body mb-4">
             Dokument-Vorschläge ({matches.length})
           </h2>
-          <p className="text-xs text-zinc-500 mb-4">
+          <p className="text-xs text-pz-muted mb-4">
             Semantisches Matching v1 — Mensch bestätigt. Kein automatischer Statuswechsel.
           </p>
           <div className="space-y-3">
             {matches.map((m) => (
-              <div key={m.id} className="rounded-md border border-zinc-100 p-3 bg-zinc-50">
+              <div key={m.id} className="rounded-md border border-pz-line p-3 bg-pz-surface">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-zinc-800 truncate">
+                    <p className="text-sm font-medium text-pz-body truncate">
                       {m.docTitle ?? "Unbenanntes Dokument"}
                     </p>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-zinc-500">
+                      <span className="text-xs text-pz-muted">
                         Konfidenz: {(m.confidence * 100).toFixed(1)}%
                       </span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${MATCH_STATUS_COLORS[m.status] ?? "bg-zinc-100"}`}>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${MATCH_STATUS_COLORS[m.status] ?? "pz-badge-neutral"}`}>
                         {MATCH_STATUS_LABELS[m.status] ?? m.status}
                       </span>
                     </div>
@@ -421,7 +420,7 @@ export default function AdminAnliegenDetail({
                       <button
                         onClick={() => handleRejectMatch(m.id)}
                         disabled={!!matchAction[m.id]}
-                        className="rounded px-2 py-1 text-xs bg-zinc-200 text-zinc-700 hover:bg-zinc-300 disabled:opacity-50"
+                        className="pz-btn pz-btn-secondary pz-btn-sm"
                       >
                         Verwerfen
                       </button>
@@ -439,17 +438,17 @@ export default function AdminAnliegenDetail({
 
       {/* Event-Zeitleiste */}
       <section>
-        <h2 className="text-sm font-semibold text-zinc-800 mb-4">Verlauf</h2>
-        <ol className="relative border-l border-zinc-200 space-y-4 ml-3">
+        <h2 className="text-sm font-semibold text-pz-body mb-4">Verlauf</h2>
+        <ol className="relative border-l border-pz-line space-y-4 ml-3">
           {events.map((ev) => (
             <li key={ev.id} className="ml-4">
-              <div className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border border-white bg-zinc-400" />
+              <div className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border border-white bg-pz-muted" />
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[ev.status] ?? "bg-zinc-100 text-zinc-700"}`}>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[ev.status] ?? "pz-badge-neutral"}`}>
                     {STATUS_OPTIONS.find(s => s.value === ev.status)?.label ?? ev.status}
                   </span>
-                  {ev.notiz && <p className="text-sm text-zinc-600 mt-1">{ev.notiz}</p>}
+                  {ev.notiz && <p className="text-sm text-pz-muted mt-1">{ev.notiz}</p>}
                   {ev.quelle && (
                     <a href={ev.quelle} target="_blank" rel="noopener noreferrer"
                        className="text-xs text-[color:var(--pz-brand-strong)] hover:underline mt-1 inline-block">
@@ -457,7 +456,7 @@ export default function AdminAnliegenDetail({
                     </a>
                   )}
                 </div>
-                <time className="text-xs text-zinc-400 shrink-0">
+                <time className="text-xs text-pz-muted shrink-0">
                   {ev.createdAt.toLocaleDateString("de-DE")}
                 </time>
               </div>
@@ -467,7 +466,7 @@ export default function AdminAnliegenDetail({
       </section>
 
       {/* Links */}
-      <div className="pt-4 border-t border-zinc-100 flex gap-4">
+      <div className="pt-4 border-t border-pz-line flex gap-4">
         <a
           href={`/${tenantSlug}/anliegen/${a.trackingCode}`}
           target="_blank"

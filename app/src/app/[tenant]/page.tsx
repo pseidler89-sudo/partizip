@@ -463,7 +463,7 @@ export default async function TenantLandingPage({ params }: PageProps) {
           </div>
 
           {gruppen.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-[color:var(--pz-line)] bg-zinc-50/50 p-6 text-center">
+            <div className="rounded-lg border border-dashed border-[color:var(--pz-line)] bg-pz-surface p-6 text-center">
               <p className="text-sm" style={{ color: "var(--pz-muted)" }}>
                 {featured
                   ? "Aktuell läuft nur die Abstimmung oben."

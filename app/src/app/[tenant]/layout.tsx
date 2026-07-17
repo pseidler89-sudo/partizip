@@ -153,7 +153,7 @@ function TenantLayoutInner({
       className="min-h-screen flex flex-col"
     >
       {/* Kopfzeile */}
-      <header className="sticky top-0 z-30 border-b border-[color:var(--pz-line)] bg-white/85 backdrop-blur supports-[backdrop-filter]:bg-white/70">
+      <header className="sticky top-0 z-30 border-b border-[color:var(--pz-line)] bg-pz-surface/85 backdrop-blur supports-[backdrop-filter]:bg-pz-surface/70">
         {/* flex-wrap: auf schmalen Handy-Viewports (<~430px) bricht die Nav in
             eine zweite Zeile statt Marke/Links zu überlappen (Demo-DoD „mobil
             einwandfrei"; Overlap real auf 420px-Screenshot beobachtet). */}

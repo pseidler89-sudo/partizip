@@ -68,16 +68,16 @@ export default function AnliegenNeuForm({ ortsteile }: Props) {
           required
           placeholder="Kurze Beschreibung Ihres Anliegens"
           className="w-full rounded-md border border-[color:var(--pz-line)] px-4 py-2.5 text-sm
-                     text-zinc-900 placeholder-zinc-400
+                     text-pz-ink placeholder:text-pz-muted
                      focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus:border-[color:var(--pz-brand)]"
         />
-        <p className="mt-1 text-xs text-zinc-400">{titel.length}/200 Zeichen</p>
+        <p className="mt-1 text-xs text-pz-muted">{titel.length}/200 Zeichen</p>
       </div>
 
       {/* Beschreibung */}
       <div>
         <label htmlFor="beschreibung" className="block text-sm font-medium mb-1" style={{ color: "var(--pz-ink)" }}>
-          Beschreibung <span className="text-zinc-400 font-normal">(optional)</span>
+          Beschreibung <span className="text-pz-muted font-normal">(optional)</span>
         </label>
         <textarea
           id="beschreibung"
@@ -87,24 +87,24 @@ export default function AnliegenNeuForm({ ortsteile }: Props) {
           rows={5}
           placeholder="Weitere Details zu Ihrem Anliegen"
           className="w-full rounded-md border border-[color:var(--pz-line)] px-4 py-2.5 text-sm
-                     text-zinc-900 placeholder-zinc-400 resize-y
+                     text-pz-ink placeholder:text-pz-muted resize-y
                      focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus:border-[color:var(--pz-brand)]"
         />
-        <p className="mt-1 text-xs text-zinc-400">{beschreibung.length}/5000 Zeichen</p>
+        <p className="mt-1 text-xs text-pz-muted">{beschreibung.length}/5000 Zeichen</p>
       </div>
 
       {/* Ortsteil */}
       {ortsteile.length > 0 && (
         <div>
           <label htmlFor="ortsteil" className="block text-sm font-medium mb-1" style={{ color: "var(--pz-ink)" }}>
-            Ortsteil <span className="text-zinc-400 font-normal">(optional)</span>
+            Ortsteil <span className="text-pz-muted font-normal">(optional)</span>
           </label>
           <select
             id="ortsteil"
             value={ortsteilId}
             onChange={(e) => setOrtsteilId(e.target.value)}
             className="w-full rounded-md border border-[color:var(--pz-line)] px-4 py-2.5 text-sm
-                       text-zinc-900 bg-white
+                       text-pz-ink bg-pz-surface
                        focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus:border-[color:var(--pz-brand)]"
           >
             <option value="">— Kein Ortsteil —</option>

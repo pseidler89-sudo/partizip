@@ -47,11 +47,11 @@ export function ZurueckziehenButton({ anliegenId }: Props) {
         <button
           type="button"
           onClick={() => setConfirming(true)}
-          className="text-sm text-zinc-500 hover:text-red-600 underline underline-offset-2"
+          className="text-sm text-pz-muted underline underline-offset-4 hover:text-[color:var(--pz-danger)]"
         >
           Anliegen zurückziehen
         </button>
-        <p className="text-xs text-zinc-400 mt-1">
+        <p className="text-xs text-pz-muted mt-1">
           Sie können Ihr Anliegen zurückziehen, solange es noch in Bearbeitung ist.
         </p>
       </div>
@@ -60,7 +60,7 @@ export function ZurueckziehenButton({ anliegenId }: Props) {
 
   return (
     <div className="rounded-md border border-red-200 bg-red-50 p-4">
-      <p className="text-sm text-zinc-700">
+      <p className="text-sm text-pz-body">
         Möchten Sie dieses Anliegen wirklich zurückziehen? Das lässt sich nicht rückgängig machen.
       </p>
       {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
@@ -80,7 +80,7 @@ export function ZurueckziehenButton({ anliegenId }: Props) {
             setError(null);
           }}
           disabled={submitting}
-          className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+          className="pz-btn pz-btn-secondary pz-btn-sm"
         >
           Abbrechen
         </button>

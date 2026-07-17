@@ -84,7 +84,7 @@ export default async function TransparenzPage({ params }: PageProps) {
 
       <section className="mt-8">
         {veroeffentlicht.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50/50 p-8 text-center text-sm text-zinc-500">
+          <div className="rounded-lg border border-dashed border-pz-line bg-pz-surface p-8 text-center text-sm text-pz-muted">
             Es wurden noch keine Zusammenfassungen veröffentlicht. Sobald die erste
             Freigabe erfolgt, wird sie hier nachvollziehbar dokumentiert.
           </div>

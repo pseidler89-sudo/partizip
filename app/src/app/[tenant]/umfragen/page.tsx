@@ -408,7 +408,7 @@ export default async function UmfragenListePage({ params }: PageProps) {
 
 function LeerHinweis({ text }: { text: string }) {
   return (
-    <div className="rounded-lg border border-dashed border-[color:var(--pz-line)] bg-zinc-50/50 p-6 text-center">
+    <div className="rounded-lg border border-dashed border-[color:var(--pz-line)] bg-pz-surface p-6 text-center">
       <p className="text-sm" style={{ color: "var(--pz-muted)" }}>
         {text}
       </p>

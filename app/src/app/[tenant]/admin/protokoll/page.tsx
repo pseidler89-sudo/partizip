@@ -123,11 +123,11 @@ export default async function AdminProtokollPage({ params, searchParams }: PageP
   return (
     <main className="min-h-screen px-6 py-10 max-w-4xl mx-auto">
       <div className="mb-6">
-        <Link href={`/${slugFromPath}/admin`} className="text-sm text-zinc-500 hover:text-zinc-700">
+        <Link href={`/${slugFromPath}/admin`} className="text-sm text-pz-muted hover:text-pz-body">
           ← Admin-Bereich
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Protokoll</h1>
-        <p className="text-sm text-zinc-500 mt-1">
+        <h1 className="mt-2 text-2xl font-semibold text-pz-ink">Protokoll</h1>
+        <p className="text-sm text-pz-muted mt-1">
           Technisches Audit-Log (PII-frei, ohne E-Mail). Letzte {LIMIT} Ereignisse,
           neueste zuerst.
         </p>
@@ -138,7 +138,7 @@ export default async function AdminProtokollPage({ params, searchParams }: PageP
         <Link
           href={`/${slugFromPath}/admin/protokoll`}
           className={`rounded-md px-3 py-1 ${
-            !nurPrivileg ? "bg-zinc-900 text-white" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+            !nurPrivileg ? "bg-[color:var(--pz-brand)] text-white" : "border border-pz-line text-pz-body hover:bg-pz-brand-soft"
           }`}
         >
           Alle
@@ -146,7 +146,7 @@ export default async function AdminProtokollPage({ params, searchParams }: PageP
         <Link
           href={`/${slugFromPath}/admin/protokoll?filter=privileg`}
           className={`rounded-md px-3 py-1 ${
-            nurPrivileg ? "bg-zinc-900 text-white" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+            nurPrivileg ? "bg-[color:var(--pz-brand)] text-white" : "border border-pz-line text-pz-body hover:bg-pz-brand-soft"
           }`}
         >
           Nur privilegierte Aktionen
@@ -154,13 +154,13 @@ export default async function AdminProtokollPage({ params, searchParams }: PageP
       </div>
 
       {events.length === 0 ? (
-        <div className="rounded-lg border border-zinc-200 p-8 text-center text-zinc-500">
+        <div className="rounded-lg border border-pz-line p-8 text-center text-pz-muted">
           Keine Protokoll-Einträge.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200">
+        <div className="overflow-x-auto rounded-lg border border-pz-line">
           <table className="w-full text-sm">
-            <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500">
+            <thead className="bg-pz-surface text-left text-xs uppercase tracking-wide text-pz-muted">
               <tr>
                 <th className="px-4 py-2 font-medium">Zeitpunkt</th>
                 <th className="px-4 py-2 font-medium">Aktion</th>
@@ -168,28 +168,28 @@ export default async function AdminProtokollPage({ params, searchParams }: PageP
                 <th className="px-4 py-2 font-medium">Ziel</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100">
+            <tbody className="divide-y divide-pz-line">
               {events.map((e: typeof events[number]) => (
-                <tr key={e.id} className="text-zinc-700">
-                  <td className="whitespace-nowrap px-4 py-2 text-zinc-500">
+                <tr key={e.id} className="text-pz-body">
+                  <td className="whitespace-nowrap px-4 py-2 text-pz-muted">
                     {e.createdAt.toLocaleString("de-DE")}
                   </td>
                   <td className="px-4 py-2">
                     <span className="font-medium">{ACTION_LABELS[e.action] ?? e.action}</span>
-                    <span className="block text-xs text-zinc-400">{e.action}</span>
+                    <span className="block text-xs text-pz-muted">{e.action}</span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-2">
-                    <span className="text-zinc-500">{e.actorType}</span>{" "}
-                    <span className="font-mono text-xs text-zinc-400">{kuerze(e.actorRef)}</span>
+                    <span className="text-pz-muted">{e.actorType}</span>{" "}
+                    <span className="font-mono text-xs text-pz-muted">{kuerze(e.actorRef)}</span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-2">
                     {e.targetType ? (
                       <>
-                        <span className="text-zinc-500">{e.targetType}</span>{" "}
-                        <span className="font-mono text-xs text-zinc-400">{kuerze(e.targetId)}</span>
+                        <span className="text-pz-muted">{e.targetType}</span>{" "}
+                        <span className="font-mono text-xs text-pz-muted">{kuerze(e.targetId)}</span>
                       </>
                     ) : (
-                      <span className="text-zinc-400">—</span>
+                      <span className="text-pz-muted">—</span>
                     )}
                   </td>
                 </tr>
