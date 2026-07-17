@@ -32,6 +32,7 @@ import {
   votes,
   pollOptions,
   voteAllocations,
+  voteResistances,
   auditEvents,
 } from "@/db/schema";
 import { SCOPE_INPUT_LEVELS } from "@/lib/region/ebenen";
@@ -55,6 +56,7 @@ import {
   DOT_BUDGET_MAX,
   DOT_OPTION_LABEL_MAX,
 } from "@/lib/polls/dot";
+import { validateWiderstandsWerte } from "@/lib/polls/widerstand";
 import { notifyNewPoll } from "@/lib/polls/notify";
 import {
   createDefaultTransport,
@@ -435,6 +437,170 @@ export async function dotAbstimmen(
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// widerstandAbstimmen — Widerstandsabfrage / Systemisches Konsensieren (ADR-025)
+// ---------------------------------------------------------------------------
+
+const widerstandAbstimmenSchema = z.object({
+  pollId: z.string().uuid(),
+  // Geteilte poll_options-Grenze: mehr Werte als Optionen kann es nie geben.
+  werte: z
+    .array(z.object({ optionId: z.string().uuid(), wert: z.number().int() }))
+    .max(DOT_OPTIONEN_MAX),
+});
+
+/**
+ * Gibt eine Widerstandsabfrage-Stimme ab: der Wähler bewertet JEDE Option mit
+ * einem Widerstandswert 0–10 (vollständige Abgabe — validateWiderstandsWerte
+ * erzwingt sie; wert=0 wird MIT gespeichert, sonst wären die Summen verzerrt).
+ * Spiegelt die Sicherheits-Gates von dotAbstimmen() (Stufe, Verbindlich, Gebiet,
+ * Rate-Limit, Beleg, PII-freies Audit) und schreibt eine vote_resistances-Zeile
+ * je Option. Secret Ballot: weder Werte noch Optionen gehen ins Audit; ein
+ * Advisory-Lock je (Umfrage, voter_ref) verhindert Teil-Doppelabgaben race-frei.
+ */
+export async function widerstandAbstimmen(
+  pollId: string,
+  werte: unknown,
+): Promise<AbstimmenResult> {
+  const ctx = await getOptionalAuthContext();
+  if (!ctx) return { ok: false, error: "Diese Seite ist nicht erreichbar." };
+  if (!ctx.userId) {
+    return { ok: false, needLogin: true, error: "Bitte melden Sie sich an, um mitzustimmen." };
+  }
+
+  const parsed = widerstandAbstimmenSchema.safeParse({ pollId, werte });
+  if (!parsed.success) return { ok: false, error: "Ungültige Eingabe." };
+
+  // Poll tenant-scoped laden (inkl. typ).
+  const pollRows = await ctx.db
+    .select({
+      id: polls.id,
+      typ: polls.typ,
+      status: polls.status,
+      verbindlich: polls.verbindlich,
+      regionId: polls.regionId,
+      opensAt: polls.opensAt,
+      closesAt: polls.closesAt,
+    })
+    .from(polls)
+    .where(and(eq(polls.id, parsed.data.pollId), eq(polls.tenantId, ctx.tenant.id)))
+    .limit(1);
+  const poll = pollRows[0];
+  if (!poll) return { ok: false, error: "Diese Frage gibt es nicht." };
+  if (poll.typ !== "widerstandsabfrage") {
+    return { ok: false, error: "Diese Abstimmung ist keine Widerstandsabfrage." };
+  }
+
+  const now = new Date();
+  if (poll.status !== "aktiv") return { ok: false, error: "Diese Abstimmung ist derzeit nicht offen." };
+  if (poll.opensAt && poll.opensAt > now) return { ok: false, error: "Diese Abstimmung hat noch nicht begonnen." };
+  if (poll.closesAt && poll.closesAt <= now) return { ok: false, error: "Diese Abstimmung ist bereits beendet." };
+
+  // Optionen der Umfrage laden → gültige optionIds.
+  const optionRows = await ctx.db
+    .select({ id: pollOptions.id })
+    .from(pollOptions)
+    .where(and(eq(pollOptions.pollId, poll.id), eq(pollOptions.tenantId, ctx.tenant.id)));
+  const gueltigeOptionIds = new Set<string>(optionRows.map((o: { id: string }) => o.id));
+
+  // Werte serverseitig validieren (Vollständigkeit, gültige Optionen, 0–10).
+  const val = validateWiderstandsWerte(parsed.data.werte, gueltigeOptionIds);
+  if (!val.ok) return { ok: false, error: val.error };
+
+  const stufe = getStufe(ctx.user);
+  const warVerifiziert = stufe >= 2;
+  if (stufe < 1) return { ok: false, needLogin: true, error: "Bitte melden Sie sich an, um mitzustimmen." };
+  if (poll.verbindlich && stufe < 2) {
+    return { ok: false, error: "Diese verbindliche Abstimmung ist verifizierten Bürger:innen vorbehalten." };
+  }
+
+  // Gebiets-Zuständigkeit (Audit M2), identisch zu abstimmen().
+  const ankerRegionId = ctx.user ? waehleAnkerRegionId(ctx.user, poll.verbindlich) : null;
+  if (!(await istGebietsZustaendig(ctx.db, ctx.tenant.id, poll.regionId, ankerRegionId))) {
+    return { ok: false, error: "Diese Abstimmung gehört nicht zu Ihrem Gebiet." };
+  }
+
+  let voterRef: string;
+  try {
+    voterRef = computeVoterRefForUser(ctx.userId);
+  } catch (err) {
+    console.error("[widerstandAbstimmen] Fehler bei voter_ref:", err);
+    return { ok: false, error: "Konfigurationsfehler — bitte später erneut versuchen." };
+  }
+
+  const ipAddress = await getClientIp();
+  const rl = await checkVoteRateLimit(ctx.db, {
+    tenantId: ctx.tenant.id,
+    actorRef: voterRef,
+    ipAddress,
+    deviceToken: null,
+  });
+  if (!rl.allowed) {
+    return { ok: false, error: "Zu viele Stimmen in kurzer Zeit. Bitte versuchen Sie es später erneut." };
+  }
+
+  const result = await ctx.db.transaction(async (tx: Db) => {
+    // Advisory-Lock je (Umfrage, Wähler) → serialisiert nebenläufige Abgaben
+    // desselben Wählers (verhindert Teil-Doppelabgabe über verschiedene Options-
+    // Mengen; die UNIQUE je Option allein reicht dafür nicht).
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${poll.id + ":" + voterRef}))`);
+
+    // Live-Status atomar prüfen (TOCTOU).
+    const liveRows = await tx
+      .select({ status: polls.status, opensAt: polls.opensAt, closesAt: polls.closesAt })
+      .from(polls)
+      .where(and(eq(polls.id, poll.id), eq(polls.tenantId, ctx.tenant.id)))
+      .for("update")
+      .limit(1);
+    const live = liveRows[0];
+    if (!live || live.status !== "aktiv" || (live.opensAt && live.opensAt > now) || (live.closesAt && live.closesAt <= now)) {
+      return { ok: false as const, error: "Diese Abstimmung ist derzeit nicht offen." };
+    }
+
+    // Schon abgestimmt? (irgendein Widerstandswert dieses Wählers für die Umfrage)
+    const bestehend = await tx
+      .select({ id: voteResistances.id })
+      .from(voteResistances)
+      .where(and(eq(voteResistances.pollId, poll.id), eq(voteResistances.voterRef, voterRef)))
+      .limit(1);
+    if (bestehend.length > 0) {
+      return { ok: true as const, alreadyVoted: true };
+    }
+
+    // ALLE Werte-Zeilen schreiben — auch wert=0 (vollständige Abgabe, sonst
+    // wären die Widerstands-Summen verzerrt).
+    await tx.insert(voteResistances).values(
+      val.werte.map((w) => ({
+        pollId: poll.id,
+        tenantId: ctx.tenant.id,
+        optionId: w.optionId,
+        voterRef,
+        wert: w.wert,
+        warVerifiziert,
+      })),
+    );
+
+    // EIN Beleg je Wähler (nicht je Option) — Invariante bleibt „ein Beleg je
+    // Stimme"; die Tabelle kennt weder voter_ref noch Werte/Option.
+    const beleg = await insertBelegCode(tx, ctx.tenant.id, poll.id);
+
+    // SECRET BALLOT: weder Werte noch Optionen ins Audit. Nur pollId + Flag.
+    await tx.insert(auditEvents).values({
+      tenantId: ctx.tenant.id,
+      actorType: "user",
+      actorRef: voterRef,
+      action: "poll.voted",
+      targetType: "poll",
+      targetId: poll.id,
+      metadata: { pollId: poll.id, warVerifiziert, format: "widerstandsabfrage" },
+    });
+
+    return { ok: true as const, alreadyVoted: false, beleg };
+  });
+
+  return result;
+}
+
 // Lese-Funktionen (getPollErgebnis / getAktiveFeaturedPoll / hatBereitsAbgestimmt)
 // liegen bewusst in @/lib/polls/queries (OHNE "use server"), damit sie nicht als
 // client-aufrufbare RPC-Endpunkte exponiert werden (Gate-B MAJOR-G).
@@ -452,11 +618,12 @@ const pollErstellenSchema = z.object({
   verbindlich: z.boolean().optional(),
   closesAt: z.coerce.date().optional().nullable(),
   // Beteiligungsformat (ADR-025). Default = binäres Ja/Nein.
-  typ: z.enum(["ja_nein_enthaltung", "dot_voting"]).optional(),
-  // Nur dot_voting: Optionen (Labels) + Punktebudget je Wähler.
+  typ: z.enum(["ja_nein_enthaltung", "dot_voting", "widerstandsabfrage"]).optional(),
+  // Nicht-binäre Formate (dot_voting + widerstandsabfrage): Optionen (Labels).
   optionen: z
     .array(z.string().trim().min(1, "Leere Option.").max(DOT_OPTION_LABEL_MAX, "Option zu lang."))
     .optional(),
+  // Nur dot_voting: Punktebudget je Wähler.
   punkteBudget: z.coerce.number().int().optional(),
 });
 
@@ -475,20 +642,24 @@ export async function pollErstellen(
   const { frage, scopeLevel, scopeCode, verbindlich, closesAt } = parsed.data;
   const typ = parsed.data.typ ?? "ja_nein_enthaltung";
 
-  // dot_voting: Optionen + Budget serverseitig validieren (Client nie vertrauen).
-  let dotOptionen: string[] = [];
+  // Nicht-binäre Formate (dot_voting + widerstandsabfrage): Optionen serverseitig
+  // validieren (Client nie vertrauen); geteilte poll_options-Grenzen aus dot.ts.
+  // Das Punktebudget bleibt dot-only (bei widerstandsabfrage NULL).
+  let formatOptionen: string[] = [];
   let punkteBudget: number | null = null;
-  if (typ === "dot_voting") {
-    dotOptionen = (parsed.data.optionen ?? []).map((s) => s.trim()).filter((s) => s.length > 0);
-    if (dotOptionen.length < DOT_OPTIONEN_MIN || dotOptionen.length > DOT_OPTIONEN_MAX) {
+  if (typ !== "ja_nein_enthaltung") {
+    formatOptionen = (parsed.data.optionen ?? []).map((s) => s.trim()).filter((s) => s.length > 0);
+    if (formatOptionen.length < DOT_OPTIONEN_MIN || formatOptionen.length > DOT_OPTIONEN_MAX) {
       return {
         ok: false,
         error: `Bitte ${DOT_OPTIONEN_MIN}–${DOT_OPTIONEN_MAX} Optionen angeben.`,
       };
     }
-    if (new Set(dotOptionen.map((s) => s.toLowerCase())).size !== dotOptionen.length) {
+    if (new Set(formatOptionen.map((s) => s.toLowerCase())).size !== formatOptionen.length) {
       return { ok: false, error: "Die Optionen müssen sich unterscheiden." };
     }
+  }
+  if (typ === "dot_voting") {
     const budget = parsed.data.punkteBudget ?? 0;
     if (!Number.isInteger(budget) || budget < DOT_BUDGET_MIN || budget > DOT_BUDGET_MAX) {
       return {
@@ -525,9 +696,10 @@ export async function pollErstellen(
       })
       .returning({ id: polls.id });
 
-    if (typ === "dot_voting") {
+    // Optionen für beide Nicht-binär-Formate (poll_options ist format-neutral).
+    if (typ !== "ja_nein_enthaltung") {
       await tx.insert(pollOptions).values(
-        dotOptionen.map((label, position) => ({
+        formatOptionen.map((label, position) => ({
           pollId: row.id,
           tenantId: ctx.tenant.id,
           label,
@@ -549,7 +721,9 @@ export async function pollErstellen(
         verbindlich: verbindlich ?? false,
         scopeLevel,
         typ,
-        ...(typ === "dot_voting" ? { optionenAnzahl: dotOptionen.length, punkteBudget } : {}),
+        // optionenAnzahl für beide Nicht-binär-Formate; punkteBudget nur dot.
+        ...(typ !== "ja_nein_enthaltung" ? { optionenAnzahl: formatOptionen.length } : {}),
+        ...(typ === "dot_voting" ? { punkteBudget } : {}),
       },
     });
 
@@ -725,13 +899,27 @@ export async function pollEntwurfLoeschen(
 
   const result = await ctx.db.transaction(async (tx: Db) => {
     // Sicherheitsnetz: bei vorhandenen Stimmen NIEMALS löschen (sollte bei
-    // einem Entwurf 0 sein — aber wir verlassen uns nicht darauf).
-    const stimmen = await tx
-      .select({ id: votes.id })
-      .from(votes)
-      .where(and(eq(votes.pollId, idParsed.data), eq(votes.tenantId, ctx.tenant.id)))
-      .limit(1);
-    if (stimmen.length > 0) {
+    // einem Entwurf 0 sein — aber wir verlassen uns nicht darauf). Deckt ALLE
+    // Abstimm-Formate ab: Ja/Nein (votes), Dot (vote_allocations), Widerstand
+    // (vote_resistances) — die Format-Actions schreiben keine votes-Zeile.
+    const [stimmen, zuteilungen, widerstaende] = await Promise.all([
+      tx
+        .select({ id: votes.id })
+        .from(votes)
+        .where(and(eq(votes.pollId, idParsed.data), eq(votes.tenantId, ctx.tenant.id)))
+        .limit(1),
+      tx
+        .select({ id: voteAllocations.id })
+        .from(voteAllocations)
+        .where(and(eq(voteAllocations.pollId, idParsed.data), eq(voteAllocations.tenantId, ctx.tenant.id)))
+        .limit(1),
+      tx
+        .select({ id: voteResistances.id })
+        .from(voteResistances)
+        .where(and(eq(voteResistances.pollId, idParsed.data), eq(voteResistances.tenantId, ctx.tenant.id)))
+        .limit(1),
+    ]);
+    if (stimmen.length > 0 || zuteilungen.length > 0 || widerstaende.length > 0) {
       return { ok: false as const, error: "Diese Umfrage hat bereits Stimmen und kann nicht gelöscht werden." };
     }
 

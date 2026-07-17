@@ -14,12 +14,16 @@
 
 import { and, eq, or, isNull, lte, gt, desc, inArray, count, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { polls, votes, pollOptions, voteAllocations, regions, pollStatusEnum } from "@/db/schema";
+import { polls, votes, pollOptions, voteAllocations, voteResistances, regions, pollStatusEnum } from "@/db/schema";
 import {
   aggregateDotVotes,
   type DotOption,
   type DotVotingErgebnis,
 } from "@/lib/polls/dot";
+import {
+  aggregateWiderstandsVotes,
+  type WiderstandsErgebnis,
+} from "@/lib/polls/widerstand";
 import type { RegionTyp } from "@/lib/region/ebenen";
 import type { TenantRow } from "@/lib/tenant";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
@@ -62,7 +66,9 @@ export async function getPollErgebnis(
 }
 
 /**
- * Optionen einer dot_voting-Umfrage (tenant-scoped, nach Position sortiert).
+ * Optionen einer Umfrage mit poll_options (tenant-scoped, nach Position
+ * sortiert). Format-neutral: dot_voting UND widerstandsabfrage teilen sich
+ * die Options-Tabelle — der Name bleibt aus historischen Gründen.
  */
 export async function getDotOptions(
   db: Db,
@@ -112,6 +118,72 @@ export async function getDotErgebnis(
     .where(and(eq(voteAllocations.pollId, pollId), eq(voteAllocations.tenantId, tenantId)));
 
   return aggregateDotVotes(rows, optionen, poll.punkteBudget ?? 0, istBeendet(poll));
+}
+
+/**
+ * Widerstandsabfrage-Ergebnis (tenant-scoped). Hält die per-Option-
+ * Aufschlüsselung zurück, solange die Umfrage läuft ODER < k Teilnehmende
+ * (ADR-025, siehe lib/polls/widerstand.ts). Teilnehmerzahl bleibt sichtbar.
+ * Optionen kommen über getDotOptions — die Options-Query ist format-neutral
+ * (poll_options trägt beide Nicht-binär-Formate).
+ */
+export async function getWiderstandsErgebnis(
+  db: Db,
+  tenantId: string,
+  pollId: string,
+): Promise<WiderstandsErgebnis | null> {
+  const pollRows = await db
+    .select({ id: polls.id, status: polls.status, closesAt: polls.closesAt })
+    .from(polls)
+    .where(and(eq(polls.id, pollId), eq(polls.tenantId, tenantId)))
+    .limit(1);
+  const poll = pollRows[0];
+  if (!poll) return null;
+
+  const optionen = await getDotOptions(db, tenantId, pollId);
+  const rows = await db
+    .select({
+      optionId: voteResistances.optionId,
+      wert: voteResistances.wert,
+      voterRef: voteResistances.voterRef,
+      warVerifiziert: voteResistances.warVerifiziert,
+    })
+    .from(voteResistances)
+    .where(and(eq(voteResistances.pollId, pollId), eq(voteResistances.tenantId, tenantId)));
+
+  return aggregateWiderstandsVotes(rows, optionen, istBeendet(poll));
+}
+
+/**
+ * Hat der eingeloggte User bei einer widerstandsabfrage-Umfrage bereits
+ * abgestimmt? (irgendein Widerstandswert für die Umfrage). Tenant-scoped,
+ * ohne userId → false.
+ */
+export async function hatBereitsWiderstandAbgestimmt(
+  db: Db,
+  tenant: TenantRow,
+  pollId: string,
+  ctx: { userId: string | null },
+): Promise<boolean> {
+  if (!ctx.userId) return false;
+  let voterRef: string;
+  try {
+    voterRef = computeVoterRefForUser(ctx.userId);
+  } catch {
+    return false;
+  }
+  const rows = await db
+    .select({ id: voteResistances.id })
+    .from(voteResistances)
+    .where(
+      and(
+        eq(voteResistances.pollId, pollId),
+        eq(voteResistances.tenantId, tenant.id),
+        eq(voteResistances.voterRef, voterRef),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }
 
 /**
@@ -189,9 +261,10 @@ export async function hatBereitsAbgestimmt(
  * nie die getroffene Wahl.
  * Tenant-scoped + voter_ref-gebunden; ohne userId (nicht eingeloggt) leeres Set.
  *
- * Deckt BEIDE Abstimm-Formate ab: Ja/Nein liegt in `votes`, Dot-Voting NUR in
- * `vote_allocations` (dotAbstimmen schreibt keine votes-Zeile) — ohne den
- * zweiten Blick bliebe der Teilnahme-Chip bei Dot-Polls fälschlich „Noch offen".
+ * Deckt ALLE Abstimm-Formate ab: Ja/Nein liegt in `votes`, Dot-Voting NUR in
+ * `vote_allocations`, Widerstandsabfragen NUR in `vote_resistances` (die
+ * Format-Actions schreiben keine votes-Zeile) — ohne die weiteren Blicke bliebe
+ * der Teilnahme-Chip bei diesen Polls fälschlich „Noch offen".
  */
 export async function hatBereitsAbgestimmtBatch(
   db: Db,
@@ -208,7 +281,7 @@ export async function hatBereitsAbgestimmtBatch(
     return new Set();
   }
 
-  const [voteRows, allocRows] = await Promise.all([
+  const [voteRows, allocRows, resistRows] = await Promise.all([
     db
       .select({ pollId: votes.pollId })
       .from(votes)
@@ -229,9 +302,19 @@ export async function hatBereitsAbgestimmtBatch(
           inArray(voteAllocations.pollId, pollIds)
         )
       ),
+    db
+      .select({ pollId: voteResistances.pollId })
+      .from(voteResistances)
+      .where(
+        and(
+          eq(voteResistances.tenantId, tenant.id),
+          eq(voteResistances.voterRef, voterRef),
+          inArray(voteResistances.pollId, pollIds)
+        )
+      ),
   ]);
   return new Set(
-    [...voteRows, ...allocRows].map((r: { pollId: string }) => r.pollId)
+    [...voteRows, ...allocRows, ...resistRows].map((r: { pollId: string }) => r.pollId)
   );
 }
 
@@ -242,7 +325,7 @@ export async function hatBereitsAbgestimmtBatch(
 export interface PollListItem {
   id: string;
   frage: string;
-  typ: "ja_nein_enthaltung" | "dot_voting";
+  typ: "ja_nein_enthaltung" | "dot_voting" | "widerstandsabfrage";
   status: (typeof pollStatusEnum.enumValues)[number];
   verbindlich: boolean;
   // ADR-024 contract: Gebietsknoten der Umfrage + abgeleitete Anzeigefelder.
@@ -265,6 +348,12 @@ export interface PollMitErgebnis extends PollListItem {
    * k-maskiert (ADR-025); gesamtWaehler/verifizierteWaehler sind immer sichtbar.
    */
   dot?: DotVotingErgebnis | null;
+  /**
+   * Nur bei typ=widerstandsabfrage gesetzt: aggregiertes Widerstands-Ergebnis
+   * für die Karten-Teilnahmezeile. Kommt aus getWiderstandsErgebnis und ist
+   * damit serverseitig zurückgehalten bis Ende + Mindest-N (ADR-025).
+   */
+  widerstand?: WiderstandsErgebnis | null;
 }
 
 /** Neutrales Leer-Ergebnis (Fallback, wenn getPollErgebnis null liefert). */
@@ -277,9 +366,10 @@ const LEERES_ERGEBNIS: PollErgebnis = {
 
 /**
  * Reichert Listen-Items um ihr Ergebnis an (Startseite/Listing): Ja/Nein-Polls
- * bekommen das votes-Aggregat, dot_voting-Polls ZUSÄTZLICH das Dot-Aggregat —
- * sonst zeigt die Karte „Noch keine Stimmen", obwohl Punkte verteilt wurden
- * (M1-Nachzug Block F). Tenant-scoped über die aufgerufenen Einzel-Queries.
+ * bekommen das votes-Aggregat, dot_voting-/widerstandsabfrage-Polls ZUSÄTZLICH
+ * ihr Format-Aggregat — sonst zeigt die Karte „Noch keine Stimmen", obwohl
+ * teilgenommen wurde (M1-Nachzug Block F). Tenant-scoped über die aufgerufenen
+ * Einzel-Queries.
  */
 export async function mitErgebnissen(
   db: Db,
@@ -291,6 +381,10 @@ export async function mitErgebnissen(
       ...p,
       ergebnis: (await getPollErgebnis(db, tenantId, p.id)) ?? LEERES_ERGEBNIS,
       dot: p.typ === "dot_voting" ? await getDotErgebnis(db, tenantId, p.id) : undefined,
+      widerstand:
+        p.typ === "widerstandsabfrage"
+          ? await getWiderstandsErgebnis(db, tenantId, p.id)
+          : undefined,
     }))
   );
 }
@@ -394,10 +488,12 @@ export async function getAktivePolls(
  * Umfragen, für die der eingeloggte User (voter_ref user-Domain) eine Stimme
  * abgegeben hat — neu→alt, jeweils mit Ergebnis-Aggregat. Tenant-scoped.
  *
- * Deckt BEIDE Abstimm-Formate ab: Ja/Nein-Stimmen liegen in `votes`,
- * Dot-Voting-Teilnahmen NUR in `vote_allocations` — ohne den zweiten Blick
- * fehlten Dot-Polls dauerhaft in „Bereits teilgenommen". Dot-Polls tragen ihr
- * Dot-Aggregat im `dot`-Feld (k-maskiert via getDotErgebnis, ADR-025).
+ * Deckt ALLE Abstimm-Formate ab: Ja/Nein-Stimmen liegen in `votes`, Dot-Voting-
+ * Teilnahmen NUR in `vote_allocations`, Widerstands-Teilnahmen NUR in
+ * `vote_resistances` — ohne die weiteren Blicke fehlten diese Polls dauerhaft
+ * in „Bereits teilgenommen". Dot-Polls tragen ihr Dot-Aggregat im `dot`-Feld
+ * (k-maskiert via getDotErgebnis), Widerstands-Polls ihr Aggregat im
+ * `widerstand`-Feld (zurückgehalten via getWiderstandsErgebnis, ADR-025).
  *
  * Einschluss bewusst unabhängig vom Status/Zeitfenster: bereits beendete oder
  * geschlossene Umfragen sollen in "Bereits teilgenommen" sichtbar bleiben.
@@ -418,9 +514,10 @@ export async function getMeineTeilnahmen(
   }
 
   // poll_ids mit einer Teilnahme dieses voter_ref (tenant-scoped): Ja/Nein-
-  // Stimmen aus votes + Dot-Zuteilungen aus vote_allocations. Beide Queries
-  // selektieren NUR poll_id (Secret Ballot: das OB, nie das WIE).
-  const [voteRows, allocRows] = await Promise.all([
+  // Stimmen aus votes + Dot-Zuteilungen aus vote_allocations + Widerstandswerte
+  // aus vote_resistances. Alle Queries selektieren NUR poll_id (Secret Ballot:
+  // das OB, nie das WIE).
+  const [voteRows, allocRows, resistRows] = await Promise.all([
     db
       .select({ pollId: votes.pollId })
       .from(votes)
@@ -431,10 +528,18 @@ export async function getMeineTeilnahmen(
       .where(
         and(eq(voteAllocations.tenantId, tenantId), eq(voteAllocations.voterRef, voterRef))
       ),
+    db
+      .select({ pollId: voteResistances.pollId })
+      .from(voteResistances)
+      .where(
+        and(eq(voteResistances.tenantId, tenantId), eq(voteResistances.voterRef, voterRef))
+      ),
   ]);
 
   const pollIds: string[] = Array.from(
-    new Set([...voteRows, ...allocRows].map((r: { pollId: string }) => r.pollId))
+    new Set(
+      [...voteRows, ...allocRows, ...resistRows].map((r: { pollId: string }) => r.pollId)
+    )
   );
   if (pollIds.length === 0) return [];
 
@@ -464,12 +569,15 @@ export async function getMeineTeilnahmen(
     .from(votes)
     .where(and(eq(votes.tenantId, tenantId), inArray(votes.pollId, pollIds)));
 
-  // Dot-Aggregat je dot_voting-Poll (Teilnahmen sind wenige — Einzel-Query je
-  // Poll ist ok; getDotErgebnis kapselt die k-Maskierung zentral).
+  // Format-Aggregat je Nicht-binär-Poll (Teilnahmen sind wenige — Einzel-Query
+  // je Poll ist ok; die Ergebnis-Queries kapseln Maskierung/Zurückhaltung zentral).
   const dotErgebnisse = new Map<string, DotVotingErgebnis | null>();
+  const widerstandsErgebnisse = new Map<string, WiderstandsErgebnis | null>();
   for (const p of pollRows as PollListItem[]) {
     if (p.typ === "dot_voting") {
       dotErgebnisse.set(p.id, await getDotErgebnis(db, tenantId, p.id));
+    } else if (p.typ === "widerstandsabfrage") {
+      widerstandsErgebnisse.set(p.id, await getWiderstandsErgebnis(db, tenantId, p.id));
     }
   }
 
@@ -484,6 +592,8 @@ export async function getMeineTeilnahmen(
       // ADR-022: laufende Umfragen ohne per-Option-Aufschlüsselung.
       ergebnis: istBeendet(p, now) ? ergebnis : ohneAufschluesselung(ergebnis),
       dot: p.typ === "dot_voting" ? dotErgebnisse.get(p.id) : undefined,
+      widerstand:
+        p.typ === "widerstandsabfrage" ? widerstandsErgebnisse.get(p.id) : undefined,
     };
   });
 }
@@ -503,21 +613,33 @@ export interface PollAdminItem {
   regionPath: string;
   status: (typeof pollStatusEnum.enumValues)[number];
   verbindlich: boolean;
+  /** Abstimm-Format (ADR-025) — für Format-Kennzeichnung + Zähler-Wortwahl. */
+  typ: "ja_nein_enthaltung" | "dot_voting" | "widerstandsabfrage";
   opensAt: Date | null;
   closesAt: Date | null;
   createdAt: Date;
-  /** Anzahl aller abgegebenen Stimmen (tenant-scoped). */
+  /**
+   * Teilnahme-Zähler: Ja/Nein = Stimmen (votes), Dot/Widerstand = Teilnehmende
+   * (distinct voter_ref — eine Person hat mehrere Zeilen je Option).
+   */
   stimmenGesamt: number;
-  /** Davon Stimmen mit war_verifiziert = true. */
+  /** Davon wohnsitz-verifiziert (war_verifiziert-Snapshot). */
   stimmenVerifiziert: number;
 }
 
 /**
- * Alle Umfragen des Tenants (jeden Status), neu→alt, jeweils mit Stimmenzählern
- * (gesamt + verifiziert). Tenant-scoped. Nur für Admin-Sichten gedacht — die
- * Aufrufer-Seite erzwingt die Admin-Berechtigung serverseitig.
+ * Alle Umfragen des Tenants (jeden Status), neu→alt, jeweils mit Teilnahme-
+ * Zählern (gesamt + verifiziert). Tenant-scoped. Nur für Admin-Sichten gedacht —
+ * die Aufrufer-Seite erzwingt die Admin-Berechtigung serverseitig.
  *
- * Effizient: EINE Aggregations-Query über votes (GROUP BY poll_id) statt N+1.
+ * Deckt ALLE Abstimm-Formate ab (Gate-B MAJOR Block G): Ja/Nein zählt votes-
+ * Zeilen, Dot/Widerstand zählen DISTINCT voter_ref aus vote_allocations bzw.
+ * vote_resistances — sonst zeigt die Verwaltung für diese Formate dauerhaft
+ * „0 Stimmen" und ein Admin schließt eine laufende Umfrage im Glauben, niemand
+ * habe teilgenommen. Je Poll ist genau eine Quelle befüllt (typ-Gates der
+ * Actions), die Summen addieren sich daher verlustfrei.
+ *
+ * Effizient: DREI Aggregations-Queries (GROUP BY poll_id) statt N+1.
  * Anschließend per Map zugeordnet (wie getMeineTeilnahmen). Keine Roh-SQL-Dates —
  * es werden keine Zeit-Parameter gebunden (nur status/tenant-Filter).
  */
@@ -535,6 +657,7 @@ export async function getAllPollsForAdmin(
       regionPath: sql<string>`${regions.path}::text`,
       status: polls.status,
       verbindlich: polls.verbindlich,
+      typ: polls.typ,
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
       createdAt: polls.createdAt,
@@ -546,32 +669,64 @@ export async function getAllPollsForAdmin(
 
   if (pollRows.length === 0) return [];
 
-  // Aggregation in EINEM Rutsch: gesamt + verifiziert je Poll (tenant-scoped).
-  // FILTER (WHERE war_verifiziert) zählt nur verifizierte Stimmen.
-  const aggRows = await db
-    .select({
-      pollId: votes.pollId,
-      gesamt: count(),
-      verifiziert: sql<number>`count(*) filter (where ${votes.warVerifiziert})`.mapWith(
-        Number
-      ),
-    })
-    .from(votes)
-    .where(eq(votes.tenantId, tenantId))
-    .groupBy(votes.pollId);
-
   type AggRow = { pollId: string; gesamt: number; verifiziert: number };
-  const aggByPoll = new Map<string, AggRow>(
-    (aggRows as AggRow[]).map((r) => [r.pollId, r])
-  );
+
+  // Aggregation je Format in EINEM Rutsch (tenant-scoped). FILTER (WHERE
+  // war_verifiziert) zählt nur Verifizierte; bei den Options-Formaten DISTINCT
+  // voter_ref, da eine Person eine Zeile JE OPTION hat.
+  const [voteAgg, allocAgg, resistAgg] = await Promise.all([
+    db
+      .select({
+        pollId: votes.pollId,
+        gesamt: count(),
+        verifiziert: sql<number>`count(*) filter (where ${votes.warVerifiziert})`.mapWith(
+          Number
+        ),
+      })
+      .from(votes)
+      .where(eq(votes.tenantId, tenantId))
+      .groupBy(votes.pollId),
+    db
+      .select({
+        pollId: voteAllocations.pollId,
+        gesamt: sql<number>`count(distinct ${voteAllocations.voterRef})`.mapWith(Number),
+        verifiziert: sql<number>`count(distinct ${voteAllocations.voterRef}) filter (where ${voteAllocations.warVerifiziert})`.mapWith(
+          Number
+        ),
+      })
+      .from(voteAllocations)
+      .where(eq(voteAllocations.tenantId, tenantId))
+      .groupBy(voteAllocations.pollId),
+    db
+      .select({
+        pollId: voteResistances.pollId,
+        gesamt: sql<number>`count(distinct ${voteResistances.voterRef})`.mapWith(Number),
+        verifiziert: sql<number>`count(distinct ${voteResistances.voterRef}) filter (where ${voteResistances.warVerifiziert})`.mapWith(
+          Number
+        ),
+      })
+      .from(voteResistances)
+      .where(eq(voteResistances.tenantId, tenantId))
+      .groupBy(voteResistances.pollId),
+  ]);
+
+  const aggByPoll = new Map<string, AggRow>();
+  for (const r of [...voteAgg, ...allocAgg, ...resistAgg] as AggRow[]) {
+    const bisher = aggByPoll.get(r.pollId);
+    aggByPoll.set(r.pollId, {
+      pollId: r.pollId,
+      gesamt: (bisher?.gesamt ?? 0) + Number(r.gesamt),
+      verifiziert: (bisher?.verifiziert ?? 0) + Number(r.verifiziert),
+    });
+  }
 
   type PollRow = (typeof pollRows)[number];
   return pollRows.map((p: PollRow) => {
     const agg = aggByPoll.get(p.id);
     return {
       ...p,
-      stimmenGesamt: agg ? Number(agg.gesamt) : 0,
-      stimmenVerifiziert: agg ? Number(agg.verifiziert) : 0,
+      stimmenGesamt: agg ? agg.gesamt : 0,
+      stimmenVerifiziert: agg ? agg.verifiziert : 0,
     };
   });
 }

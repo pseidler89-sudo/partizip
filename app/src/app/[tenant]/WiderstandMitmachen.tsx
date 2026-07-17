@@ -1,27 +1,30 @@
 "use client";
 
 /**
- * DotMitmachen.tsx — Abstimm-/Ergebnis-UI für Dot-/Budget-Voting (ADR-025).
+ * WiderstandMitmachen.tsx — Abstimm-/Ergebnis-UI für die Widerstandsabfrage /
+ * Systemisches Konsensieren (ADR-025).
  *
- * Isoliert vom Ja/Nein-PollMitmachen. Barrierearm (ADR-025): Punkte werden je
- * Option per Stepper/Zahlenfeld verteilt — KEIN Drag&Drop, voll tastatur- und
- * screenreaderbedienbar. Ergebnis = Aggregat-Verteilung (nie ein individuelles
- * Muster), erst nach Ende + ab Mindest-N sichtbar (serverseitig durchgesetzt).
+ * Isoliert vom Ja/Nein-PollMitmachen und DotMitmachen. Barrierearm (ADR-025):
+ * je Option ein beschrifteter Slider 0–10 mit sichtbarem Zahlenwert — KEIN
+ * Drag&Drop-Zwang, voll tastatur- und screenreaderbedienbar (range = Pfeiltasten).
+ * Vollständige Abgabe: ALLE Optionen werden mitgesendet (Default 0 = „keine
+ * Einwände" ist eine legitime Aussage — keine Pflicht-Interaktion je Slider).
+ * Ergebnis = Aggregat (Gesamtwiderstand + Ø je Option), erst nach Ende + ab
+ * Mindest-N sichtbar (serverseitig durchgesetzt); geringster Widerstand gewinnt.
  */
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { dotAbstimmen } from "@/lib/polls/actions";
-import type { DotVotingErgebnis } from "@/lib/polls/dot";
+import { widerstandAbstimmen } from "@/lib/polls/actions";
+import type { WiderstandsErgebnis } from "@/lib/polls/widerstand";
 
 const OPEN_LOGIN_EVENT = "pz:open-login";
 
 interface Props {
   pollId: string;
-  budget: number;
   optionen: { id: string; label: string }[];
-  ergebnis: DotVotingErgebnis;
+  ergebnis: WiderstandsErgebnis;
   tenantSlug: string;
   eingeloggt: boolean;
   verifiziert: boolean;
@@ -30,9 +33,20 @@ interface Props {
   demoMode?: boolean;
 }
 
-export default function DotMitmachen({
+/**
+ * Sprechende Slider-Ansage für Screenreader (aria-valuetext). Benannt sind NUR
+ * die Endpunkte — exakt wie die sichtbare Legende („0 keine Einwände / 10
+ * starker Widerstand"), damit sehende und nicht-sehende Nutzer dieselbe
+ * Skalen-Semantik bekommen (Gate-B-A11y-Fund: 8–9 klangen sonst wie 10).
+ */
+function wertAnsage(wert: number): string {
+  const endpunkt =
+    wert === 0 ? " — keine Einwände" : wert === 10 ? " — starker Widerstand" : "";
+  return `Widerstand ${wert} von 10${endpunkt}`;
+}
+
+export default function WiderstandMitmachen({
   pollId,
-  budget,
   optionen,
   ergebnis,
   tenantSlug,
@@ -43,6 +57,7 @@ export default function DotMitmachen({
   demoMode = false,
 }: Props) {
   const router = useRouter();
+  // Default 0 je Option = „keine Einwände" — eine legitime, vollständige Abgabe.
   const [werte, setWerte] = useState<Record<string, number>>(() =>
     Object.fromEntries(optionen.map((o) => [o.id, 0])),
   );
@@ -51,27 +66,17 @@ export default function DotMitmachen({
   const [error, setError] = useState<string | null>(null);
   const [beleg, setBeleg] = useState<string | null>(null);
 
-  const vergeben = useMemo(() => Object.values(werte).reduce((a, b) => a + b, 0), [werte]);
-  const verbleibend = budget - vergeben;
-
   // Verbindliche Abstimmung ohne Verifizierung: serverseitig gesperrt → Hinweis.
   const gesperrtUnverifiziert = verbindlich && eingeloggt && !verifiziert;
   const kannAbstimmen = eingeloggt && !bereitsAbgestimmt && !gesperrtUnverifiziert && phase === "frage";
 
-  function setWert(id: string, next: number) {
-    const clamped = Math.max(0, Math.min(budget, Math.floor(next || 0)));
-    setWerte((w) => ({ ...w, [id]: clamped }));
-  }
-
   async function absenden() {
-    if (vergeben < 1 || vergeben > budget) return;
     setError(null);
     setSubmitting(true);
     try {
-      const allocations = optionen
-        .map((o) => ({ optionId: o.id, punkte: werte[o.id] ?? 0 }))
-        .filter((a) => a.punkte > 0);
-      const res = await dotAbstimmen(pollId, allocations);
+      // Vollständige Abgabe: ALLE Optionen mitsenden (auch wert=0).
+      const abgabe = optionen.map((o) => ({ optionId: o.id, wert: werte[o.id] ?? 0 }));
+      const res = await widerstandAbstimmen(pollId, abgabe);
       if (res.needLogin) {
         window.dispatchEvent(new Event(OPEN_LOGIN_EVENT));
         return;
@@ -101,7 +106,7 @@ export default function DotMitmachen({
             Diese verbindliche Abstimmung ist wohnsitz-verifizierten Bürger:innen vorbehalten.
           </p>
         )}
-        <DotErgebnisAnzeige ergebnis={ergebnis} beleg={beleg} />
+        <WiderstandsErgebnisAnzeige ergebnis={ergebnis} beleg={beleg} />
         {!eingeloggt && (
           <div className="mt-5 border-t border-[color:var(--pz-line)] pt-5 text-center">
             <p className="text-sm font-medium" style={{ color: "var(--pz-ink)" }}>Möchten Sie mitstimmen?</p>
@@ -123,53 +128,46 @@ export default function DotMitmachen({
   }
 
   // -------------------------------------------------------------------------
-  // Abstimm-Widget (Punkte verteilen)
+  // Abstimm-Widget (Widerstandswerte vergeben)
   // -------------------------------------------------------------------------
   return (
     <div>
       <p className="text-sm" style={{ color: "var(--pz-body)" }}>
-        Verteilen Sie <b style={{ color: "var(--pz-ink)" }}>{budget} Punkte</b> auf die Optionen —
-        Sie können alles auf eine Option setzen oder aufteilen.
+        Geben Sie für jede Option an, wie stark Ihr Widerstand ist —{" "}
+        <b style={{ color: "var(--pz-ink)" }}>0 = keine Einwände, 10 = starker Widerstand</b>.
+        Es gewinnt die Option mit dem geringsten Gesamtwiderstand.
       </p>
-      <p aria-live="polite" className="mt-1 text-sm font-medium" style={{ color: verbleibend < 0 ? "#b91c1c" : "var(--pz-brand-strong)" }}>
-        Verbleibend: {verbleibend} von {budget}
+      <p className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
+        Skala: 0 keine Einwände / 10 starker Widerstand
       </p>
 
-      <ul className="mt-4 space-y-3">
+      <ul className="mt-4 space-y-4">
         {optionen.map((o) => {
           const wert = werte[o.id] ?? 0;
+          const sliderId = `widerstand-${o.id}`;
           return (
-            <li key={o.id} className="flex items-center gap-3">
-              <span className="min-w-0 flex-1 text-sm" style={{ color: "var(--pz-ink)" }}>{o.label}</span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setWert(o.id, wert - 1)}
-                  disabled={wert <= 0 || submitting}
-                  aria-label={`Ein Punkt weniger für ${o.label}`}
-                  className="flex h-8 w-8 items-center justify-center rounded-md border text-lg leading-none disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
-                  style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
-                >−</button>
+            <li key={o.id}>
+              <label htmlFor={sliderId} className="text-sm" style={{ color: "var(--pz-ink)" }}>
+                {o.label}
+              </label>
+              <div className="mt-1 flex items-center gap-3">
                 <input
-                  type="number"
-                  inputMode="numeric"
+                  id={sliderId}
+                  type="range"
                   min={0}
-                  max={budget}
+                  max={10}
+                  step={1}
                   value={wert}
                   disabled={submitting}
-                  onChange={(e) => setWert(o.id, Number(e.target.value))}
-                  aria-label={`Punkte für ${o.label}`}
-                  className="w-14 rounded-md border px-2 py-1.5 text-center text-sm tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
-                  style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
+                  onChange={(e) => setWerte((w) => ({ ...w, [o.id]: Number(e.target.value) }))}
+                  aria-label={`Widerstand für ${o.label}`}
+                  aria-valuetext={wertAnsage(wert)}
+                  className="w-full accent-[color:var(--tenant-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
                 />
-                <button
-                  type="button"
-                  onClick={() => setWert(o.id, wert + 1)}
-                  disabled={verbleibend <= 0 || submitting}
-                  aria-label={`Ein Punkt mehr für ${o.label}`}
-                  className="flex h-8 w-8 items-center justify-center rounded-md border text-lg leading-none disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
-                  style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
-                >+</button>
+                {/* Sichtbarer Zahlenwert neben dem Slider (output-artig). */}
+                <span className="w-14 shrink-0 text-right text-sm tabular-nums" style={{ color: "var(--pz-ink)" }}>
+                  {wert} / 10
+                </span>
               </div>
             </li>
           );
@@ -185,14 +183,16 @@ export default function DotMitmachen({
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
+        {/* Direkt aktiv: 0 überall ist eine gültige, vollständige Abgabe —
+            keine Pflicht-Interaktion je Slider. */}
         <button
           type="button"
           onClick={absenden}
-          disabled={vergeben < 1 || vergeben > budget || submitting}
+          disabled={submitting}
           className="inline-flex items-center rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
           style={{ backgroundColor: "var(--tenant-primary)" }}
         >
-          {submitting ? "…" : "Punkte abgeben"}
+          {submitting ? "…" : "Bewertung abgeben"}
         </button>
         <button
           type="button"
@@ -207,14 +207,17 @@ export default function DotMitmachen({
   );
 }
 
-/** Aggregat-Verteilung + Teilnahme (Top-Level, damit keine Komponente im Render entsteht). */
-function DotErgebnisAnzeige({
+/** Aggregat + Teilnahme (Top-Level, damit keine Komponente im Render entsteht). */
+function WiderstandsErgebnisAnzeige({
   ergebnis,
   beleg,
 }: {
-  ergebnis: DotVotingErgebnis;
+  ergebnis: WiderstandsErgebnis;
   beleg: string | null;
 }) {
+  // Balken relativ zur größten Summe (größter Widerstand = voller Balken);
+  // maxSumme 0 (überall „keine Einwände") → alle Balken leer.
+  const maxSumme = Math.max(0, ...ergebnis.optionen.map((o) => o.widerstandsSumme ?? 0));
   return (
     <div>
       <p className="text-sm" style={{ color: "var(--pz-body)" }}>
@@ -230,25 +233,39 @@ function DotErgebnisAnzeige({
           {ergebnis.zurueckhaltungsGrund === "zu_wenige_teilnehmende"
             ? // Tritt nur NACH Abstimmungsende auf — kein „sobald genügend
               // mitmachen"-Versprechen, das niemand mehr einlösen kann (Gate-B).
-              "Es haben zu wenige Personen teilgenommen — die Verteilung bleibt zum Schutz kleiner Gruppen ausgeblendet."
-            : "Die Verteilung der Punkte wird nach Abstimmungsende angezeigt. Die Teilnahme können Sie schon sehen."}
+              "Es haben zu wenige Personen teilgenommen — die Auswertung bleibt zum Schutz kleiner Gruppen ausgeblendet."
+            : "Die Auswertung wird nach Abstimmungsende angezeigt. Die Teilnahme können Sie schon sehen."}
         </p>
       ) : (
         <ul className="mt-4 space-y-3">
           {ergebnis.optionen.map((o) => (
             <li key={o.optionId}>
               <div className="flex items-baseline justify-between gap-2 text-sm">
-                <span style={{ color: "var(--pz-ink)" }}>{o.label}</span>
-                <span className="tabular-nums" style={{ color: "var(--pz-muted)" }}>
-                  {o.maskiert
-                    ? "zum Schutz kleiner Gruppen ausgeblendet"
-                    : `${o.punkteSumme} Punkte${o.prozent != null ? ` · ${o.prozent}%` : ""}`}
+                <span className="min-w-0" style={{ color: "var(--pz-ink)" }}>
+                  {o.label}
+                  {o.geringsterWiderstand && (
+                    <span className="pz-badge-success ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium align-middle">
+                      Geringster Widerstand
+                    </span>
+                  )}
+                </span>
+                <span className="shrink-0 tabular-nums" style={{ color: "var(--pz-muted)" }}>
+                  {o.maskiert ? (
+                    "zum Schutz kleiner Gruppen ausgeblendet"
+                  ) : (
+                    <>Gesamtwiderstand {o.widerstandsSumme} · Ø {o.mittelwert}</>
+                  )}
                 </span>
               </div>
-              <div className="mt-1 h-2.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: "var(--pz-line)" }}>
+              <div className="mt-1 h-2.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: "var(--pz-neutral-soft)" }}>
                 <div
                   className="h-full rounded-full"
-                  style={{ width: `${o.prozent ?? 0}%`, backgroundColor: "var(--tenant-primary)" }}
+                  style={{
+                    width: `${maxSumme > 0 ? ((o.widerstandsSumme ?? 0) / maxSumme) * 100 : 0}%`,
+                    // Gewinner (geringster Widerstand) in Tenant-Farbe, Rest neutral —
+                    // der Balken misst Widerstand, nicht Zustimmung.
+                    backgroundColor: o.geringsterWiderstand ? "var(--tenant-primary)" : "var(--pz-muted)",
+                  }}
                   aria-hidden
                 />
               </div>
@@ -260,7 +277,7 @@ function DotErgebnisAnzeige({
       {beleg && (
         <p className="mt-4 rounded-lg border border-dashed p-3 text-sm" style={{ borderColor: "var(--pz-line)", color: "var(--pz-body)" }}>
           Ihr Beleg-Code: <span className="font-mono font-semibold" style={{ color: "var(--pz-ink)" }}>{beleg}</span>{" "}
-          — bewahren Sie ihn auf; er beweist, dass Ihre Stimme zählt, verrät aber nicht, wie Sie verteilt haben.
+          — bewahren Sie ihn auf; er beweist, dass Ihre Stimme zählt, verrät aber nicht, wie Sie bewertet haben.
         </p>
       )}
     </div>

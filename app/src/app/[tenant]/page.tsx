@@ -29,6 +29,7 @@ import {
   hatBereitsAbgestimmt,
   hatBereitsAbgestimmtBatch,
   hatBereitsDotAbgestimmt,
+  hatBereitsWiderstandAbgestimmt,
   mitErgebnissen,
   type PollMitErgebnis,
 } from "@/lib/polls/queries";
@@ -38,7 +39,7 @@ import type { PollErgebnis } from "@/lib/polls/ergebnis";
 import { REGION_COOKIE_NAME, parseRegionCookie } from "@/lib/region/core";
 import { getOrtsteileForTenant } from "@/lib/region/queries";
 import PollMitmachen from "./PollMitmachen";
-import { KurzErgebnisDot } from "./KurzErgebnisDot";
+import { KurzErgebnisTeilnahme } from "./KurzErgebnisTeilnahme";
 import StufenFortschritt from "./StufenFortschritt";
 import PollStatusChip from "./PollStatusChip";
 import { PollTypBadge } from "./PollTypBadge";
@@ -132,14 +133,22 @@ function PollKarte({
       <h4 className="mt-2 text-sm font-semibold" style={{ color: "var(--pz-ink)" }}>
         {poll.frage}
       </h4>
-      {/* Dot-Voting hat kein Ja/Nein-Aggregat — Teilnahme-Zeile aus dem
-          Dot-Ergebnis (M1-Nachzug Block F) statt fälschlich „Noch keine Stimmen". */}
+      {/* Options-Formate haben kein Ja/Nein-Aggregat — Teilnahme-Zeile aus dem
+          Format-Ergebnis (M1-Nachzug Block F) statt fälschlich „Noch keine Stimmen". */}
       {poll.typ === "dot_voting" ? (
         poll.dot ? (
-          <KurzErgebnisDot ergebnis={poll.dot} />
+          <KurzErgebnisTeilnahme ergebnis={poll.dot} />
         ) : (
           <div className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
             Punkte-Voting — verteilen Sie Ihre Punkte auf die Optionen
+          </div>
+        )
+      ) : poll.typ === "widerstandsabfrage" ? (
+        poll.widerstand ? (
+          <KurzErgebnisTeilnahme ergebnis={poll.widerstand} />
+        ) : (
+          <div className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
+            Widerstandsabfrage — bewerten Sie jede Option von 0 bis 10
           </div>
         )
       ) : (
@@ -275,19 +284,24 @@ export default async function TenantLandingPage({ params }: PageProps) {
   // Hero erscheint, die in der gruppierten Sicht ausgeblendet wäre.
   const featured = alleMitErgebnis[0] ?? null;
   const featuredErgebnis = featured?.ergebnis ?? null;
-  // Teilnahme-Signal fürs Hero: Dot-Polls zählen Teilnehmende (distinct Wähler),
-  // Ja/Nein-Polls Stimmen — beide laut ADR-022/-025 immer sichtbar.
+  // Teilnahme-Signal fürs Hero: Options-Format-Polls zählen Teilnehmende
+  // (distinct Wähler), Ja/Nein-Polls Stimmen — alle laut ADR-022/-025 immer sichtbar.
   const featuredTeilnahmen =
     featured?.typ === "dot_voting"
       ? featured.dot?.gesamtWaehler ?? 0
-      : featuredErgebnis?.gesamt ?? 0;
-  // Teilnahme-Prüfung typ-abhängig: Dot-Teilnahmen liegen NUR in
-  // vote_allocations — die votes-Query wäre bei dot systematisch falsch-negativ
-  // (Gate-B MINOR). Beide Queries liefern nur das OB (Secret Ballot).
+      : featured?.typ === "widerstandsabfrage"
+        ? featured.widerstand?.gesamtWaehler ?? 0
+        : featuredErgebnis?.gesamt ?? 0;
+  // Teilnahme-Prüfung typ-abhängig: Dot-/Widerstands-Teilnahmen liegen NUR in
+  // vote_allocations bzw. vote_resistances — die votes-Query wäre dort
+  // systematisch falsch-negativ (Gate-B MINOR). Alle Queries liefern nur das
+  // OB (Secret Ballot).
   const bereitsAbgestimmt = featured
     ? featured.typ === "dot_voting"
       ? await hatBereitsDotAbgestimmt(db, tenant, featured.id, { userId })
-      : await hatBereitsAbgestimmt(db, tenant, featured.id, { userId })
+      : featured.typ === "widerstandsabfrage"
+        ? await hatBereitsWiderstandAbgestimmt(db, tenant, featured.id, { userId })
+        : await hatBereitsAbgestimmt(db, tenant, featured.id, { userId })
     : false;
 
   // Nach Ebene gruppiert, ohne die Featured-Frage doppelt zu zeigen.
@@ -355,16 +369,20 @@ export default async function TenantLandingPage({ params }: PageProps) {
               </p>
 
               <div className="mx-auto mt-7 max-w-lg pz-card p-6 text-left">
-                {featured.typ === "dot_voting" ? (
-                  // Dot-Voting: die Punkte-Verteilung lebt auf der Detailseite
-                  // (barrierearmes Stepper-Widget) — im Hero nur der Einstieg.
+                {featured.typ !== "ja_nein_enthaltung" ? (
+                  // Options-Formate: das Abstimm-Widget lebt auf der Detailseite
+                  // (barrierearme Stepper/Slider) — im Hero nur der Einstieg.
                   // Bereits Teilgenommene sehen das ehrlich (kein zweiter
-                  // „Verteilen Sie"-Aufruf, Gate-B MINOR).
+                  // Mitmach-Aufruf, Gate-B MINOR).
                   <div className="text-center">
                     <p className="text-sm" style={{ color: "var(--pz-body)" }}>
                       {bereitsAbgestimmt
-                        ? "Sie haben Ihre Punkte bereits verteilt — danke fürs Mitmachen!"
-                        : "Punkte-Voting: Verteilen Sie Ihre Punkte auf die Optionen."}
+                        ? featured.typ === "dot_voting"
+                          ? "Sie haben Ihre Punkte bereits verteilt — danke fürs Mitmachen!"
+                          : "Sie haben bereits bewertet — danke fürs Mitmachen!"
+                        : featured.typ === "dot_voting"
+                          ? "Punkte-Voting: Verteilen Sie Ihre Punkte auf die Optionen."
+                          : "Widerstandsabfrage: Bewerten Sie jede Option von 0 bis 10 — die Option mit dem geringsten Gesamtwiderstand gewinnt."}
                     </p>
                     <Link
                       href={`/${slug}/umfrage/${featured.id}`}

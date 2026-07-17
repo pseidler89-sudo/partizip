@@ -1059,10 +1059,13 @@ export const pollStatusEnum = pgEnum("poll_status", [
 
 // Beteiligungsformate (ADR-025). ja_nein_enthaltung = binäres Stimmungsbild;
 // dot_voting = Punkte-/Budget-Verteilung auf mehrere Optionen (Ergebnis =
-// Verteilung, kein Einzelsieger). Bewusst erweiterbar (Widerstandsabfrage folgt).
+// Verteilung, kein Einzelsieger); widerstandsabfrage = Systemisches Konsensieren
+// (je Option ein Widerstandswert 0–10; es gewinnt der GERINGSTE Gesamtwiderstand
+// — Konsens statt Mehrheitssieg). Bewusst erweiterbar (Statement-Voting folgt).
 export const pollTypeEnum = pgEnum("poll_type", [
   "ja_nein_enthaltung",
   "dot_voting",
+  "widerstandsabfrage",
 ]);
 
 export const polls = pgTable(
@@ -1082,7 +1085,8 @@ export const polls = pgTable(
     frage: text("frage").notNull(),
     typ: pollTypeEnum("typ").notNull().default("ja_nein_enthaltung"),
     // Nur dot_voting: Punktekontingent je Wähler (Budget), das auf die Optionen
-    // verteilt wird. NULL für ja_nein_enthaltung. Validierung serverseitig.
+    // verteilt wird. NULL für ja_nein_enthaltung UND widerstandsabfrage.
+    // Validierung serverseitig.
     punkteBudget: integer("punkte_budget"),
     status: pollStatusEnum("status").notNull().default("entwurf"),
     // Verbindlich = nur Stufe≥2 dürfen abstimmen (sonst unverbindliches Stimmungsbild)
@@ -1208,6 +1212,47 @@ export const voteAllocations = pgTable(
     index("idx_vote_allocations_tenant_voter").on(t.tenantId, t.voterRef),
     // Punkte müssen positiv sein (0-Zuteilungen gar nicht erst speichern).
     check("vote_allocations_punkte_positiv", sql`${t.punkte} > 0`),
+  ]
+);
+
+// Widerstandswert eines Wählers für eine Option (widerstandsabfrage, ADR-025).
+// EINE Zeile je (Wähler, Option) — und zwar für JEDE Option der Umfrage: die
+// vollständige Abgabe ist die Invariante (sichert die Action), sonst wäre die
+// Summen-Auswertung verzerrt. Deshalb WIRD wert=0 („keine Einwände") gespeichert
+// — anders als bei vote_allocations, wo 0-Zuteilungen entfallen.
+// Wie votes/vote_allocations: voter_ref-Pseudonym (kein User-FK, Secret Ballot),
+// Tenant-Redundanz, immutable. UNIQUE(poll, voter, option) gegen Doppelabgaben.
+export const voteResistances = pgTable(
+  "vote_resistances",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    pollId: uuid("poll_id")
+      .notNull()
+      .references(() => polls.id, { onDelete: "cascade" }),
+    // Tenant-Redundanz für direkte Tenant-Isolation in JEDER Query
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    optionId: uuid("option_id")
+      .notNull()
+      .references(() => pollOptions.id, { onDelete: "cascade" }),
+    // Pseudonym: HMAC(SALT, domain) — kein User-FK (Secret Ballot).
+    voterRef: text("voter_ref").notNull(),
+    // Widerstandswert 0–10 (0 = keine Einwände, 10 = starker Widerstand).
+    // 0 WIRD gespeichert — vollständige Abgabe je Wähler ist die Invariante.
+    wert: integer("wert").notNull(),
+    // Snapshot Stufe≥2 bei Abgabe (wie votes.war_verifiziert).
+    warVerifiziert: boolean("war_verifiziert").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (t) => [
+    // Genau ein Widerstandswert je (Umfrage, Wähler, Option).
+    unique("vote_resistances_poll_voter_option_unique").on(t.pollId, t.voterRef, t.optionId),
+    index("idx_vote_resistances_poll").on(t.pollId),
+    index("idx_vote_resistances_tenant_poll").on(t.tenantId, t.pollId),
+    index("idx_vote_resistances_tenant_voter").on(t.tenantId, t.voterRef),
+    // Wertebereich als letztes Sicherheitsnetz (serverseitig ohnehin validiert).
+    check("vote_resistances_wert_bereich", sql`${t.wert} >= 0 AND ${t.wert} <= 10`),
   ]
 );
 
