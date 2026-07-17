@@ -29,17 +29,27 @@ import { cookies, headers } from "next/headers";
 import { and, eq, gt, like, sql } from "drizzle-orm";
 import { count } from "drizzle-orm";
 import { createDb, type Db } from "@/db/client";
-import { users, sessions, auditEvents, rateLimitEvents } from "@/db/schema";
+import { users, sessions, roles, auditEvents, rateLimitEvents } from "@/db/schema";
 import { generateRawToken, sha256Hex, hmacRateLimit } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getTenantFromHost } from "@/lib/tenant";
 import { getClientIp, databaseUrl } from "@/lib/auth/action-context";
+import { getUserRoleTypes, isAdmin } from "@/lib/auth/roles";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { isDemoTenant, DEMO_EMAIL_DOMAIN } from "@/lib/demo/config";
 
 const DEMO_SESSION_TTL_HOURS = 12; // Reset läuft nächtlich — kurz halten.
 const IP_WINDOW_MIN = 15;
 const IP_MAX_SESSIONS = 5; // je IP und Viertelstunde
 const DAILY_CAP = 500; // Demo-Konten je Tenant und 24 h (globaler Notdeckel)
+
+// Deckel der VERWALTUNGS-Perspektive — bewusst STRENGER als die Bürger-Session:
+// jedes Konto erhält eine echte kommune_admin-Rolle (Admin-Fläche = größere
+// Angriffsfläche: Composer, Lebenszyklus, QR-Erzeugung). Die Side-Effect-Fences
+// kappen die Außenwirkung, aber weniger Wegwerf-Admins = weniger Spielraum.
+const ADMIN_IP_MAX_SESSIONS = 3; // je IP und Viertelstunde
+const ADMIN_DAILY_CAP = 100; // Verwaltungs-Konten je Tenant und 24 h
+const ADMIN_EMAIL_PREFIX = "demo-verwaltung-"; // unterscheidet Admin- von Bürger-Konten
 
 export interface DemoSessionResult {
   ok: boolean;
@@ -166,6 +176,185 @@ export async function demoSessionStarten(): Promise<DemoSessionResult> {
       actorType: "user",
       actorRef: user.id,
       action: "demo.session_created",
+      metadata: { tenant: tenant.slug },
+    });
+
+    return user;
+  });
+  if (!created) return { ok: false, error: "Demo-Start fehlgeschlagen." };
+
+  cookieStore.set(SESSION_COOKIE_NAME, rawSessionToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    expires: expiresAt,
+    secure: process.env.NODE_ENV === "production",
+  });
+
+  return { ok: true };
+}
+
+/**
+ * Erzeugt ein ephemeres VERWALTUNGS-Konto (kommune_admin) + Session-Cookie —
+ * NUR auf dem Demo-Mandanten (Perspektiv-Umschalter des Demo-Rundgangs,
+ * ONBOARDING-Spec Teil 1 §1: hands-on Frage erstellen → aktivieren → schließen).
+ *
+ * SICHERHEITS-KERN (zusätzlich zum Kopfkommentar der Datei):
+ *   - Die Rolle ist IMMER kommune_admin, NIEMALS super_admin — die
+ *     Eskalationsgrenze (canManageRole) bleibt damit auch auf der Spielwiese
+ *     intakt; Reserve-Rollen sind unerreichbar.
+ *   - Echte Außenwirkung verhindern NICHT diese Rolle, sondern die
+ *     Side-Effect-Fences (digest/actions, polls/actions, invitation-actions):
+ *     isDemoTenant ⇒ keine Kanal-Posts, keine Benachrichtigungs-/Einladungs-Mails.
+ *   - Strengere Deckel als die Bürger-Session (eigener Scope
+ *     "demo_admin_session", 3/15 min je IP, 100/24 h) — Admin-Fläche.
+ *   - Der nächtliche Reset löscht die Konten (@demo.invalid, Rollen/Sessions
+ *     CASCADE) UND ihre Spielstände (Nicht-Seed-Polls, QR-Codes).
+ *
+ * Idempotenz: besteht bereits eine gültige Session, deren User Admin im
+ * Demo-Tenant ist → ok ohne Neuanlage. Eine BÜRGER-Demo-Session wird durch die
+ * neue Verwaltungs-Session ersetzt (Cookie überschrieben; die alte Session
+ * verwaist bewusst — TTL 12 h bzw. der nächtliche Reset räumen sie ab).
+ */
+export async function demoVerwaltungStarten(): Promise<DemoSessionResult> {
+  const headerStore = await headers();
+  const host = headerStore.get("host") ?? "localhost";
+  const tenant = await getTenantFromHost(host);
+  if (!tenant) return { ok: false, error: "Diese Seite ist nicht erreichbar." };
+
+  // HARTES Gate: nur der Demo-Mandant. Kein Client-Input, nur Host-Auflösung.
+  if (!isDemoTenant(tenant.slug)) {
+    return { ok: false, error: "Diese Funktion gibt es nur auf der Demo." };
+  }
+
+  const db = createDb(databaseUrl());
+
+  // Idempotenz: gültige Session, deren Konto bereits Admin ist → nichts zu tun.
+  // Eine gültige BÜRGER-Session fällt hier durch und wird unten ersetzt.
+  const cookieStore = await cookies();
+  const existingRaw = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  if (existingRaw) {
+    const rows = await db
+      .select({
+        userId: sessions.userId,
+        revokedAt: sessions.revokedAt,
+        expiresAt: sessions.expiresAt,
+      })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.tokenHash, sha256Hex(existingRaw)),
+          eq(sessions.tenantId, tenant.id),
+        ),
+      )
+      .limit(1);
+    const s = rows[0];
+    if (s && !s.revokedAt && s.expiresAt >= new Date()) {
+      const roleTypes = await getUserRoleTypes(db, tenant.id, s.userId);
+      if (isAdmin(roleTypes)) return { ok: true };
+    }
+  }
+
+  // --- Missbrauchsdeckel 1: IP-Rate-Limit (eigener Scope, strenger) ---------
+  // Gleiche IP-Semantik wie demoSessionStarten (letztes x-forwarded-for-Element
+  // vom eigenen Proxy). Eigener Scope, damit Bürger-Demo-Starts den Admin-Deckel
+  // nicht auffüllen und umgekehrt.
+  const ip = await getClientIp();
+  if (ip) {
+    const keyHash = hmacRateLimit(ip);
+    await db.insert(rateLimitEvents).values([{ scope: "demo_admin_session", keyHash }]);
+    const since = new Date(Date.now() - IP_WINDOW_MIN * 60 * 1000);
+    const n = await db
+      .select({ n: count() })
+      .from(rateLimitEvents)
+      .where(
+        and(
+          eq(rateLimitEvents.scope, "demo_admin_session"),
+          eq(rateLimitEvents.keyHash, keyHash),
+          gt(rateLimitEvents.createdAt, since),
+        ),
+      );
+    if ((n[0]?.n ?? 0) > ADMIN_IP_MAX_SESSIONS) {
+      return {
+        ok: false,
+        error: "Zu viele Demo-Starts in kurzer Zeit. Bitte versuchen Sie es später erneut.",
+      };
+    }
+  }
+
+  // --- Missbrauchsdeckel 2: globaler 24-h-Cap (nur Verwaltungs-Konten) ------
+  // Gleicher NOTDECKEL-Charakter wie in demoSessionStarten (nicht atomar);
+  // gezählt werden nur die am E-Mail-Präfix erkennbaren Verwaltungs-Konten.
+  const capRows = await db
+    .select({ n: count() })
+    .from(users)
+    .where(
+      and(
+        eq(users.tenantId, tenant.id),
+        like(users.email, `${ADMIN_EMAIL_PREFIX}%@${DEMO_EMAIL_DOMAIN}`),
+        gt(users.createdAt, sql`now() - interval '24 hours'`),
+      ),
+    );
+  if ((capRows[0]?.n ?? 0) >= ADMIN_DAILY_CAP) {
+    return {
+      ok: false,
+      error: "Die Demo ist gerade stark ausgelastet. Bitte versuchen Sie es später erneut.",
+    };
+  }
+
+  // Rollen brauchen einen Gebietsknoten: der Demo-Admin wirkt stadtweit
+  // (Gemeinde-Knoten). Fehlt der Baum (Seed nicht gelaufen), lieber freundlich
+  // scheitern als still einen Knoten anzulegen (region_provision-GUC greift
+  // in Produktion nie).
+  let stadtRegionId: string;
+  try {
+    stadtRegionId = await resolveRegionIdForScope(db, tenant.id, "stadt", null);
+  } catch {
+    return { ok: false, error: "Demo-Start fehlgeschlagen — bitte später erneut versuchen." };
+  }
+
+  // --- Verwaltungs-Konto + kommune_admin-Rolle + Session (kurzlebig) --------
+  const emailToken = generateRawToken().slice(0, 16).toLowerCase();
+  const email = `${ADMIN_EMAIL_PREFIX}${emailToken}@${DEMO_EMAIL_DOMAIN}`;
+  const rawSessionToken = generateRawToken();
+  const expiresAt = new Date(Date.now() + DEMO_SESSION_TTL_HOURS * 60 * 60 * 1000);
+
+  const created = await db.transaction(async (tx: Db) => {
+    const [user] = await tx
+      .insert(users)
+      .values({
+        tenantId: tenant.id,
+        email,
+        // Demo-Ausnahme (siehe Kopfkommentar der Datei): synthetisch, Stufe 1.
+        minAgeConfirmedAt: new Date(),
+        // NIE Mail an synthetische Adressen.
+        notifyNewPolls: false,
+      })
+      .returning({ id: users.id });
+
+    // NIEMALS super_admin: kommune_admin reicht für den kompletten Hands-on-
+    // Track (Composer, Aktivieren, Schließen, Rollen-Ansicht) und hält die
+    // Eskalationsgrenze intakt.
+    await tx.insert(roles).values({
+      tenantId: tenant.id,
+      userId: user.id,
+      roleType: "kommune_admin",
+      regionId: stadtRegionId,
+    });
+
+    await tx.insert(sessions).values({
+      tenantId: tenant.id,
+      userId: user.id,
+      tokenHash: sha256Hex(rawSessionToken),
+      expiresAt,
+    });
+
+    // PII-frei (actorRef = User-UUID; die E-Mail ist ohnehin synthetisch).
+    await tx.insert(auditEvents).values({
+      tenantId: tenant.id,
+      actorType: "user",
+      actorRef: user.id,
+      action: "demo.admin_session_created",
       metadata: { tenant: tenant.slug },
     });
 

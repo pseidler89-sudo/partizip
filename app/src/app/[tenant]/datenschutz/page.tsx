@@ -178,7 +178,7 @@ export default function DatenschutzPage() {
 
       <Abschnitt titel="11. Cookies: nur funktional, kein Tracking">
         <p>
-          Wir setzen ausschließlich drei funktionale, technisch notwendige Cookies
+          Wir setzen ausschließlich vier funktionale, technisch notwendige Cookies
           ein — <strong>keine</strong> Analyse-Dienste, externen Schriftarten/CDNs
           oder Social-Media-Plugins:
         </p>
@@ -203,6 +203,16 @@ export default function DatenschutzPage() {
             Personenbezug — merkt sich ausschließlich diese Anzeige-Entscheidung.
             Rechtsgrundlage: § 25 Abs. 2 Nr. 2 TDDDG (von Ihnen ausdrücklich
             angefordert).
+          </li>
+          <li>
+            <strong>Demo-Perspektiven-Cookie <code>pz_demo_perspektive</code></strong>:
+            wird ausschließlich im Demo-Mandanten (fiktive „Musterstadt“) gesetzt,
+            wenn Sie dort in die Verwaltungs-Perspektive wechseln; Laufzeit 12
+            Stunden, fester Inhalt „verwaltung“ ohne jeden Personenbezug — merkt
+            sich nur diese Anzeige-Entscheidung. Der zugehörige Schrittzähler des
+            Demo-Rundgangs wird sitzungsgebunden im sessionStorage Ihres Browsers
+            gehalten und endet mit dem Schließen des Tabs. Rechtsgrundlage:
+            § 25 Abs. 2 Nr. 2 TDDDG (von Ihnen ausdrücklich angefordert).
           </li>
         </ul>
       </Abschnitt>

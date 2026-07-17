@@ -22,6 +22,7 @@ import { users, roles, sessions, regions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin, manageableRoleTypes, getUserRoleTypes } from "@/lib/auth/roles";
+import { isDemoTenant } from "@/lib/demo/config";
 import { einladungenListeCore } from "@/lib/admin/invitation-core";
 import Link from "next/link";
 import { RollenVerwaltung } from "./RollenVerwaltung";
@@ -151,10 +152,25 @@ export default async function AdminRollenPage({ params }: PageProps) {
       />
 
       <div className="mt-12 border-t border-zinc-200 pt-10">
-        <EinladungenVerwaltung
-          erlaubteRollen={erlaubteRollen}
-          einladungen={einladungen}
-        />
+        {/* Demo-Spielwiese: das Einladungs-Formular entfällt — die Server-Actions
+            lehnen den Versand auf dem Demo-Mandanten ohnehin ab (Side-Effect-
+            Fence gegen Spam über den echten SMTP-Server); die UI erklärt es
+            freundlich statt einen Fehler zu provozieren. */}
+        {isDemoTenant(tenant.slug) ? (
+          <div
+            className="rounded-lg border p-4 text-sm"
+            style={{ borderColor: "var(--pz-line)", color: "var(--pz-muted)" }}
+          >
+            <strong style={{ color: "var(--pz-ink)" }}>Demo-Spielwiese:</strong>{" "}
+            Einladungen sind hier deaktiviert — es werden keine echten E-Mails
+            versendet. Die Rollen des Demo-Mandanten sehen Sie oben.
+          </div>
+        ) : (
+          <EinladungenVerwaltung
+            erlaubteRollen={erlaubteRollen}
+            einladungen={einladungen}
+          />
+        )}
       </div>
     </main>
   );

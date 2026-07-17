@@ -32,6 +32,14 @@ type Op = "aktivieren" | "schliessen" | "loeschen";
 interface Props {
   pollId: string;
   status: Status;
+  /** Demo-Mandant: ehrlicher Aktivieren-Text (keine echten Benachrichtigungen). */
+  demo?: boolean;
+  /**
+   * Kuratierte Musterstadt-Seed-Frage: KEINE Aktions-Buttons rendern — sie
+   * würden nur am Seed-Guard scheitern (Gate-B MINOR-5). Die Karte kennzeichnet
+   * die Frage stattdessen als „Beispiel".
+   */
+  istBeispiel?: boolean;
 }
 
 const DIALOG: Record<
@@ -61,11 +69,30 @@ const DIALOG: Record<
   },
 };
 
-export default function PollAdminActions({ pollId, status }: Props) {
+/**
+ * Aktivieren verspricht E-Mails an Opt-in-Nutzer:innen — auf dem Demo-Mandanten
+ * wird notifyNewPoll aber gefenced (keine Außenwirkung). Ehrlicher Text statt
+ * eines uneingelösten Versprechens (Gate-B MINOR-1).
+ */
+const DEMO_AKTIVIEREN_BESCHREIBUNG =
+  "Die Abstimmung wird sofort sichtbar. In der Demo werden keine echten " +
+  "Benachrichtigungen versendet. Das lässt sich nicht zurücknehmen.";
+
+export default function PollAdminActions({ pollId, status, demo, istBeispiel }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState<null | Op>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Op | null>(null);
+
+  // Seed-Beispiel-Fragen: keine zustandsändernden Aktionen (Seed-Guard würde
+  // jede ablehnen) — die Karte kennzeichnet sie serverseitig als „Beispiel".
+  if (istBeispiel) return null;
+
+  // Beschreibung des Bestätigungsdialogs; auf Demo für „aktivieren" ehrlich.
+  function beschreibungFuer(op: Op): string {
+    if (op === "aktivieren" && demo) return DEMO_AKTIVIEREN_BESCHREIBUNG;
+    return DIALOG[op].beschreibung;
+  }
 
   const AKTIONEN: Record<Op, () => Promise<{ ok: boolean; error?: string }>> = {
     aktivieren: () => pollAktivieren(pollId),
@@ -137,7 +164,7 @@ export default function PollAdminActions({ pollId, status }: Props) {
       <BestaetigungsDialog
         offen={confirm !== null}
         titel={confirm ? DIALOG[confirm].titel : ""}
-        beschreibung={confirm ? DIALOG[confirm].beschreibung : undefined}
+        beschreibung={confirm ? beschreibungFuer(confirm) : undefined}
         bestaetigenLabel={confirm ? DIALOG[confirm].label : ""}
         variante={confirm ? DIALOG[confirm].variante : "gefahr"}
         busy={busy !== null}

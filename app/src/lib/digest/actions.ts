@@ -34,6 +34,8 @@ import { sendDigestToMastodon } from "@/lib/channels/mastodon";
 import { sendDigestToBluesky } from "@/lib/channels/bluesky";
 import type { DigestSummary } from "@/lib/channels/types";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
+import { isDemoTenant } from "@/lib/demo/config";
+import { istMusterstadtSeedDigestId } from "@/lib/demo/seed-ids";
 import { getUserRoleTypes, canRedaktion, canFreigeben } from "@/lib/auth/roles";
 import {
   freigebenCore,
@@ -214,6 +216,12 @@ export async function setStatementHighlight(
   if (rows.length === 0) return { ok: false, error: "Aussage nicht gefunden." };
   if (rows[0].digestStatus !== "entwurf") return { ok: false, error: "Highlight-Markierung nur im Status 'entwurf' möglich." };
 
+  // Seed-Schutz (Demo-Spielwiese): der kuratierte Beispiel-Digest bleibt
+  // unverändert — defensiv (er ist veröffentlicht, der Status-Guard griffe schon).
+  if (isDemoTenant(ctx.tenant.slug) && istMusterstadtSeedDigestId(ctx.tenant.slug, rows[0].digestId)) {
+    return { ok: false, error: "Dieser Beispiel-Digest gehört zum Demo-Rundgang und bleibt unverändert." };
+  }
+
   // SoD-Spur (Separation of Duties): beim SETZEN eines Highlights halten wir fest,
   // WER es gesetzt hat — redaktionelle Gewichtung zählt als Mitgestaltung, und die
   // Selbstfreigabe-Sperre in freigebenCore konsultiert diese Spur.
@@ -249,6 +257,13 @@ export async function freigeben(digestId: string): Promise<{ ok: boolean; error?
   const ctx = await getAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
 
+  // Seed-Schutz (Demo-Spielwiese): der kuratierte Beispiel-Digest ist der
+  // Anschauungs-Moment des Rundgangs und bleibt unverändert — rein defensiv
+  // (er ist bereits veröffentlicht, der Status-Guard griffe ohnehin).
+  if (isDemoTenant(ctx.tenant.slug) && istMusterstadtSeedDigestId(ctx.tenant.slug, digestId)) {
+    return { ok: false, error: "Dieser Beispiel-Digest gehört zum Demo-Rundgang und bleibt unverändert." };
+  }
+
   const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
 
   // Gesamte Kern-Logik (Rolle, Vollständigkeit, Vier-Augen-Sperre/SoD atomar im
@@ -269,6 +284,12 @@ export async function freigeben(digestId: string): Promise<{ ok: boolean; error?
 export async function veroeffentlichen(digestId: string): Promise<{ ok: boolean; error?: string }> {
   const ctx = await getAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+
+  // Seed-Schutz (Demo-Spielwiese): analog freigeben() — der Beispiel-Digest
+  // des Rundgangs bleibt für alle Besucher unverändert.
+  if (isDemoTenant(ctx.tenant.slug) && istMusterstadtSeedDigestId(ctx.tenant.slug, digestId)) {
+    return { ok: false, error: "Dieser Beispiel-Digest gehört zum Demo-Rundgang und bleibt unverändert." };
+  }
 
   const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
   if (!canFreigeben(roleTypes)) {
@@ -392,6 +413,32 @@ export async function veroeffentlichen(digestId: string): Promise<{ ok: boolean;
   });
 
   if (!result.ok) return result;
+
+  // SIDE-EFFECT-FENCE (Demo-Spielwiese, fail-closed): Auf dem Demo-Mandanten
+  // wird der Kanal-Versand KOMPLETT übersprungen. Die ECHTEN MASTODON_/BLUESKY_-
+  // Zugangsdaten liegen im selben Prozess (env-Gates sind prozessglobal) — ohne
+  // diesen Fence könnte jeder Demo-Besucher mit ephemerem Wegwerf-Admin über
+  // die souveränen Kanäle der Installation NACH AUSSEN posten. Die
+  // Veröffentlichung selbst (Status, eigene Seite) bleibt erlaubt: die Demo
+  // zeigt die volle Kette, nur die Außenwirkung ist gekappt. Im Zweifel gilt:
+  // isDemoTenant ⇒ keine Außenwirkung.
+  if (isDemoTenant(ctx.tenant.slug)) {
+    try {
+      await ctx.db.insert(auditEvents).values({
+        tenantId: ctx.tenant.id,
+        actorType: "system",
+        actorRef: null,
+        action: "digest.channels_skipped",
+        targetType: "digest",
+        targetId: digestId,
+        metadata: { grund: "demo_tenant" },
+      });
+    } catch (err) {
+      // Audit best-effort — der Digest ist bereits live, die Action bleibt ok.
+      console.error("[Kanal] Audit digest.channels_skipped fehlgeschlagen:", err);
+    }
+    return { ok: true };
+  }
 
   // Kanal-Versand (ADR-021): souveräne, offene Protokolle — Mastodon (ActivityPub,
   // primär) und Bluesky (AT, Reichweite). Beide sind no-op ohne env-Zugangsdaten.

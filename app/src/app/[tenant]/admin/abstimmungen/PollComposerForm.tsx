@@ -22,6 +22,13 @@ interface OrtsteilOption {
 
 interface Props {
   ortsteile: OrtsteilOption[];
+  /**
+   * Demo-Mandant: nur die Ebene „stadt" anbieten. Ein Demo-Konto hat keinen
+   * Ortsteil-Anker (Gemeinde-Fallback) → eine Ortsteil-Frage wäre in der
+   * Bürger-Sicht unsichtbar und der Verwaltungs-Track bräche in Schritt 2
+   * (Gate-B MINOR-4). „stadt" ist serverseitig ohnehin gültig.
+   */
+  demo?: boolean;
 }
 
 type ScopeLevel = "stadt" | "ortsteil";
@@ -30,7 +37,7 @@ type PollTyp = "ja_nein_enthaltung" | "dot_voting" | "widerstandsabfrage";
 const DOT_MIN = 2;
 const DOT_MAX = 12;
 
-export default function PollComposerForm({ ortsteile }: Props) {
+export default function PollComposerForm({ ortsteile, demo = false }: Props) {
   const router = useRouter();
   const [frage, setFrage] = useState("");
   const [typ, setTyp] = useState<PollTyp>("ja_nein_enthaltung");
@@ -258,12 +265,14 @@ export default function PollComposerForm({ ortsteile }: Props) {
               style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
             >
               <option value="stadt">Kommune (alle Bürger:innen)</option>
-              <option value="ortsteil">Ortsteil</option>
+              {/* Demo: kein Ortsteil (Demo-Konto ohne Ortsteil-Anker sähe die
+                  Frage nicht) — nur „stadt", damit der Track sichtbar bleibt. */}
+              {!demo && <option value="ortsteil">Ortsteil</option>}
             </select>
           </div>
 
-          {/* Ortsteil-Auswahl, nur bei Ebene = Ortsteil */}
-          {scopeLevel === "ortsteil" && (
+          {/* Ortsteil-Auswahl, nur bei Ebene = Ortsteil (auf Demo nie wählbar) */}
+          {!demo && scopeLevel === "ortsteil" && (
             <div>
               <label htmlFor="scopeCode" className={labelCls} style={{ color: "var(--pz-ink)" }}>
                 Ortsteil

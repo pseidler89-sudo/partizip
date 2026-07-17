@@ -32,6 +32,7 @@ import { sendMagicLinkEmail, sendRegistrationHintEmail } from "@/lib/auth/mail";
 import { apiError } from "@/lib/api-error";
 import { clientIpFromForwardedFor } from "@/lib/client-ip";
 import { auditEvents } from "@/db/schema";
+import { isDemoTenant } from "@/lib/demo/config";
 
 // H2: Nicht cachen — Auth-Routen immer dynamisch
 export const dynamic = "force-dynamic";
@@ -77,6 +78,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const { email, minAgeConfirmed } = parsed.data;
+
+  // --- SIDE-EFFECT-FENCE (Block I): Demo-Mandant ---------------------------
+  // Der Login läuft auf dem Demo-Mandanten AUSSCHLIESSLICH über die ephemere
+  // Session (lib/demo), NIE über Magic-Link. Ohne diesen Guard legte jeder
+  // Request mit minAgeConfirmed:true eine PERSISTENTE users-Zeile an (auch
+  // @evil.com) und verschickte eine echte Magic-Link-Mail. Wir fangen früh ab:
+  // kein Konto, keine Mail — und geben DIESELBE neutrale 200 zurück wie sonst
+  // (kein Enumeration-Leak, verrät das Fencen nicht). Schließt die
+  // Konten-Akkumulation + den Mailversand-Vektor auf dem Demo-Tenant.
+  if (isDemoTenant(tenant.slug)) {
+    return neutralResponse();
+  }
 
   // --- Client-IP bestimmen ---
   // Annahme: genau ein vertrauenswürdiger Proxy (z. B. Traefik) hängt an.

@@ -29,6 +29,7 @@ import { SCOPE_INPUT_LEVELS } from "@/lib/region/ebenen";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { getTenantFromHost } from "@/lib/tenant";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
+import { isDemoTenant } from "@/lib/demo/config";
 import { getUserRoleTypes } from "@/lib/auth/roles";
 import { getOptionalAuthContext } from "@/lib/auth/action-context";
 import { sendInvitationEmail } from "@/lib/auth/mail";
@@ -114,6 +115,14 @@ export async function einladen(rawInput: EinladenInput): Promise<InvitationActio
   const ctx = await getAdminAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
 
+  // SIDE-EFFECT-FENCE (Demo-Spielwiese, fail-closed): ephemere Demo-Admins
+  // dürfen KEINE echten E-Mails auslösen — sonst wäre der Einladungs-Flow ein
+  // offener Spam-Vektor über den echten SMTP-Server. Der Fehler kommt VOR jedem
+  // Token-/Mail-Pfad (kein Datensatz, kein Versand).
+  if (isDemoTenant(ctx.tenant.slug)) {
+    return { ok: false, error: "Im Demo-Mandanten werden keine Einladungen versendet." };
+  }
+
   const parsed = einladenSchema.safeParse(rawInput);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.errors[0]?.message ?? "Ungültige Eingabe." };
@@ -164,6 +173,11 @@ export async function einladungZurueckziehen(invitationId: string): Promise<Invi
 export async function einladungErneutSenden(invitationId: string): Promise<InvitationActionResult> {
   const ctx = await getAdminAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+
+  // SIDE-EFFECT-FENCE (Demo-Spielwiese): wie einladen() — keine Mail nach außen.
+  if (isDemoTenant(ctx.tenant.slug)) {
+    return { ok: false, error: "Im Demo-Mandanten werden keine Einladungen versendet." };
+  }
 
   const idParsed = z.string().uuid().safeParse(invitationId);
   if (!idParsed.success) return { ok: false, error: "Ungültige Einladungs-ID." };

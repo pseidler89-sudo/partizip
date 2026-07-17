@@ -8,7 +8,7 @@
 
 import type { Metadata } from "next";
 import Link from "next/link";
-import { isDemoTenant } from "@/lib/demo/config";
+import { demoTenantSlug, isDemoTenant } from "@/lib/demo/config";
 
 export const metadata: Metadata = {
   title: "Für Kommunen & Vereine — Partizip",
@@ -21,6 +21,15 @@ const DEMO_MAILTO =
 
 /** Öffentliche Selbstbedienungs-Demo (Musterstadt-Spielwiese, nächtlicher Reset). */
 const DEMO_URL = "https://demo.partizip.online";
+
+/**
+ * Einstieg in die Verwaltungs-Perspektive der Demo (Block I) — Tenant-Route
+ * /[tenant]/demo-verwaltung auf dem Demo-Mandanten. Der Pfad-Slug kommt aus
+ * DEMO_TENANT_SLUG (SSOT), NICHT aus einem zweiten Hardcode „demo" — weicht der
+ * konfigurierte Slug ab (z. B. Staging), zeigte ein fester Pfad sonst ins Leere
+ * (404, Gate-B MINOR-6). Fallback „demo" bleibt parat zur Subdomain in DEMO_URL.
+ */
+const DEMO_VERWALTUNG_URL = `${DEMO_URL}/${demoTenantSlug() ?? "demo"}/demo-verwaltung`;
 
 const SCHRITTE: { n: string; titel: string; text: string }[] = [
   {
@@ -93,6 +102,25 @@ export default async function FuerKommunenPage({
                 style={{ backgroundColor: "var(--pz-brand)" }}
               >
                 Demo sofort ausprobieren
+              </a>
+            )}
+            {/* Verwaltungs-Track (Block I): auf dem Demo-Mandanten direkt lokal
+                verlinken (kein Kreisverweis über die absolute URL nötig). */}
+            {inDemo ? (
+              <Link
+                href={`/${slug}/demo-verwaltung`}
+                className="inline-flex min-h-[48px] items-center rounded-lg border px-6 py-3 text-sm font-semibold transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
+                style={{ borderColor: "var(--pz-brand)", color: "var(--pz-brand-strong)" }}
+              >
+                Verwaltungs-Demo ausprobieren
+              </Link>
+            ) : (
+              <a
+                href={DEMO_VERWALTUNG_URL}
+                className="inline-flex min-h-[48px] items-center rounded-lg border px-6 py-3 text-sm font-semibold transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
+                style={{ borderColor: "var(--pz-brand)", color: "var(--pz-brand-strong)" }}
+              >
+                Verwaltungs-Demo ausprobieren
               </a>
             )}
             <a

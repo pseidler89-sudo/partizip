@@ -17,6 +17,7 @@ import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin as isAdminCheck, beobachterDarfTenantweitSehen, canRedaktion, getUserRolesMitScope } from "@/lib/auth/roles";
 import { getAdminKennzahlen, maskTeilnahme } from "@/lib/admin/kennzahlen";
+import { isDemoTenant } from "@/lib/demo/config";
 import Link from "next/link";
 
 /** Eine Kennzahl-Kachel (PII-frei). `hint` erklärt z. B. die Re-Identifikations-Maskierung. */
@@ -112,8 +113,11 @@ export default async function AdminDashboardPage({ params }: PageProps) {
   // zählt aber auch Abgelaufenes/Geschlossenes. Nur für Admins (Beobachter =
   // View-Only, keine Handlungs-CTAs); die Karte verschwindet vollständig,
   // sobald alles vorhanden ist (kein Dismiss nötig).
+  // Auf dem Demo-Mandanten NICHT berechnen/rendern: „Verifizierungs-Standort"
+  // und „QR-Code" sind dort nicht erfüllbar (keine UI) → die Karte bliebe ewig
+  // stehen (Sackgasse, Gate-B MINOR-3).
   let ersteSchritte: { label: string; href: string; erledigt: boolean }[] | null = null;
-  if (isAdmin) {
+  if (isAdmin && !isDemoTenant(tenant.slug)) {
     const [locRows, qrRows, pollRows, digestRows] = await Promise.all([
       db.select({ c: count() }).from(verificationLocations).where(eq(verificationLocations.tenantId, tenant.id)),
       db.select({ c: count() }).from(qrCodes).where(eq(qrCodes.tenantId, tenant.id)),

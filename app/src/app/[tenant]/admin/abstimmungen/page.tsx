@@ -27,6 +27,8 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin, beobachterDarfSehen, getUserRolesMitScope } from "@/lib/auth/roles";
 import { regionTypLabel } from "@/lib/region/ebenen";
 import { getAllPollsForAdmin, type PollAdminItem } from "@/lib/polls/queries";
+import { isDemoTenant } from "@/lib/demo/config";
+import { istMusterstadtSeedPollId } from "@/lib/demo/seed-ids";
 import PollComposerForm from "./PollComposerForm";
 import PollAdminActions from "./PollAdminActions";
 
@@ -123,6 +125,12 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
       );
   const byStatus = (s: string) => allPolls.filter((p) => p.status === s);
 
+  // Demo-Mandant: Composer bietet nur „stadt" (jede Demo-Frage bleibt in der
+  // Bürger-Sicht sichtbar, MINOR-4) und die kuratierten Seed-Fragen werden als
+  // „Beispiel" gekennzeichnet + ohne (am Seed-Guard scheiternde) Aktions-Buttons
+  // gezeigt (MINOR-5).
+  const istDemo = isDemoTenant(tenant.slug);
+
   return (
     <main className="min-h-screen px-6 py-10 max-w-4xl mx-auto">
       <div className="mb-8">
@@ -138,7 +146,7 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
 
       {/* Erstellen-Formular (nur Admins; Beobachter: reine Lese-Ansicht) */}
       {admin ? (
-        <PollComposerForm ortsteile={ortsteilRows} />
+        <PollComposerForm ortsteile={ortsteilRows} demo={istDemo} />
       ) : (
         <div
           className="rounded-lg border p-4 text-sm"
@@ -181,6 +189,9 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
                     const opens = fmtDate(p.opensAt);
                     const closes = fmtDate(p.closesAt);
                     const created = fmtDate(p.createdAt);
+                    // Kuratierte Seed-Frage des Demo-Mandanten: „Beispiel"-Badge,
+                    // keine Aktions-Buttons (die scheiterten am Seed-Guard).
+                    const istBeispiel = istDemo && istMusterstadtSeedPollId(tenant.slug, p.id);
                     return (
                       <li key={p.id} className="pz-card p-5">
                         <div className="flex flex-wrap items-center gap-2">
@@ -190,6 +201,11 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
                           >
                             {scopeLabel(p)}
                           </span>
+                          {istBeispiel && (
+                            <span className="pz-badge-neutral inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium">
+                              Beispiel
+                            </span>
+                          )}
                           {p.verbindlich ? (
                             <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
                               Verbindlich (nur verifiziert)
@@ -234,7 +250,14 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
                         </p>
 
                         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-                          {admin && <PollAdminActions pollId={p.id} status={p.status} />}
+                          {admin && (
+                            <PollAdminActions
+                              pollId={p.id}
+                              status={p.status}
+                              demo={istDemo}
+                              istBeispiel={istBeispiel}
+                            />
+                          )}
 
                           {p.status === "aktiv" && (
                             <Link
