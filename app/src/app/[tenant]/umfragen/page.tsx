@@ -28,7 +28,14 @@ import {
   type PollMitErgebnis,
 } from "@/lib/polls/queries";
 import { gruppiereNachEbene } from "@/lib/polls/gruppierung";
+import {
+  getEinrichtungsStatus,
+  naechsterSchritt,
+  type EinrichtungsSchritt,
+} from "@/lib/konto/einrichtung";
+import { EINRICHTUNG_SPAETER_COOKIE } from "@/lib/konto/constants";
 import { RegionEinstieg } from "../RegionEinstieg";
+import NaechsterSchritt from "../NaechsterSchritt";
 import { isDemoTenant } from "@/lib/demo/config";
 import { REGION_TYP_LABEL } from "@/lib/region/ebenen";
 import type { PollErgebnis } from "@/lib/polls/ergebnis";
@@ -189,6 +196,9 @@ export default async function UmfragenListePage({ params }: PageProps) {
   let userId: string | null = null;
   let userOrtsteilCode: string | null = null;
   let userHomeRegionId: string | null = null;
+  // Ein-Schritt-Nudge (Einrichtungs-Checkliste Fläche B): der eine nächste
+  // offene Schritt — null = nichts zeigen (alles erledigt / „Später" / Demo).
+  let einrichtungsSchritt: EinrichtungsSchritt | null = null;
   const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (rawToken) {
     const tokenHash = sha256Hex(rawToken);
@@ -201,7 +211,19 @@ export default async function UmfragenListePage({ params }: PageProps) {
     const session = sessionRows[0];
     if (session && !session.revokedAt && session.expiresAt >= now) {
       const userRows = await db
-        .select({ id: users.id, ortsteilId: users.ortsteilId, homeRegionId: users.homeRegionId })
+        .select({
+          id: users.id,
+          ortsteilId: users.ortsteilId,
+          homeRegionId: users.homeRegionId,
+          // Felder für getEinrichtungsStatus (getStufe braucht die volle
+          // Eligibility-Sicht) — datensparsam, keine PII wie E-Mail.
+          verificationStatus: users.verificationStatus,
+          residencyVerifiedAt: users.residencyVerifiedAt,
+          residencyVerifiedUntil: users.residencyVerifiedUntil,
+          accountStatus: users.accountStatus,
+          minAgeConfirmedAt: users.minAgeConfirmedAt,
+          notifyNewPolls: users.notifyNewPolls,
+        })
         .from(users)
         .where(and(eq(users.id, session.userId), eq(users.tenantId, tenant.id)))
         .limit(1);
@@ -216,6 +238,15 @@ export default async function UmfragenListePage({ params }: PageProps) {
             .where(and(eq(ortsteile.id, user.ortsteilId), eq(ortsteile.tenantId, tenant.id)))
             .limit(1);
           userOrtsteilCode = otRows[0]?.code ?? null;
+        }
+        // Nudge nur berechnen, wenn er überhaupt gezeigt würde: nicht nach
+        // „Später" (Cookie), nicht auf dem Demo-Mandanten (Demo-Konten
+        // erfüllen die Schritte nie — RegionEinstieg-Gate-B-Lehre).
+        const spaeter = cookieStore.get(EINRICHTUNG_SPAETER_COOKIE)?.value === "1";
+        if (!spaeter && !isDemoTenant(tenant.slug)) {
+          einrichtungsSchritt = naechsterSchritt(
+            await getEinrichtungsStatus(db, tenant, user, user.id)
+          );
         }
       }
     }
@@ -288,19 +319,39 @@ export default async function UmfragenListePage({ params }: PageProps) {
 
   const teilnahmen = await getMeineTeilnahmen(db, tenant.id, userId!);
 
-  // Erst-Login-Lücke: wer sich ohne vorherige PLZ-Eingabe registriert, hat weder
-  // home_region noch Cookie und sieht nur die tenant-weite Sicht. Einmalige
-  // Einladung, den Wohnort zu setzen (regionAusPlz schreibt für Eingeloggte
-  // home_region_id mit — lib/region/actions.ts).
+  // Erst-Login-Lücke: Eingeloggte ohne Wohnort-Anker sehen nur die tenant-weite
+  // Sicht. Einmalige Einladung, den Wohnort zu setzen (regionAusPlz schreibt für
+  // Eingeloggte home_region_id mit — lib/region/actions.ts).
+  // BEWUSST UNABHÄNGIG vom Region-Cookie (Gate-B Checkliste MAJOR): wer als
+  // Anonymer die PLZ-Haustür passiert hat (Cookie gesetzt) und sich DANN
+  // registriert, hat trotzdem home_region_id = NULL — die eingeloggte Sicht
+  // nutzt das Cookie nicht. Ohne die Karte liefe der „Wohnort festlegen"-CTA
+  // der Einrichtungs-Checkliste hier ins Leere (Sackgassen-Klasse).
   // Nicht auf dem Demo-Tenant: Demo-Konten haben nie einen Wohnort, und der
   // Musterstadt-Zweig hat keine PLZ-Zuordnungen — die Karte wäre eine Sackgasse
   // mitten im Demo-Rundgang (Gate-B-Befund).
-  const zeigeRegionEinstieg =
-    viewerRegionId == null && region == null && !isDemoTenant(tenant.slug);
+  const zeigeRegionEinstieg = viewerRegionId == null && !isDemoTenant(tenant.slug);
+
+  // Ein-Schritt-Nudge (Fläche B) oberhalb der Liste — aber NIE zwei
+  // Setup-Elemente übereinander: zeigt die RegionEinstieg-Karte schon, entfällt
+  // der Nudge. Zusätzlich entfallen hier die Schritte, deren CTA auf DIESE
+  // Seite zeigte (Selbst-Link): „wohnort" übernimmt die RegionEinstieg-Karte,
+  // „teilnahme" ist die Liste direkt darunter.
+  const zeigeNudge =
+    !zeigeRegionEinstieg &&
+    (einrichtungsSchritt === "verifizierung" || einrichtungsSchritt === "benachrichtigung");
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-10">
-      {banner}
+      {/* Nie zwei Region-Elemente übereinander: zeigt die Wohnort-Karte, ist der
+          Banner (Ortsteil-Umschalter fürs Cookie) redundant — die eingeloggte
+          Sicht hängt ohnehin nicht am Cookie. */}
+      {!zeigeRegionEinstieg && banner}
+      {zeigeNudge && einrichtungsSchritt && (
+        <div className="mb-8">
+          <NaechsterSchritt schritt={einrichtungsSchritt} tenantSlug={slugFromPath} />
+        </div>
+      )}
       {zeigeRegionEinstieg && (
         <section className="pz-card mb-8 p-5" aria-label="Wohnort festlegen">
           <h2 className="text-sm font-semibold" style={{ color: "var(--pz-ink)" }}>

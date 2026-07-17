@@ -44,7 +44,9 @@ export function BenachrichtigungSection({ initial }: { initial: boolean }) {
   }
 
   return (
-    <section className="mb-6">
+    // id = Anker-Ziel der Einrichtungs-Checkliste („Benachrichtigungen einschalten");
+    // scroll-mt hält die Überschrift beim Sprung sichtbar unter dem Seitenrand.
+    <section id="benachrichtigungen" className="mb-6 scroll-mt-6">
       <h2 className="text-sm font-semibold mb-2" style={{ color: "var(--pz-ink)" }}>
         Benachrichtigungen
       </h2>
