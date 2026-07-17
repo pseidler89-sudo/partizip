@@ -25,10 +25,17 @@ interface Props {
 }
 
 type ScopeLevel = "stadt" | "ortsteil";
+type PollTyp = "ja_nein_enthaltung" | "dot_voting";
+
+const DOT_MIN = 2;
+const DOT_MAX = 12;
 
 export default function PollComposerForm({ ortsteile }: Props) {
   const router = useRouter();
   const [frage, setFrage] = useState("");
+  const [typ, setTyp] = useState<PollTyp>("ja_nein_enthaltung");
+  const [optionen, setOptionen] = useState<string[]>(["", ""]);
+  const [punkteBudget, setPunkteBudget] = useState<number>(5);
   const [scopeLevel, setScopeLevel] = useState<ScopeLevel>("stadt");
   const [scopeCode, setScopeCode] = useState<string>(ortsteile[0]?.code ?? "");
   const [verbindlich, setVerbindlich] = useState(false);
@@ -50,11 +57,28 @@ export default function PollComposerForm({ ortsteile }: Props) {
       setError("Bitte wählen Sie einen Ortsteil.");
       return;
     }
+    const sauberOptionen = optionen.map((o) => o.trim()).filter((o) => o.length > 0);
+    if (typ === "dot_voting") {
+      if (sauberOptionen.length < DOT_MIN) {
+        setError(`Bitte mindestens ${DOT_MIN} Optionen angeben.`);
+        return;
+      }
+      if (new Set(sauberOptionen.map((o) => o.toLowerCase())).size !== sauberOptionen.length) {
+        setError("Die Optionen müssen sich unterscheiden.");
+        return;
+      }
+      if (!Number.isInteger(punkteBudget) || punkteBudget < 1 || punkteBudget > 100) {
+        setError("Das Punktebudget muss zwischen 1 und 100 liegen.");
+        return;
+      }
+    }
 
     setSubmitting(true);
     try {
       const result = await pollErstellen({
         frage: frage.trim(),
+        typ,
+        ...(typ === "dot_voting" ? { optionen: sauberOptionen, punkteBudget } : {}),
         scopeLevel,
         scopeCode: scopeLevel === "ortsteil" ? scopeCode : null,
         verbindlich,
@@ -73,6 +97,9 @@ export default function PollComposerForm({ ortsteile }: Props) {
       setVerbindlich(false);
       setClosesAt("");
       setScopeLevel("stadt");
+      setTyp("ja_nein_enthaltung");
+      setOptionen(["", ""]);
+      setPunkteBudget(5);
       router.refresh();
     } catch {
       setError("Verbindungsfehler — bitte erneut versuchen.");
@@ -117,6 +144,95 @@ export default function PollComposerForm({ ortsteile }: Props) {
             {frage.trim().length}/500 Zeichen (mind. 5)
           </p>
         </div>
+
+        {/* Format (ADR-025) */}
+        <div>
+          <label htmlFor="typ" className={labelCls} style={{ color: "var(--pz-ink)" }}>
+            Format
+          </label>
+          <select
+            id="typ"
+            value={typ}
+            onChange={(e) => setTyp(e.target.value as PollTyp)}
+            className={inputCls}
+            style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
+          >
+            <option value="ja_nein_enthaltung">Ja / Nein / Enthaltung</option>
+            <option value="dot_voting">Punkte-Voting (Prioritäten setzen)</option>
+          </select>
+          <p className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
+            {typ === "dot_voting"
+              ? "Teilnehmende verteilen ein festes Punktebudget auf mehrere Optionen — Ergebnis ist eine Prioritätenverteilung."
+              : "Klassisches Stimmungsbild mit drei Antwortmöglichkeiten."}
+          </p>
+        </div>
+
+        {/* Dot-Voting: Optionen + Budget */}
+        {typ === "dot_voting" && (
+          <div className="rounded-lg border p-4" style={{ borderColor: "var(--pz-line)" }}>
+            <span className="text-sm font-medium" style={{ color: "var(--pz-ink)" }}>
+              Optionen ({DOT_MIN}–{DOT_MAX})
+            </span>
+            <div className="mt-2 space-y-2">
+              {optionen.map((wert, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={wert}
+                    maxLength={120}
+                    onChange={(e) =>
+                      setOptionen((arr) => arr.map((v, j) => (j === i ? e.target.value : v)))
+                    }
+                    aria-label={`Option ${i + 1}`}
+                    placeholder={`Option ${i + 1}`}
+                    className={inputCls}
+                    style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)", marginTop: 0 }}
+                  />
+                  {optionen.length > DOT_MIN && (
+                    <button
+                      type="button"
+                      onClick={() => setOptionen((arr) => arr.filter((_, j) => j !== i))}
+                      aria-label={`Option ${i + 1} entfernen`}
+                      className="shrink-0 rounded-md border px-2 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
+                      style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
+                    >
+                      Entfernen
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {optionen.length < DOT_MAX && (
+              <button
+                type="button"
+                onClick={() => setOptionen((arr) => [...arr, ""])}
+                className="mt-2 text-sm font-medium underline-offset-4 hover:underline"
+                style={{ color: "var(--pz-brand-strong)" }}
+              >
+                + Option hinzufügen
+              </button>
+            )}
+
+            <div className="mt-4">
+              <label htmlFor="punkteBudget" className={labelCls} style={{ color: "var(--pz-ink)" }}>
+                Punkte je Teilnehmer:in
+              </label>
+              <input
+                id="punkteBudget"
+                type="number"
+                min={1}
+                max={100}
+                value={punkteBudget}
+                onChange={(e) => setPunkteBudget(Math.floor(Number(e.target.value) || 0))}
+                className={inputCls}
+                style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)", maxWidth: "8rem" }}
+              />
+              <p className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
+                Wie viele Punkte jede:r auf die Optionen verteilen darf (1–100).
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Ebene */}
         <div className="grid gap-5 sm:grid-cols-2">

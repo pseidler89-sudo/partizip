@@ -19,12 +19,19 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { polls, sessions, users, regions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { getPollErgebnis, hatBereitsAbgestimmt } from "@/lib/polls/queries";
+import {
+  getPollErgebnis,
+  hatBereitsAbgestimmt,
+  getDotOptions,
+  getDotErgebnis,
+  hatBereitsDotAbgestimmt,
+} from "@/lib/polls/queries";
 import { istBeendet } from "@/lib/polls/ergebnis";
 import { getStufe } from "@/lib/eligibility/stufe";
 import { istGebietsZustaendig, waehleAnkerRegionId } from "@/lib/polls/gebiet";
 import { regionTypLabel } from "@/lib/region/ebenen";
 import PollMitmachen from "../../PollMitmachen";
+import DotMitmachen from "../../DotMitmachen";
 import { TeilenButton } from "../../TeilenButton";
 import { PollTypBadge } from "../../PollTypBadge";
 import { isDemoTenant } from "@/lib/demo/config";
@@ -67,6 +74,7 @@ async function getPublicPoll(tenantSlug: string, pollId: string) {
       verbindlich: polls.verbindlich,
       regionId: polls.regionId,
       regionTyp: regions.typ,
+      punkteBudget: polls.punkteBudget,
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
     })
@@ -129,8 +137,14 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
   const beendet = istBeendet(poll);
   const belegeVerfuegbar = beendet;
 
-  const ergebnis = await getPollErgebnis(db, tenant.id, poll.id);
-  if (!ergebnis) notFound();
+  const istDot = poll.typ === "dot_voting";
+  // Ja/Nein-Ergebnis nur für das binäre Format laden; dot_voting hat ein eigenes
+  // Aggregat (getDotErgebnis) + eigene Optionen.
+  const ergebnis = istDot ? null : await getPollErgebnis(db, tenant.id, poll.id);
+  if (!istDot && !ergebnis) notFound();
+  const dotOptionen = istDot ? await getDotOptions(db, tenant.id, poll.id) : [];
+  const dotErgebnis = istDot ? await getDotErgebnis(db, tenant.id, poll.id) : null;
+  if (istDot && !dotErgebnis) notFound();
 
   // Optionale Session für voter_ref / bereits-abgestimmt
   let userId: string | null = null;
@@ -187,7 +201,9 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
     (!poll.opensAt || poll.opensAt <= now) &&
     (!poll.closesAt || poll.closesAt > now);
 
-  const bereitsAbgestimmt = await hatBereitsAbgestimmt(db, tenant, poll.id, { userId });
+  const bereitsAbgestimmt = istDot
+    ? await hatBereitsDotAbgestimmt(db, tenant, poll.id, { userId })
+    : await hatBereitsAbgestimmt(db, tenant, poll.id, { userId });
 
   return (
     <main className="min-h-screen px-4 py-10 max-w-lg mx-auto">
@@ -211,19 +227,34 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
 
       <div className="pz-card p-6">
         {/* Bei offener Umfrage: mitstimmen möglich; sonst nur Ergebnis (über
-            bereitsAbgestimmt=true erzwingen → PollMitmachen zeigt direkt Ergebnis). */}
-        <PollMitmachen
-          pollId={poll.id}
-          verbindlich={poll.verbindlich}
-          tenantSlug={slugFromPath}
-          eingeloggt={userId != null}
-          verifiziert={verifiziert}
-          // Nicht-zuständige eingeloggte Nutzer sehen nur das Ergebnis (die
-          // Abstimm-Action würde ohnehin ablehnen — Audit M2).
-          bereitsAbgestimmt={bereitsAbgestimmt || !istOffen || !gebietsZustaendig}
-          ergebnis={ergebnis}
-          demoMode={isDemoTenant(tenant.slug)}
-        />
+            bereitsAbgestimmt=true erzwingen → zeigt direkt das Ergebnis). */}
+        {istDot ? (
+          <DotMitmachen
+            pollId={poll.id}
+            budget={poll.punkteBudget ?? 0}
+            optionen={dotOptionen.map((o) => ({ id: o.id, label: o.label }))}
+            ergebnis={dotErgebnis!}
+            tenantSlug={slugFromPath}
+            eingeloggt={userId != null}
+            verifiziert={verifiziert}
+            verbindlich={poll.verbindlich}
+            bereitsAbgestimmt={bereitsAbgestimmt || !istOffen || !gebietsZustaendig}
+            demoMode={isDemoTenant(tenant.slug)}
+          />
+        ) : (
+          <PollMitmachen
+            pollId={poll.id}
+            verbindlich={poll.verbindlich}
+            tenantSlug={slugFromPath}
+            eingeloggt={userId != null}
+            verifiziert={verifiziert}
+            // Nicht-zuständige eingeloggte Nutzer sehen nur das Ergebnis (die
+            // Abstimm-Action würde ohnehin ablehnen — Audit M2).
+            bereitsAbgestimmt={bereitsAbgestimmt || !istOffen || !gebietsZustaendig}
+            ergebnis={ergebnis!}
+            demoMode={isDemoTenant(tenant.slug)}
+          />
+        )}
         {userId != null && !gebietsZustaendig && istOffen && (
           <p className="mt-3 text-sm" style={{ color: "var(--pz-muted)" }}>
             Diese Abstimmung gehört nicht zu Ihrem Gebiet — Sie sehen das Ergebnis,

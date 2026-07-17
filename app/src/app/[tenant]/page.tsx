@@ -339,16 +339,33 @@ export default async function TenantLandingPage({ params }: PageProps) {
               </p>
 
               <div className="mx-auto mt-7 max-w-lg pz-card p-6 text-left">
-                <PollMitmachen
-                  pollId={featured.id}
-                  verbindlich={featured.verbindlich}
-                  tenantSlug={slug}
-                  eingeloggt={eingeloggt}
-                  verifiziert={verifiziert}
-                  bereitsAbgestimmt={bereitsAbgestimmt}
-                  ergebnis={featuredErgebnis}
-                  demoMode={demo}
-                />
+                {featured.typ === "dot_voting" ? (
+                  // Dot-Voting: die Punkte-Verteilung lebt auf der Detailseite
+                  // (barrierearmes Stepper-Widget) — im Hero nur der Einstieg.
+                  <div className="text-center">
+                    <p className="text-sm" style={{ color: "var(--pz-body)" }}>
+                      Punkte-Voting: Verteilen Sie Ihre Punkte auf die Optionen.
+                    </p>
+                    <Link
+                      href={`/${slug}/umfrage/${featured.id}`}
+                      className="mt-4 inline-block rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
+                      style={{ backgroundColor: "var(--tenant-primary)" }}
+                    >
+                      Zur Abstimmung
+                    </Link>
+                  </div>
+                ) : (
+                  <PollMitmachen
+                    pollId={featured.id}
+                    verbindlich={featured.verbindlich}
+                    tenantSlug={slug}
+                    eingeloggt={eingeloggt}
+                    verifiziert={verifiziert}
+                    bereitsAbgestimmt={bereitsAbgestimmt}
+                    ergebnis={featuredErgebnis}
+                    demoMode={demo}
+                  />
+                )}
                 <div className="mt-4 border-t border-[color:var(--pz-line)] pt-3">
                   <TeilenButton title={featured.frage} path={`/${slug}/umfrage/${featured.id}`} />
                 </div>
