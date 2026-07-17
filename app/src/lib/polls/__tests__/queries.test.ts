@@ -40,12 +40,13 @@ import {
   getAktivePolls,
   getMeineTeilnahmen,
   hatBereitsAbgestimmtBatch,
+  mitErgebnissen,
 } from "@/lib/polls/queries";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
 import { resolveOrtsteilRegionId, resolveRegionIdForScope } from "@/lib/region/scope";
 import { and, eq } from "drizzle-orm";
 
-const { tenants, polls, votes, users, regions } = schema;
+const { tenants, polls, votes, users, regions, pollOptions, voteAllocations } = schema;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(__dirname, "../../../../../db/migrations");
@@ -423,5 +424,82 @@ describe("polls/queries (Integration)", () => {
     // Kein userId bzw. leere pollIds → leeres Set (kein DB-Treffer).
     expect((await hatBereitsAbgestimmtBatch(db as never, tA as never, [pB.id], { userId: null })).size).toBe(0);
     expect((await hatBereitsAbgestimmtBatch(db as never, tA as never, [], { userId: u.id })).size).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Dot-Voting-Teilnahmen (M1-Nachzug Block F): Dot-Teilnahmen liegen NUR in
+  // vote_allocations — Batch-Chip und „Bereits teilgenommen" müssen sie sehen.
+  // -------------------------------------------------------------------------
+
+  it.skipIf(SKIP)("hatBereitsAbgestimmtBatch erkennt Dot-Voting-Teilnahmen (vote_allocations)", async () => {
+    const [t] = await db.insert(tenants).values({ slug: `bd-${Date.now()}`, name: "BatchDot" }).returning();
+    const [u] = await db.insert(users).values({ tenantId: t.id, email: `bd-${Date.now()}@t.de`, minAgeConfirmedAt: new Date() }).returning();
+    const [other] = await db.insert(users).values({ tenantId: t.id, email: `bd-o-${Date.now()}@t.de`, minAgeConfirmedAt: new Date() }).returning();
+    const myRef = computeVoterRefForUser(u.id);
+    const otherRef = computeVoterRefForUser(other.id);
+    const stadtT = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+
+    const [pDot] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "dot?", typ: "dot_voting", status: "aktiv", punkteBudget: 5 }).returning();
+    const [pDot2] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "dot2?", typ: "dot_voting", status: "aktiv", punkteBudget: 5 }).returning();
+    const [optA] = await db.insert(pollOptions).values({ pollId: pDot.id, tenantId: t.id, label: "A", position: 0 }).returning();
+    const [optB] = await db.insert(pollOptions).values({ pollId: pDot2.id, tenantId: t.id, label: "B", position: 0 }).returning();
+
+    await db.insert(voteAllocations).values([
+      { pollId: pDot.id, tenantId: t.id, optionId: optA.id, voterRef: myRef, punkte: 3, warVerifiziert: false },
+      { pollId: pDot2.id, tenantId: t.id, optionId: optB.id, voterRef: otherRef, punkte: 2, warVerifiziert: false },
+    ]);
+
+    const set = await hatBereitsAbgestimmtBatch(db as never, t as never, [pDot.id, pDot2.id], { userId: u.id });
+    expect(set.has(pDot.id)).toBe(true);   // eigene Zuteilung → teilgenommen
+    expect(set.has(pDot2.id)).toBe(false); // fremde Zuteilung → NICHT
+    expect(set.size).toBe(1);
+  });
+
+  it.skipIf(SKIP)("getMeineTeilnahmen enthält Dot-Voting-Teilnahmen mit Dot-Aggregat (dot-Feld)", async () => {
+    const [t] = await db.insert(tenants).values({ slug: `md-${Date.now()}`, name: "MeineDot" }).returning();
+    const [u] = await db.insert(users).values({ tenantId: t.id, email: `md-${Date.now()}@t.de`, minAgeConfirmedAt: new Date() }).returning();
+    const myRef = computeVoterRefForUser(u.id);
+    const stadtT = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+
+    const [pDot] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "Budget?", typ: "dot_voting", status: "aktiv", punkteBudget: 5 }).returning();
+    const [optA] = await db.insert(pollOptions).values({ pollId: pDot.id, tenantId: t.id, label: "A", position: 0 }).returning();
+    await db.insert(voteAllocations).values([
+      { pollId: pDot.id, tenantId: t.id, optionId: optA.id, voterRef: myRef, punkte: 3, warVerifiziert: true },
+      { pollId: pDot.id, tenantId: t.id, optionId: optA.id, voterRef: "fremd-1", punkte: 5, warVerifiziert: false },
+    ]);
+
+    const teiln = await getMeineTeilnahmen(db as never, t.id, u.id);
+    expect(teiln.map((p) => p.id)).toContain(pDot.id);
+    const dotPoll = teiln.find((p) => p.id === pDot.id)!;
+    // Dot-Aggregat für die Karten-Teilnahmezeile: Teilnehmende immer sichtbar …
+    expect(dotPoll.dot?.gesamtWaehler).toBe(2);
+    expect(dotPoll.dot?.verifizierteWaehler).toBe(1);
+    // … per-Option-Aufschlüsselung läuft-noch-zurückgehalten (ADR-025/-022).
+    expect(dotPoll.dot?.aufschluesselungZurueckgehalten).toBe(true);
+    expect(dotPoll.dot?.zurueckhaltungsGrund).toBe("laeuft_noch");
+    for (const o of dotPoll.dot!.optionen) {
+      expect(o.punkteSumme).toBeNull();
+      expect(o.prozent).toBeNull();
+    }
+  });
+
+  it.skipIf(SKIP)("mitErgebnissen reichert dot_voting-Polls um das Dot-Aggregat an (Ja/Nein ohne dot)", async () => {
+    const [t] = await db.insert(tenants).values({ slug: `me-${Date.now()}`, name: "MitErg" }).returning();
+    const stadtT = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+
+    const [pJa] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "ja/nein?", typ: "ja_nein_enthaltung", status: "aktiv" }).returning();
+    const [pDot] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "dot?", typ: "dot_voting", status: "aktiv", punkteBudget: 5 }).returning();
+    const [optA] = await db.insert(pollOptions).values({ pollId: pDot.id, tenantId: t.id, label: "A", position: 0 }).returning();
+    await db.insert(voteAllocations).values({ pollId: pDot.id, tenantId: t.id, optionId: optA.id, voterRef: "me-1", punkte: 4, warVerifiziert: false });
+
+    const items = await getAktivePolls(db as never, t.id);
+    const enriched = await mitErgebnissen(db as never, t.id, items);
+
+    const dot = enriched.find((p) => p.id === pDot.id)!;
+    expect(dot.dot?.gesamtWaehler).toBe(1); // Teilnahme sichtbar statt „Noch keine Stimmen"
+    expect(dot.ergebnis.gesamt).toBe(0);    // Ja/Nein-Aggregat bleibt leer (kein votes-Eintrag)
+
+    const ja = enriched.find((p) => p.id === pJa.id)!;
+    expect(ja.dot).toBeUndefined();
   });
 });

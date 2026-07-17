@@ -26,10 +26,10 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { resolveOrtsteilRegionId } from "@/lib/region/scope";
 import {
   getAktivePolls,
-  getPollErgebnis,
   hatBereitsAbgestimmt,
   hatBereitsAbgestimmtBatch,
-  type PollListItem,
+  hatBereitsDotAbgestimmt,
+  mitErgebnissen,
   type PollMitErgebnis,
 } from "@/lib/polls/queries";
 import { gruppiereNachEbene } from "@/lib/polls/gruppierung";
@@ -38,6 +38,7 @@ import type { PollErgebnis } from "@/lib/polls/ergebnis";
 import { REGION_COOKIE_NAME, parseRegionCookie } from "@/lib/region/core";
 import { getOrtsteileForTenant } from "@/lib/region/queries";
 import PollMitmachen from "./PollMitmachen";
+import { KurzErgebnisDot } from "./KurzErgebnisDot";
 import StufenFortschritt from "./StufenFortschritt";
 import PollStatusChip from "./PollStatusChip";
 import { PollTypBadge } from "./PollTypBadge";
@@ -108,12 +109,10 @@ function KurzErgebnis({ ergebnis }: { ergebnis: PollErgebnis }) {
 function PollKarte({
   slug,
   poll,
-  ergebnis,
   abgestimmt,
 }: {
   slug: string;
-  poll: PollListItem;
-  ergebnis: PollErgebnis;
+  poll: PollMitErgebnis;
   /** Teilnahme-Chip (nur eingeloggt → definiert): true=abgestimmt, false=offen. */
   abgestimmt?: boolean;
 }) {
@@ -123,13 +122,29 @@ function PollKarte({
       className="pz-card pz-card-hover block p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        <PollTypBadge verbindlich={poll.verbindlich} scope={REGION_TYP_LABEL[poll.regionTyp]} />
+        <PollTypBadge
+          verbindlich={poll.verbindlich}
+          scope={REGION_TYP_LABEL[poll.regionTyp]}
+          typ={poll.typ}
+        />
         {abgestimmt !== undefined && <PollStatusChip abgestimmt={abgestimmt} />}
       </div>
       <h4 className="mt-2 text-sm font-semibold" style={{ color: "var(--pz-ink)" }}>
         {poll.frage}
       </h4>
-      <KurzErgebnis ergebnis={ergebnis} />
+      {/* Dot-Voting hat kein Ja/Nein-Aggregat — Teilnahme-Zeile aus dem
+          Dot-Ergebnis (M1-Nachzug Block F) statt fälschlich „Noch keine Stimmen". */}
+      {poll.typ === "dot_voting" ? (
+        poll.dot ? (
+          <KurzErgebnisDot ergebnis={poll.dot} />
+        ) : (
+          <div className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
+            Punkte-Voting — verteilen Sie Ihre Punkte auf die Optionen
+          </div>
+        )
+      ) : (
+        <KurzErgebnis ergebnis={poll.ergebnis} />
+      )}
     </Link>
   );
 }
@@ -251,32 +266,32 @@ export default async function TenantLandingPage({ params }: PageProps) {
       ? await resolveOrtsteilRegionId(db, tenant.id, cookieOrtsteilCode)
       : null;
 
-  // Alle aktiven Polls für mich (vertikale Scheibe, neu→alt).
+  // Alle aktiven Polls für mich (vertikale Scheibe, neu→alt), mit Ergebnis
+  // (Ja/Nein-Aggregat + Dot-Aggregat für dot_voting — M1-Nachzug Block F).
   const aktive = await getAktivePolls(db, tenant.id, { viewerRegionId });
+  const alleMitErgebnis: PollMitErgebnis[] = await mitErgebnissen(db, tenant.id, aktive);
   // Featured = neueste SICHTBARE Abstimmung (scope-konsistent — kein separater
   // ungescopter Query; Gate-B ADR-015). Verhindert, dass eine Ortsteil-Frage als
   // Hero erscheint, die in der gruppierten Sicht ausgeblendet wäre.
-  const featured = aktive[0] ?? null;
-  const featuredErgebnis = featured ? await getPollErgebnis(db, tenant.id, featured.id) : null;
+  const featured = alleMitErgebnis[0] ?? null;
+  const featuredErgebnis = featured?.ergebnis ?? null;
+  // Teilnahme-Signal fürs Hero: Dot-Polls zählen Teilnehmende (distinct Wähler),
+  // Ja/Nein-Polls Stimmen — beide laut ADR-022/-025 immer sichtbar.
+  const featuredTeilnahmen =
+    featured?.typ === "dot_voting"
+      ? featured.dot?.gesamtWaehler ?? 0
+      : featuredErgebnis?.gesamt ?? 0;
+  // Teilnahme-Prüfung typ-abhängig: Dot-Teilnahmen liegen NUR in
+  // vote_allocations — die votes-Query wäre bei dot systematisch falsch-negativ
+  // (Gate-B MINOR). Beide Queries liefern nur das OB (Secret Ballot).
   const bereitsAbgestimmt = featured
-    ? await hatBereitsAbgestimmt(db, tenant, featured.id, { userId })
+    ? featured.typ === "dot_voting"
+      ? await hatBereitsDotAbgestimmt(db, tenant, featured.id, { userId })
+      : await hatBereitsAbgestimmt(db, tenant, featured.id, { userId })
     : false;
 
   // Nach Ebene gruppiert, ohne die Featured-Frage doppelt zu zeigen.
-  const aktiveMitErgebnis: PollMitErgebnis[] = await Promise.all(
-    aktive
-      .filter((p) => p.id !== featured?.id)
-      .map(async (p) => ({
-        ...p,
-        ergebnis:
-          (await getPollErgebnis(db, tenant.id, p.id)) ?? {
-            gesamt: 0,
-            verifiziert: 0,
-            optionen: [],
-            aufschluesselungNachSchluss: false,
-          },
-      }))
-  );
+  const aktiveMitErgebnis = alleMitErgebnis.filter((p) => p.id !== featured?.id);
   const gruppen = gruppiereNachEbene(aktiveMitErgebnis);
 
   // P1: Teilnahme-Status für die gruppierten Karten in EINER Batch-Query statt N×
@@ -325,6 +340,7 @@ export default async function TenantLandingPage({ params }: PageProps) {
               <PollTypBadge
                 verbindlich={featured.verbindlich}
                 scope={SCOPE_PHRASE[featured.regionTyp]}
+                typ={featured.typ}
               />
               <h1
                 className="mx-auto mt-4 max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl"
@@ -333,8 +349,8 @@ export default async function TenantLandingPage({ params }: PageProps) {
                 {featured.frage}
               </h1>
               <p className="mx-auto mt-3 max-w-xl text-sm" style={{ color: "var(--pz-muted)" }}>
-                {featuredErgebnis.gesamt > 0
-                  ? `Bereits ${featuredErgebnis.gesamt} ${featuredErgebnis.gesamt === 1 ? "Person hat" : "Menschen haben"} mitgemacht.`
+                {featuredTeilnahmen > 0
+                  ? `Bereits ${featuredTeilnahmen} ${featuredTeilnahmen === 1 ? "Person hat" : "Menschen haben"} mitgemacht.`
                   : "Machen Sie den Anfang — Ihre Stimme zählt."}
               </p>
 
@@ -342,16 +358,20 @@ export default async function TenantLandingPage({ params }: PageProps) {
                 {featured.typ === "dot_voting" ? (
                   // Dot-Voting: die Punkte-Verteilung lebt auf der Detailseite
                   // (barrierearmes Stepper-Widget) — im Hero nur der Einstieg.
+                  // Bereits Teilgenommene sehen das ehrlich (kein zweiter
+                  // „Verteilen Sie"-Aufruf, Gate-B MINOR).
                   <div className="text-center">
                     <p className="text-sm" style={{ color: "var(--pz-body)" }}>
-                      Punkte-Voting: Verteilen Sie Ihre Punkte auf die Optionen.
+                      {bereitsAbgestimmt
+                        ? "Sie haben Ihre Punkte bereits verteilt — danke fürs Mitmachen!"
+                        : "Punkte-Voting: Verteilen Sie Ihre Punkte auf die Optionen."}
                     </p>
                     <Link
                       href={`/${slug}/umfrage/${featured.id}`}
                       className="mt-4 inline-block rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2"
                       style={{ backgroundColor: "var(--tenant-primary)" }}
                     >
-                      Zur Abstimmung
+                      {bereitsAbgestimmt ? "Zum Ergebnis" : "Zur Abstimmung"}
                     </Link>
                   </div>
                 ) : (
@@ -427,7 +447,6 @@ export default async function TenantLandingPage({ params }: PageProps) {
                         <PollKarte
                           slug={slug}
                           poll={p}
-                          ergebnis={p.ergebnis}
                           abgestimmt={eingeloggt ? abgestimmtSet.has(p.id) : undefined}
                         />
                       </li>
