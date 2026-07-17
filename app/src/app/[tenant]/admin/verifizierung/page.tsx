@@ -20,7 +20,14 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { canVerify, getUserRoleTypes } from "@/lib/auth/roles";
+import {
+  canVerify,
+  erlaubteScopeEbenenFuerVerifier,
+  getUserRolesMitScope,
+  getUserRoleTypes,
+  isAdmin,
+} from "@/lib/auth/roles";
+import { SCOPE_INPUT_LEVELS } from "@/lib/region/ebenen";
 import { qrCodesListe } from "@/lib/verification/queries";
 import { getOffeneTermineFuerVerifier } from "@/lib/verification/booking-queries";
 import { formatSlotLabel } from "@/lib/verification/slot-format";
@@ -69,6 +76,18 @@ export default async function AdminVerifizierungPage({ params }: PageProps) {
   const roleTypes = await getUserRoleTypes(db, tenant.id, session.userId);
   if (!canVerify(roleTypes)) redirect(`/${slugFromPath}/anmelden`);
 
+  // Gebietsbindung (Block K1), UI-Komfort: Nicht-Admin-Verifier sehen im
+  // Ebenen-Dropdown nur die Ebenen ihres eigenen Knotens und darunter
+  // (Gemeinde-Rolle ⇒ „stadt"+„ortsteil"; Ortsteil-Rolle ⇒ nur „ortsteil").
+  // Admins sehen alle Ebenen wie bisher. Die eigentliche Durchsetzung liegt
+  // serverseitig in qrErstellenCore (ltree-Pfad-Abdeckung, fail-closed).
+  const callerIstAdmin = isAdmin(roleTypes);
+  const erlaubteEbenen = callerIstAdmin
+    ? [...SCOPE_INPUT_LEVELS]
+    : erlaubteScopeEbenenFuerVerifier(
+        await getUserRolesMitScope(db, tenant.id, session.userId),
+      );
+
   const liste = await qrCodesListe(db, tenant.id);
   const termineRaw = await getOffeneTermineFuerVerifier(db, tenant.id);
   const termine = termineRaw.map((t) => ({
@@ -98,6 +117,26 @@ export default async function AdminVerifizierungPage({ params }: PageProps) {
         </p>
       </div>
 
+      {/* Standort-/Sprechzeiten-Verwaltung (Block K1): NUR für Admins sichtbar —
+          reine Verifier bestätigen Termine, verwalten aber keine Standorte
+          (die Unterseite + Actions erzwingen isAdmin zusätzlich serverseitig). */}
+      {callerIstAdmin && (
+        <section className="mb-10">
+          <Link
+            href={`/${slugFromPath}/admin/verifizierung/standorte`}
+            className="pz-card block p-5 transition-shadow hover:shadow-md"
+          >
+            <h2 className="text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
+              Standorte &amp; Sprechzeiten verwalten →
+            </h2>
+            <p className="mt-1 text-sm" style={{ color: "var(--pz-muted)" }}>
+              Verifizierungs-Standorte anlegen, Sprechzeiten (einzeln oder als
+              Wochenserie) einstellen — die Termine, die Bürger:innen buchen können.
+            </p>
+          </Link>
+        </section>
+      )}
+
       <section className="mb-10">
         <h2 className="mb-3 text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
           Gebuchte Termine
@@ -114,7 +153,7 @@ export default async function AdminVerifizierungPage({ params }: PageProps) {
         <h2 className="mb-3 text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
           QR-Code (Schnellweg)
         </h2>
-        <QrVerwaltung liste={serializeListe(liste)} />
+        <QrVerwaltung liste={serializeListe(liste)} erlaubteEbenen={erlaubteEbenen} />
       </section>
     </main>
   );

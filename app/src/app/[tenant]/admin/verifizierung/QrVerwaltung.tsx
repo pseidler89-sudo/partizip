@@ -55,6 +55,13 @@ interface QrListItem {
 
 interface Props {
   liste: QrListItem[];
+  /**
+   * Gebietsbindung (Block K1), NUR UI-Komfort: die vom Server berechneten
+   * erlaubten Eingabe-Ebenen des Callers (Admin: alle; Nicht-Admin-Verifier:
+   * eigener Knoten und darunter). Die Durchsetzung passiert serverseitig in
+   * qrErstellenCore — dieses Dropdown filtert nur die Auswahl.
+   */
+  erlaubteEbenen: ScopeLevel[];
 }
 
 interface ErstelltState {
@@ -80,12 +87,17 @@ function statusOf(q: QrListItem): { text: string; tone: "ok" | "warn" | "muted" 
   return { text: "Aktiv", tone: "ok" };
 }
 
-export function QrVerwaltung({ liste }: Props) {
+export function QrVerwaltung({ liste, erlaubteEbenen }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  // Formular-State
-  const [scopeLevel, setScopeLevel] = useState<ScopeLevel>("stadt");
+  // Nur die für den Caller erlaubten Ebenen anbieten (Reihenfolge der UI-Liste
+  // beibehalten). Vorbelegung „stadt" wie bisher — falls dem Caller nicht
+  // erlaubt (z. B. reiner Ortsteil-Verifier), die erste erlaubte Ebene.
+  const ebenen = SCOPE_LEVELS.filter((s) => erlaubteEbenen.includes(s));
+  const [scopeLevel, setScopeLevel] = useState<ScopeLevel>(
+    ebenen.includes("stadt") ? "stadt" : (ebenen[0] ?? "stadt"),
+  );
   const [scopeCode, setScopeCode] = useState("");
   const [label, setLabel] = useState("");
   const [maxRedemptions, setMaxRedemptions] = useState("50");
@@ -187,7 +199,7 @@ export function QrVerwaltung({ liste }: Props) {
                 className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
                 style={{ borderColor: "var(--pz-line)" }}
               >
-                {SCOPE_LEVELS.map((s) => (
+                {ebenen.map((s) => (
                   <option key={s} value={s}>
                     {SCOPE_LABELS[s]}
                   </option>

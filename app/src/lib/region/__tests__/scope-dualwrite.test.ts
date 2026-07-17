@@ -120,12 +120,20 @@ describe("region/scope Dual-Write (Integration)", () => {
 
   it.skipIf(SKIP)("qrErstellenCore setzt region_id aus der Scope-Eingabe (contract: nur region_id)", async () => {
     const [u] = await db.insert(users).values({ tenantId, email: `qr-${Date.now()}@t.de`, minAgeConfirmedAt: new Date() }).returning();
-    const res = await qrErstellenCore(db as never, tenantId, u.id, {
-      scopeLevel: "ortsteil",
-      scopeCode: "wehen",
-      maxRedemptions: 3,
-      gueltigkeitStunden: 24,
-    });
+    const res = await qrErstellenCore(
+      db as never,
+      tenantId,
+      u.id,
+      {
+        scopeLevel: "ortsteil",
+        scopeCode: "wehen",
+        maxRedemptions: 3,
+        gueltigkeitStunden: 24,
+      },
+      // Gebietsbindung (Block K1): Admin-Kontext — hier zählt nur der
+      // region_id-Contract, nicht die Verifier-Einschränkung.
+      { isAdmin: true, scopes: [] },
+    );
     const [row] = await db.select().from(qrCodes).where(eq(qrCodes.id, res.qrId)).limit(1);
     expect(await pathOf(db, row.regionId!)).toBe("de.hessen.rtk.taunusstein.wehen");
   });

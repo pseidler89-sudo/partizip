@@ -15,6 +15,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { roles, users, regions } from "@/db/schema";
 import type { Db } from "@/db/client";
+import type { ScopeInputLevel } from "@/lib/region/ebenen";
 
 export const REDAKTION_ROLES = ["redakteur", "kommune_admin", "super_admin"] as const;
 export const FREIGABE_ROLES = ["kommune_admin", "super_admin"] as const;
@@ -120,8 +121,12 @@ export interface RoleScopeRow {
 /**
  * Deckt der Vorfahr-(oder-Selbst-)Knoten `anc` den Knoten `node` ab? ltree-`@>`
  * in JS: gleicher Pfad ODER `node` liegt echt unterhalb (`anc.` als Präfix).
+ *
+ * Exportiert (Block K1): neben der Beobachter-Sichtbarkeit nutzt auch die
+ * QR-Gebietsbindung (qrErstellenCore) diese Abdeckungs-Prüfung — ein Verifier
+ * darf QR-Codes nur für Knoten erstellen, die sein Rollen-Pfad abdeckt.
  */
-function pfadDecktAb(anc: string, node: string): boolean {
+export function pfadDecktAb(anc: string, node: string): boolean {
   return node === anc || node.startsWith(anc + ".");
 }
 
@@ -188,6 +193,44 @@ export async function getUserRolesMitScope(
       ),
     );
   return rows as RoleScopeRow[];
+}
+
+/**
+ * Erlaubte QR-Eingabe-Ebenen je Gebietsart des Rollen-Knotens (Block K1):
+ * die Ebene des eigenen Knotens und alles DARUNTER (ein Kreis-Verifier darf
+ * kreis-, stadt- und ortsteil-QRs erstellen; ein Ortsteil-Verifier nur
+ * ortsteil). Mapping Gebietsart→Eingabe-Ebene: `gemeinde` → „stadt";
+ * `bund` deckt alle vier Eingabe-Ebenen ab (Bund selbst ist keine Ebene).
+ */
+const SCOPE_EBENEN_JE_REGION_TYP: Record<string, ScopeInputLevel[]> = {
+  ortsteil: ["ortsteil"],
+  gemeinde: ["ortsteil", "stadt"],
+  kreis: ["ortsteil", "stadt", "kreis"],
+  land: ["ortsteil", "stadt", "kreis", "land"],
+  bund: ["ortsteil", "stadt", "kreis", "land"],
+};
+
+/**
+ * Welche QR-Eingabe-Ebenen darf ein Nicht-Admin-Verifier mit diesen Rollen im
+ * Dropdown sehen? REINE Funktion, nur UI-KOMFORT — die eigentliche Durchsetzung
+ * (inkl. „richtiger Ortsteil?") passiert serverseitig in qrErstellenCore über
+ * den ltree-Pfad (pfadDecktAb). Betrachtet werden AUSSCHLIESSLICH
+ * `verifier`-Rollen; unbekannte Gebietsarten zählen nicht (fail-closed).
+ */
+export function erlaubteScopeEbenenFuerVerifier(
+  rollen: RoleScopeRow[],
+): ScopeInputLevel[] {
+  const erlaubt = new Set<ScopeInputLevel>();
+  for (const r of rollen) {
+    if (r.roleType !== "verifier") continue;
+    for (const ebene of SCOPE_EBENEN_JE_REGION_TYP[r.regionTyp] ?? []) {
+      erlaubt.add(ebene);
+    }
+  }
+  // Stabile Anzeige-Reihenfolge (lokal → grob), unabhängig von der Rollen-Reihenfolge.
+  return (["ortsteil", "stadt", "kreis", "land"] as const).filter((e) =>
+    erlaubt.has(e),
+  );
 }
 
 // ---------------------------------------------------------------------------

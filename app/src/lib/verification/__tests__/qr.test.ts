@@ -43,12 +43,25 @@ import {
   qrErstellenCore,
   qrWiderrufenCore,
   qrEinloesenCore,
+  QrGebietError,
   QR_VERIFICATION_MONTHS,
   addMonths,
+  type QrErstellerKontext,
 } from "@/lib/verification/qr-core";
 import { qrCodesListe, qrTokenMeta } from "@/lib/verification/queries";
+import {
+  erlaubteScopeEbenenFuerVerifier,
+  getUserRolesMitScope,
+} from "@/lib/auth/roles";
+import { resolveRegionIdForScope } from "@/lib/region/scope";
 
-const { tenants, users, ortsteile, qrCodes, qrRedemptions, auditEvents } = schema;
+const { tenants, users, roles, ortsteile, qrCodes, qrRedemptions, auditEvents } = schema;
+
+/**
+ * Gebietsbindungs-Kontext eines Admins (Block K1): unbeschränkt — entspricht
+ * dem, was die Action für kommune_admin/super_admin durchreicht.
+ */
+const ADMIN: QrErstellerKontext = { isAdmin: true, scopes: [] };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(__dirname, "../../../../../db/migrations");
@@ -126,7 +139,7 @@ describe("verification/qr (Integration)", () => {
       scopeLevel: "stadt",
       maxRedemptions: 5,
       gueltigkeitStunden: 24,
-    });
+    }, ADMIN);
     expect(r.rawToken).toBeTruthy();
 
     const [row] = await db.select().from(qrCodes).where(eq(qrCodes.id, r.qrId));
@@ -147,7 +160,7 @@ describe("verification/qr (Integration)", () => {
       label: "Bürgerbüro",
       maxRedemptions: 3,
       gueltigkeitStunden: 24,
-    });
+    }, ADMIN);
 
     const res = await qrEinloesenCore(db as never, tenantId, u.id, r.rawToken);
     expect(res.ok).toBe(true);
@@ -189,7 +202,7 @@ describe("verification/qr (Integration)", () => {
       scopeLevel: "stadt",
       maxRedemptions: 5,
       gueltigkeitStunden: 1,
-    });
+    }, ADMIN);
     // expiresAt in die Vergangenheit setzen.
     await db
       .update(qrCodes)
@@ -214,7 +227,7 @@ describe("verification/qr (Integration)", () => {
       scopeLevel: "stadt",
       maxRedemptions: 5,
       gueltigkeitStunden: 24,
-    });
+    }, ADMIN);
     const wr = await qrWiderrufenCore(db as never, tenantId, verifierId, r.qrId);
     expect(wr.ok).toBe(true);
 
@@ -233,7 +246,7 @@ describe("verification/qr (Integration)", () => {
       scopeLevel: "stadt",
       maxRedemptions: 2,
       gueltigkeitStunden: 24,
-    });
+    }, ADMIN);
     const u1 = await makeUser(tenantId);
     const u2 = await makeUser(tenantId);
     const u3 = await makeUser(tenantId);
@@ -262,7 +275,7 @@ describe("verification/qr (Integration)", () => {
       scopeLevel: "stadt",
       maxRedemptions: 1, // genau ein Slot
       gueltigkeitStunden: 24,
-    });
+    }, ADMIN);
     const a = await makeUser(tenantId);
     const b = await makeUser(tenantId);
 
@@ -287,7 +300,7 @@ describe("verification/qr (Integration)", () => {
       scopeLevel: "stadt",
       maxRedemptions: 5,
       gueltigkeitStunden: 24,
-    });
+    }, ADMIN);
     const u = await makeUser(tenantId);
 
     const first = await qrEinloesenCore(db as never, tenantId, u.id, r.rawToken);
@@ -310,7 +323,7 @@ describe("verification/qr (Integration)", () => {
       scopeLevel: "stadt",
       maxRedemptions: 5,
       gueltigkeitStunden: 24,
-    });
+    }, ADMIN);
     const fremderUser = await makeUser(tenant2Id);
 
     // Einlösen über den FALSCHEN Tenant → ungültig (nicht gefunden).
@@ -335,7 +348,7 @@ describe("verification/qr (Integration)", () => {
       scopeCode: "OT-77",
       maxRedemptions: 5,
       gueltigkeitStunden: 24,
-    });
+    }, ADMIN);
 
     const res = await qrEinloesenCore(db as never, tenantId, u.id, r.rawToken);
     expect(res.ok).toBe(true);
@@ -355,5 +368,154 @@ describe("verification/qr (Integration)", () => {
     const res = await qrEinloesenCore(db as never, tenantId, u.id, "nicht-existent-xyz");
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/ungültig/i);
+  });
+
+  // --- Gebietsbindung (Block K1) -------------------------------------------
+  // Nicht-Admin-Verifier dürfen QRs nur für Knoten erstellen, die der ltree-
+  // Pfad einer ihrer verifier-Rollen abdeckt (fail-closed, QrGebietError).
+  // Der Kontext wird wie in der Action über getUserRolesMitScope geladen —
+  // die ECHTE Query, keine handgebauten Pfade.
+  describe.skipIf(SKIP)("Gebietsbindung (Block K1)", () => {
+    let otVerifier: string; // Verifier mit Rolle NUR auf Ortsteil OT-A
+    let otVerifierScopes: QrErstellerKontext["scopes"];
+
+    beforeAll(async () => {
+      if (SKIP) return;
+      // Ortsteil-Knoten OT-A/OT-B im Baum anlegen (Provisioning-GUC ist in der
+      // Test-DB an) und dem Verifier eine verifier-Rolle NUR auf OT-A geben.
+      const otA = await resolveRegionIdForScope(db as never, tenantId, "ortsteil", "OT-A");
+      await resolveRegionIdForScope(db as never, tenantId, "ortsteil", "OT-B");
+      const u = await makeUser(tenantId);
+      otVerifier = u.id;
+      await db.insert(roles).values({
+        tenantId,
+        userId: otVerifier,
+        roleType: "verifier",
+        regionId: otA,
+      });
+      otVerifierScopes = await getUserRolesMitScope(db as never, tenantId, otVerifier);
+      expect(otVerifierScopes.length).toBe(1);
+    });
+
+    it("Ortsteil-Verifier: stadt-QR wird abgelehnt (fail-closed)", async () => {
+      const vorher = (await qrCodesListe(db as never, tenantId)).length;
+      await expect(
+        qrErstellenCore(
+          db as never,
+          tenantId,
+          otVerifier,
+          { scopeLevel: "stadt", maxRedemptions: 5, gueltigkeitStunden: 24 },
+          { isAdmin: false, scopes: otVerifierScopes },
+        ),
+      ).rejects.toThrow(QrGebietError);
+      // Kein QR-Datensatz entstanden (der Fehler kommt VOR dem Insert).
+      const nachher = (await qrCodesListe(db as never, tenantId)).length;
+      expect(nachher).toBe(vorher);
+    });
+
+    it("Ortsteil-Verifier: QR im EIGENEN Ortsteil ist erlaubt", async () => {
+      const r = await qrErstellenCore(
+        db as never,
+        tenantId,
+        otVerifier,
+        {
+          scopeLevel: "ortsteil",
+          scopeCode: "OT-A",
+          maxRedemptions: 5,
+          gueltigkeitStunden: 24,
+        },
+        { isAdmin: false, scopes: otVerifierScopes },
+      );
+      expect(r.qrId).toBeTruthy();
+    });
+
+    it("Ortsteil-Verifier: QR im FREMDEN Ortsteil wird abgelehnt", async () => {
+      await expect(
+        qrErstellenCore(
+          db as never,
+          tenantId,
+          otVerifier,
+          {
+            scopeLevel: "ortsteil",
+            scopeCode: "OT-B",
+            maxRedemptions: 5,
+            gueltigkeitStunden: 24,
+          },
+          { isAdmin: false, scopes: otVerifierScopes },
+        ),
+      ).rejects.toThrow(/Zuständigkeitsgebiet/);
+    });
+
+    it("Admin: alle Ebenen erlaubt (auch fremder Ortsteil)", async () => {
+      const stadt = await qrErstellenCore(
+        db as never,
+        tenantId,
+        verifierId,
+        { scopeLevel: "stadt", maxRedemptions: 5, gueltigkeitStunden: 24 },
+        ADMIN,
+      );
+      expect(stadt.qrId).toBeTruthy();
+      const otB = await qrErstellenCore(
+        db as never,
+        tenantId,
+        verifierId,
+        {
+          scopeLevel: "ortsteil",
+          scopeCode: "OT-B",
+          maxRedemptions: 5,
+          gueltigkeitStunden: 24,
+        },
+        ADMIN,
+      );
+      expect(otB.qrId).toBeTruthy();
+    });
+
+    it("Tenant-Isolation: verifier-Rolle in Tenant B zählt in Tenant A nicht", async () => {
+      // User mit verifier-Rolle in Tenant 2 (Gemeinde-Knoten dort).
+      const [fremd] = await db
+        .insert(users)
+        .values({
+          tenantId: tenant2Id,
+          email: nextEmail("fremd"),
+          minAgeConfirmedAt: new Date(),
+          verificationStatus: "pending",
+        })
+        .returning();
+      const gem2 = await resolveRegionIdForScope(db as never, tenant2Id, "stadt", null);
+      await db.insert(roles).values({
+        tenantId: tenant2Id,
+        userId: fremd.id,
+        roleType: "verifier",
+        regionId: gem2,
+      });
+      // getUserRolesMitScope ist tenant-scoped: in Tenant A hat der User NICHTS.
+      const scopesInA = await getUserRolesMitScope(db as never, tenantId, fremd.id);
+      expect(scopesInA.length).toBe(0);
+      await expect(
+        qrErstellenCore(
+          db as never,
+          tenantId,
+          fremd.id,
+          { scopeLevel: "stadt", maxRedemptions: 5, gueltigkeitStunden: 24 },
+          { isAdmin: false, scopes: scopesInA },
+        ),
+      ).rejects.toThrow(QrGebietError);
+    });
+
+    it("erlaubteScopeEbenenFuerVerifier (UI-Komfort): eigener Knoten + darunter", () => {
+      const ot = { roleType: "verifier", regionTyp: "ortsteil", regionPath: "de.x.y.g.o" };
+      const gem = { roleType: "verifier", regionTyp: "gemeinde", regionPath: "de.x.y.g" };
+      const kreis = { roleType: "verifier", regionTyp: "kreis", regionPath: "de.x.y" };
+      expect(erlaubteScopeEbenenFuerVerifier([ot])).toEqual(["ortsteil"]);
+      expect(erlaubteScopeEbenenFuerVerifier([gem])).toEqual(["ortsteil", "stadt"]);
+      expect(erlaubteScopeEbenenFuerVerifier([kreis])).toEqual(["ortsteil", "stadt", "kreis"]);
+      // Mehrere Rollen: Vereinigung; Nicht-verifier-Rollen zählen nicht.
+      expect(erlaubteScopeEbenenFuerVerifier([ot, kreis])).toEqual(["ortsteil", "stadt", "kreis"]);
+      expect(
+        erlaubteScopeEbenenFuerVerifier([
+          { roleType: "beobachter", regionTyp: "land", regionPath: "de.x" },
+        ]),
+      ).toEqual([]);
+    });
   });
 });
