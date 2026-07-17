@@ -99,7 +99,13 @@ export function DemoGuide({
   const [error, setError] = useState<string | null>(null);
 
   async function zurVerwaltung() {
-    if (busy || verwaltung) return;
+    // IMMER erneut starten (nur bei laufender Aktion kurz gesperrt), NIE wegen
+    // bereits aktiver Perspektive: Nach dem nächtlichen Reset (03:30) überlebt
+    // das 12-h-Cookie die gelöschte Session — der Guide zeigt zwar noch
+    // „Verwaltung", jeder Admin-CTA liefe aber ins /anmelden (Sackgasse). Ein
+    // erneuter Klick ruft die idempotente Action, die bei fehlender Session eine
+    // FRISCHE anlegt, statt den Besucher gefangen zu halten.
+    if (busy) return;
     setError(null);
     setBusy(true);
     try {
@@ -119,7 +125,10 @@ export function DemoGuide({
   }
 
   function zurBuergerin() {
-    if (busy || !verwaltung) return;
+    // IMMER klickbar (nur bei laufender Aktion kurz gesperrt): der Rück-Weg in
+    // die Bürger-Sicht muss jederzeit erreichbar sein, damit ein nach-Reset-
+    // Besucher der Verwaltungs-Sackgasse entkommt.
+    if (busy) return;
     setError(null);
     // Nur das UI-Cookie löschen — die (rechtefreie) Bürger-Sicht steht sofort;
     // die ephemere Session läuft über TTL/Reset aus.

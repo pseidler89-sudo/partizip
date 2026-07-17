@@ -115,6 +115,8 @@ describe("demo/side-effect-fence (Integration, echte Actions)", () => {
   let veroeffentlichen: typeof import("@/lib/digest/actions").veroeffentlichen;
   let freigeben: typeof import("@/lib/digest/actions").freigeben;
   let einladen: typeof import("@/lib/admin/invitation-actions").einladen;
+  let assignRole: typeof import("@/lib/admin/actions").assignRole;
+  let revokeRole: typeof import("@/lib/admin/actions").revokeRole;
 
   /** Dummy-Transport für pollAktivieren (Default-Transport braucht SMTP-env). */
   const dummyTransport = { sendMail: async () => ({}) };
@@ -252,6 +254,9 @@ describe("demo/side-effect-fence (Integration, echte Actions)", () => {
     freigeben = digestActions.freigeben;
     const invitationActions = await import("@/lib/admin/invitation-actions");
     einladen = invitationActions.einladen;
+    const adminActions = await import("@/lib/admin/actions");
+    assignRole = adminActions.assignRole;
+    revokeRole = adminActions.revokeRole;
   });
 
   afterAll(async () => {
@@ -366,6 +371,45 @@ describe("demo/side-effect-fence (Integration, echte Actions)", () => {
     const res = await einladen({ email: "neu@example.org", roleType: "redakteur" });
     expect(res.ok).toBe(true);
     expect(sendInvitationEmailMock).toHaveBeenCalledTimes(1);
+  });
+
+  // --- (c2) Rollen-Fence (Block I MAJOR-1) ------------------------------------
+
+  it.skipIf(SKIP)("assignRole/revokeRole auf Demo: abgelehnt VOR jeder Mutation", async () => {
+    await loginAlsAdmin(demoTenant);
+    const DEMO_LOCK = "Im Demo-Mandanten werden Rollen nicht verändert.";
+
+    const a = await assignRole({
+      targetEmail: "person@example.org",
+      roleType: "redakteur",
+      scopeLevel: "stadt",
+      scopeCode: null,
+    });
+    expect(a.ok).toBe(false);
+    expect(a.error).toBe(DEMO_LOCK);
+
+    const r = await revokeRole({ roleId: "00000000-0000-0000-0000-000000000000" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe(DEMO_LOCK);
+
+    // Fence greift VOR dem Kern: keine neue Rolle für den Fremd-Adressaten.
+    const rows = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.tenantId, demoTenant.id), eq(users.email, "person@example.org")));
+    expect(rows.length).toBe(0);
+  });
+
+  it.skipIf(SKIP)("assignRole auf Nicht-Demo: keine Rollen-Fence (Kern läuft)", async () => {
+    await loginAlsAdmin(normalTenant);
+    const res = await assignRole({
+      targetEmail: `neu-${++counter}@example.org`,
+      roleType: "redakteur",
+      scopeLevel: "stadt",
+      scopeCode: null,
+    });
+    // Der Kern läuft (Erfolg) — jedenfalls NICHT die Demo-Sperre.
+    expect(res.error).not.toBe("Im Demo-Mandanten werden Rollen nicht verändert.");
   });
 
   // --- (d) Seed-Schutz ----------------------------------------------------------

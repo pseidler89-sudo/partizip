@@ -20,6 +20,7 @@ import { sha256Hex } from "@/lib/auth/crypto";
 import { getTenantFromHost } from "@/lib/tenant";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getUserRoleTypes } from "@/lib/auth/roles";
+import { isDemoTenant } from "@/lib/demo/config";
 import {
   assignRoleCore,
   revokeRoleCore,
@@ -70,10 +71,22 @@ async function getAdminAuthContext(): Promise<AdminAuthContext | null> {
   };
 }
 
+/**
+ * SIDE-EFFECT-FENCE (Block I, Gate-B MAJOR): Rollen-Mutationen sind auf dem
+ * Demo-Mandanten gesperrt. Der ephemere Demo-Admin dürfte sonst einem
+ * PERSISTENTEN Konto eine kommune_admin-Rolle geben. Doppelt abgesichert:
+ * dieser Fence verhindert die Rollen-Mutation, und /api/auth/request legt auf
+ * dem Demo-Mandanten gar kein Konto mehr an (ephemere Sessions statt
+ * Magic-Link) — beide zusammen halten die „jeden Morgen frisch + rein
+ * ephemer"-Invariante. Fail-closed.
+ */
+const DEMO_ROLLEN_GESPERRT = "Im Demo-Mandanten werden Rollen nicht verändert.";
+
 /** Server Action: Rolle zuweisen (auditiert, eskalationsgeschützt). */
 export async function assignRole(input: AssignRoleInput): Promise<RoleActionResult> {
   const ctx = await getAdminAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_ROLLEN_GESPERRT };
 
   return assignRoleCore(ctx.db, ctx.tenant.id, ctx.roleTypes, ctx.userId, input);
 }
@@ -82,6 +95,7 @@ export async function assignRole(input: AssignRoleInput): Promise<RoleActionResu
 export async function revokeRole(input: RevokeRoleInput): Promise<RoleActionResult> {
   const ctx = await getAdminAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_ROLLEN_GESPERRT };
 
   return revokeRoleCore(ctx.db, ctx.tenant.id, ctx.roleTypes, ctx.userId, input);
 }

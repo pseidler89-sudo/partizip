@@ -43,6 +43,7 @@ import { clientIpFromForwardedFor } from "@/lib/client-ip";
 import { notifyFollowersStatusChanged, sendTrackingCodeEmail } from "@/lib/anliegen/notify";
 import type { NotifyTransport } from "@/lib/anliegen/notify";
 import { FEATURE_ANLIEGEN_EINREICHEN } from "@/lib/features";
+import { isDemoTenant } from "@/lib/demo/config";
 
 // ---------------------------------------------------------------------------
 // Auth-Hilfsfunktionen (nach Muster aus digest/actions.ts)
@@ -395,6 +396,11 @@ export async function changeAnliegenStatus(
   });
 
   if (!result.ok) return result;
+
+  // SIDE-EFFECT-FENCE (Block I): Auf dem Demo-Mandanten keine echten Mails an
+  // Follower (Doktrin „isDemoTenant ⇒ keine Außenwirkung"). Der Statuswechsel
+  // selbst ist erlaubt und bereits committet — nur der SMTP-Versand entfällt.
+  if (isDemoTenant(ctx.tenant.slug)) return { ok: true };
 
   // Follower benachrichtigen (außerhalb Transaktion — Fehler blockieren nicht)
   try {

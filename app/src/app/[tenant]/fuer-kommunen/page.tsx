@@ -8,7 +8,7 @@
 
 import type { Metadata } from "next";
 import Link from "next/link";
-import { isDemoTenant } from "@/lib/demo/config";
+import { demoTenantSlug, isDemoTenant } from "@/lib/demo/config";
 
 export const metadata: Metadata = {
   title: "Für Kommunen & Vereine — Partizip",
@@ -24,9 +24,12 @@ const DEMO_URL = "https://demo.partizip.online";
 
 /**
  * Einstieg in die Verwaltungs-Perspektive der Demo (Block I) — Tenant-Route
- * /[tenant]/demo-verwaltung auf dem Demo-Mandanten (Slug "demo", wie DEMO_URL).
+ * /[tenant]/demo-verwaltung auf dem Demo-Mandanten. Der Pfad-Slug kommt aus
+ * DEMO_TENANT_SLUG (SSOT), NICHT aus einem zweiten Hardcode „demo" — weicht der
+ * konfigurierte Slug ab (z. B. Staging), zeigte ein fester Pfad sonst ins Leere
+ * (404, Gate-B MINOR-6). Fallback „demo" bleibt parat zur Subdomain in DEMO_URL.
  */
-const DEMO_VERWALTUNG_URL = `${DEMO_URL}/demo/demo-verwaltung`;
+const DEMO_VERWALTUNG_URL = `${DEMO_URL}/${demoTenantSlug() ?? "demo"}/demo-verwaltung`;
 
 const SCHRITTE: { n: string; titel: string; text: string }[] = [
   {

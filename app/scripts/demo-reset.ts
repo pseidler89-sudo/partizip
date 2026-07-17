@@ -23,7 +23,12 @@
  *      Seed-Fragen (deterministische IDs aus src/lib/demo/seed-ids.ts) bleiben.
  *   3. Alle QR-Codes des Demo-Mandanten löschen (qr_redemptions CASCADE) —
  *      auch die stammen nur von Demo-Admins, der Seed legt keine an.
- *   4. Ephemere Demo-Konten (@demo.invalid) löschen — Sessions/Rollen CASCADE.
+ *   4. ALLE User des Demo-Mandanten löschen — Sessions/Rollen CASCADE. Der Seed
+ *      (seed-musterstadt.ts) legt KEINE User an; jede users-Zeile auf dem
+ *      Demo-Tenant ist damit Wegwerf/Fremd (ephemere Demo-Admins ODER über
+ *      /api/auth/request angelegte Fremdkonten) → vollständig ephemer. Defense-
+ *      in-Depth zum Fence in api/auth/request (dort wird gar kein Konto mehr
+ *      angelegt); früher wurden nur @demo.invalid-Konten geräumt.
  *   5. Anliegen des Demo-Mandanten löschen (Events/Follower CASCADE) — Seed
  *      legt keine an; alles dort ist Besucher-Content (Gate-B MINOR-5).
  *   6. rate_limit_events der Demo-Scopes (Bürger + Verwaltung) älter als 24 h
@@ -33,9 +38,11 @@
  *   DEMO_TENANT_SLUG=demo npm run demo:reset
  */
 
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import postgres from "postgres";
-import { drizzle } from "drizzle-orm/postgres-js";
-import { and, eq, inArray, like, lt, notInArray, sql } from "drizzle-orm";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { and, eq, inArray, lt, notInArray, sql } from "drizzle-orm";
 import {
   tenants,
   polls,
@@ -53,21 +60,28 @@ import { musterstadtSeedPollIds } from "../src/lib/demo/seed-ids.js";
 const databaseUrl =
   process.env.DATABASE_URL ??
   "postgres://partizip:partizip@127.0.0.1:5433/partizip";
-const DEMO_EMAIL_DOMAIN = "demo.invalid"; // == src/lib/demo/config.ts
 /** MUSS dem Seed-Namen in seed-musterstadt.ts entsprechen (Demo-Marker a). */
 const DEMO_TENANT_NAME = "Musterstadt (Demo)";
 
-async function main() {
-  const SLUG = process.env.DEMO_TENANT_SLUG?.trim().toLowerCase();
-  if (!SLUG) {
-    throw new Error(
-      "DEMO_TENANT_SLUG ist Pflicht (kein Default) — nichts gelöscht.",
-    );
-  }
+export interface DemoResetStats {
+  votesDeleted: number;
+  receiptsDeleted: number;
+  pollsDeleted: number;
+  qrCodesDeleted: number;
+  usersDeleted: number;
+  anliegenDeleted: number;
+}
 
-  const sqlc = postgres(databaseUrl, { max: 1 });
-  const db = drizzle(sqlc);
-
+/**
+ * Reset-Kern (guards + Transaktion), von der Verbindung entkoppelt — so testbar
+ * (der Test übergibt eine eigene drizzle-Instanz auf die Test-DB). main() legt
+ * die Verbindung an und ruft dies auf. Beide fail-closed-Guards (Tenant-Name +
+ * Seed-Marker-Poll) laufen VOR jeder Löschung.
+ */
+export async function demoReset(
+  db: PostgresJsDatabase<Record<string, never>>,
+  SLUG: string,
+): Promise<DemoResetStats> {
   const tenantRows = await db
     .select({ id: tenants.id, name: tenants.name })
     .from(tenants)
@@ -137,9 +151,12 @@ async function main() {
       .where(eq(qrCodes.tenantId, tenantId))
       .returning({ id: qrCodes.id });
 
+    // ALLE User des Demo-Mandanten (Sessions/Rollen CASCADE): der Seed legt
+    // keine an → jede Zeile ist Wegwerf/Fremd. Fängt auch persistente Fremd-
+    // konten ab, die vor dem api/auth/request-Fence angelegt wurden.
     const u = await tx
       .delete(users)
-      .where(and(eq(users.tenantId, tenantId), like(users.email, `%@${DEMO_EMAIL_DOMAIN}`)))
+      .where(eq(users.tenantId, tenantId))
       .returning({ id: users.id });
 
     // Besucher-Anliegen (Seed legt keine an; Events/Follower CASCADE).
@@ -184,15 +201,46 @@ async function main() {
     };
   });
 
-  console.log(
-    `Demo-Reset '${SLUG}': ${stats.votesDeleted} Stimmen, ${stats.receiptsDeleted} Belege, ` +
-      `${stats.pollsDeleted} Demo-Fragen, ${stats.qrCodesDeleted} QR-Codes, ` +
-      `${stats.usersDeleted} Demo-Konten, ${stats.anliegenDeleted} Anliegen entfernt.`,
-  );
-  await sqlc.end();
+  return stats;
 }
 
-main().catch((err) => {
-  console.error("Demo-Reset fehlgeschlagen:", err);
-  process.exit(1);
-});
+async function main() {
+  const SLUG = process.env.DEMO_TENANT_SLUG?.trim().toLowerCase();
+  if (!SLUG) {
+    throw new Error(
+      "DEMO_TENANT_SLUG ist Pflicht (kein Default) — nichts gelöscht.",
+    );
+  }
+
+  const sqlc = postgres(databaseUrl, { max: 1 });
+  const db = drizzle(sqlc);
+  try {
+    const stats = await demoReset(db, SLUG);
+    console.log(
+      `Demo-Reset '${SLUG}': ${stats.votesDeleted} Stimmen, ${stats.receiptsDeleted} Belege, ` +
+        `${stats.pollsDeleted} Demo-Fragen, ${stats.qrCodesDeleted} QR-Codes, ` +
+        `${stats.usersDeleted} User (alle des Demo-Tenants), ${stats.anliegenDeleted} Anliegen entfernt.`,
+    );
+  } finally {
+    await sqlc.end();
+  }
+}
+
+/** Nur bei direktem Aufruf (npm run demo:reset) ausführen — NICHT beim Import
+ *  aus Tests (dort ist process.argv[1] die Vitest-Binary). */
+function istDirektAufgerufen(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+  } catch {
+    return false;
+  }
+}
+
+if (istDirektAufgerufen()) {
+  main().catch((err) => {
+    console.error("Demo-Reset fehlgeschlagen:", err);
+    process.exit(1);
+  });
+}
