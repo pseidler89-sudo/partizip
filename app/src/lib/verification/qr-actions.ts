@@ -34,8 +34,10 @@ import {
   qrErstellenCore,
   qrWiderrufenCore,
   qrEinloesenCore,
+  QrGebietError,
   QR_LIMITS,
 } from "@/lib/verification/qr-core";
+import { getUserRoleTypes, getUserRolesMitScope, isAdmin } from "@/lib/auth/roles";
 import { checkQrRedeemRateLimit } from "@/lib/verification/rate-limit";
 
 // ---------------------------------------------------------------------------
@@ -83,13 +85,34 @@ export async function qrErstellen(
   }
   const { scopeLevel, scopeCode, label, maxRedemptions, gueltigkeitStunden } = parsed.data;
 
-  const result = await qrErstellenCore(ctx.db, ctx.tenant.id, ctx.userId, {
-    scopeLevel,
-    scopeCode: scopeCode ?? null,
-    label: label ?? null,
-    maxRedemptions,
-    gueltigkeitStunden,
-  });
+  // GEBIETSBINDUNG (Block K1): Admin-Status + Rollen-Gebiete SERVERSEITIG laden
+  // (beide tenant-scoped + account_status-gefiltert) und an den Core durchreichen
+  // — der erzwingt fail-closed, dass Nicht-Admin-Verifier nur im eigenen
+  // Zuständigkeitsgebiet QRs erstellen. Die UI filtert das Dropdown nur als Komfort.
+  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
+  const scopes = await getUserRolesMitScope(ctx.db, ctx.tenant.id, ctx.userId);
+
+  let result;
+  try {
+    result = await qrErstellenCore(
+      ctx.db,
+      ctx.tenant.id,
+      ctx.userId,
+      {
+        scopeLevel,
+        scopeCode: scopeCode ?? null,
+        label: label ?? null,
+        maxRedemptions,
+        gueltigkeitStunden,
+      },
+      { isAdmin: isAdmin(roleTypes), scopes },
+    );
+  } catch (err) {
+    if (err instanceof QrGebietError) {
+      return { ok: false, error: err.message };
+    }
+    throw err;
+  }
 
   // Einlöse-URL bauen: https://<host>/<slug>/verifizieren?code=<rawToken>.
   // Host aus dem Request-Header (Tenant-Subdomain); Schema = https außer auf
@@ -133,7 +156,16 @@ export async function qrWiderrufen(
   const idParsed = z.string().uuid().safeParse(qrId);
   if (!idParsed.success) return { ok: false, error: "Ungültige QR-ID." };
 
-  return qrWiderrufenCore(ctx.db, ctx.tenant.id, ctx.userId, idParsed.data);
+  // GEBIETSBINDUNG (Gate-B K1): symmetrisch zu qrErstellen — Admin-Status +
+  // Rollen-Gebiete serverseitig laden, der Core erzwingt die Abdeckung
+  // (Ortsteil-Verifier kann keine stadtweiten QRs mehr widerrufen).
+  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
+  const scopes = await getUserRolesMitScope(ctx.db, ctx.tenant.id, ctx.userId);
+
+  return qrWiderrufenCore(ctx.db, ctx.tenant.id, ctx.userId, idParsed.data, {
+    isAdmin: isAdmin(roleTypes),
+    scopes,
+  });
 }
 
 // ---------------------------------------------------------------------------

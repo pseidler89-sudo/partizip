@@ -39,6 +39,7 @@ import {
 import { generateRawToken, sha256Hex } from "@/lib/auth/crypto";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
 import type { ScopeInputLevel } from "@/lib/region/ebenen";
+import { pfadDecktAb, type RoleScopeRow } from "@/lib/auth/roles";
 
 /** Composer-Eingabe-Ebene für die QR-Erstellung (TS-Union, kein DB-Enum mehr). */
 export type ScopeLevel = ScopeInputLevel;
@@ -133,12 +134,40 @@ export interface QrErstellenResult {
 }
 
 /**
+ * Gebietsbindungs-Kontext des QR-Erstellers (Block K1): die Action lädt Rollen +
+ * Admin-Status SERVERSEITIG (getUserRoleTypes/getUserRolesMitScope, beide
+ * tenant-scoped + account_status-gefiltert) und reicht sie hierher durch —
+ * NIEMALS aus Client-Eingaben.
+ */
+export interface QrErstellerKontext {
+  isAdmin: boolean;
+  scopes: RoleScopeRow[];
+}
+
+/**
+ * Marker-Fehler der QR-Gebietsbindung (Block K1): ein Nicht-Admin-Verifier hat
+ * versucht, einen QR außerhalb seines Rollen-Gebiets zu erstellen. Wird von der
+ * Action abgefangen und als freundlicher `{ ok:false }`-Fehler zurückgegeben
+ * (Muster QrCapError: throw im Core, catch in der Aufrufschicht).
+ */
+export class QrGebietError extends Error {
+  constructor() {
+    super("QR-Codes können Sie nur für Ihr eigenes Zuständigkeitsgebiet erstellen.");
+    this.name = "QrGebietError";
+  }
+}
+
+/**
  * Erzeugt einen QR-Code (tenant-scoped). Speichert NUR tokenHash + Felder.
  * expiresAt = now() + gueltigkeitStunden (in der DB berechnet, kein JS-Date in
  * Roh-SQL für den Wert — wir nutzen Drizzle-Insert mit einem JS-Date, das der
  * Treiber korrekt als Parameter bindet).
  *
- * Berechtigung (canVerify) wird in der aufrufenden Action geprüft.
+ * Berechtigung (canVerify) wird in der aufrufenden Action geprüft. ZUSÄTZLICH
+ * (Block K1, fail-closed): Nicht-Admin-Verifier dürfen nur QRs für Knoten
+ * erstellen, die der ltree-Pfad einer ihrer `verifier`-Rollen abdeckt
+ * (pfadDecktAb) — sonst QrGebietError. Admins (kommune_admin/super_admin)
+ * bleiben unbeschränkt wie bisher.
  * `createdBy` ist der einlösungsfähige Verifier/Admin (für die Audit-Spur).
  */
 export async function qrErstellenCore(
@@ -146,6 +175,7 @@ export async function qrErstellenCore(
   tenantId: string,
   createdBy: string,
   input: QrErstellenInput,
+  caller: QrErstellerKontext,
 ): Promise<QrErstellenResult> {
   const rawToken = generateRawToken();
   const tokenHash = sha256Hex(rawToken);
@@ -161,6 +191,29 @@ export async function qrErstellenCore(
     input.scopeLevel,
     input.scopeCode ?? null
   );
+
+  // GEBIETSBINDUNG (Block K1, fail-closed): Nicht-Admin ⇒ mindestens EINE
+  // `verifier`-Rolle muss den Ziel-Knoten abdecken (Rollen-Pfad ist Vorfahr-
+  // oder-Selbst des Ziel-Pfads). Der Ziel-Pfad wird über die soeben TENANT-
+  // SCOPED aufgelöste regionId geladen (regions.tenant_id ist bei Kreis-/
+  // Land-Knoten bewusst NULL — ein direkter tenant_id-Filter würde grobe
+  // Knoten fälschlich ausschließen; die Tenant-Bindung steckt bereits in
+  // resolveRegionIdForScope). caller.scopes stammt aus getUserRolesMitScope
+  // (tenant-scoped) — Rollen fremder Tenants zählen strukturell nicht.
+  if (!caller.isAdmin) {
+    const ziel = await db
+      .select({ path: sql<string>`${regions.path}::text` })
+      .from(regions)
+      .where(eq(regions.id, regionId))
+      .limit(1);
+    const zielPath = ziel[0]?.path;
+    const gedeckt =
+      !!zielPath &&
+      caller.scopes.some(
+        (r) => r.roleType === "verifier" && pfadDecktAb(r.regionPath, zielPath),
+      );
+    if (!gedeckt) throw new QrGebietError();
+  }
 
   return db.transaction(async (tx: Db) => {
     const [row] = await tx
@@ -198,13 +251,43 @@ export async function qrErstellenCore(
 /**
  * Widerruft einen QR-Code (tenant-scoped). Setzt revokedAt nur, wenn noch nicht
  * widerrufen (idempotent). Berechtigung (canVerify) prüft die Action.
+ *
+ * GEBIETSBINDUNG (Gate-B K1, symmetrisch zur Erstellung): ein Nicht-Admin-
+ * Verifier darf nur QRs widerrufen, deren Gebietsknoten der ltree-Pfad einer
+ * seiner `verifier`-Rollen abdeckt — sonst könnte ein Ortsteil-Verifier den
+ * stadtweiten Aktions-QR des Admins mitten in der Aktion abschießen
+ * (Innentäter-DoS). Fail-closed: existiert der QR nicht (oder gehört er einem
+ * fremden Tenant), erhält der Nicht-Admin dieselbe Gebiets-Meldung — kein
+ * Existenz-Orakel. Admins bleiben tenant-weit unbeschränkt.
  */
 export async function qrWiderrufenCore(
   db: Db,
   tenantId: string,
   actorUserId: string,
   qrId: string,
+  caller: QrErstellerKontext,
 ): Promise<{ ok: boolean; error?: string }> {
+  if (!caller.isAdmin) {
+    const ziel = await db
+      .select({ path: sql<string>`${regions.path}::text` })
+      .from(qrCodes)
+      .innerJoin(regions, eq(regions.id, qrCodes.regionId))
+      .where(and(eq(qrCodes.id, qrId), eq(qrCodes.tenantId, tenantId)))
+      .limit(1);
+    const zielPath = ziel[0]?.path;
+    const gedeckt =
+      !!zielPath &&
+      caller.scopes.some(
+        (r) => r.roleType === "verifier" && pfadDecktAb(r.regionPath, zielPath),
+      );
+    if (!gedeckt) {
+      return {
+        ok: false,
+        error: "QR-Codes können Sie nur für Ihr eigenes Zuständigkeitsgebiet widerrufen.",
+      };
+    }
+  }
+
   return db.transaction(async (tx: Db) => {
     const updated = await tx
       .update(qrCodes)
