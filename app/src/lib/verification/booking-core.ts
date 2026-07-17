@@ -28,6 +28,11 @@ import {
 } from "@/db/schema";
 import { grantResidency } from "@/lib/verification/qr-core";
 import { generateReadableCode, readableCodePattern } from "@/lib/readable-code";
+import {
+  istPgFehler,
+  PG_FOREIGN_KEY_VIOLATION,
+  PG_UNIQUE_VIOLATION,
+} from "@/lib/db/pg-errors";
 
 export const BOOKING_CODE_PREFIX = "TERMIN";
 export const BOOKING_CODE_PATTERN = readableCodePattern(BOOKING_CODE_PREFIX);
@@ -247,12 +252,20 @@ export async function bookSlotCore(
       return { ok: false, error: "Dieser Termin ist leider schon ausgebucht." };
     }
     // Partielles One-Open-UNIQUE (Race nach dem Vorab-Check) → freundlich.
-    if (typeof err === "object" && err !== null && (err as { code?: string }).code === "23505") {
+    // istPgFehler prüft auch err.cause — drizzle wickelt den PostgresError je
+    // nach Pfad in einen DrizzleQueryError (Gate-B K1, gemeinsamer Helfer).
+    if (istPgFehler(err, PG_UNIQUE_VIOLATION)) {
       return {
         ok: false,
         alreadyBooked: true,
         error: "Sie haben bereits einen offenen Termin. Bitte sagen Sie ihn zuerst ab.",
       };
+    }
+    // Race Slot-Löschung vs. Buchung (Gate-B K1): löscht ein Admin den Slot
+    // zwischen Vorab-Select und Buchungs-Insert, verletzt der Insert den
+    // slot_id-FK (23503) — freundlicher Fehler statt 500 beim Bürger.
+    if (istPgFehler(err, PG_FOREIGN_KEY_VIOLATION)) {
+      return { ok: false, error: "Dieser Termin ist nicht mehr verfügbar." };
     }
     throw err;
   }

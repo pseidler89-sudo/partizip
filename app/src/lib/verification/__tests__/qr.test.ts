@@ -228,7 +228,7 @@ describe("verification/qr (Integration)", () => {
       maxRedemptions: 5,
       gueltigkeitStunden: 24,
     }, ADMIN);
-    const wr = await qrWiderrufenCore(db as never, tenantId, verifierId, r.qrId);
+    const wr = await qrWiderrufenCore(db as never, tenantId, verifierId, r.qrId, ADMIN);
     expect(wr.ok).toBe(true);
 
     const res = await qrEinloesenCore(db as never, tenantId, u.id, r.rawToken);
@@ -236,7 +236,7 @@ describe("verification/qr (Integration)", () => {
     expect(res.error).toMatch(/widerrufen/i);
 
     // Erneuter Widerruf ist idempotent-abgelehnt (kein Doppel-Audit-Spam).
-    const wr2 = await qrWiderrufenCore(db as never, tenantId, verifierId, r.qrId);
+    const wr2 = await qrWiderrufenCore(db as never, tenantId, verifierId, r.qrId, ADMIN);
     expect(wr2.ok).toBe(false);
   });
 
@@ -444,6 +444,57 @@ describe("verification/qr (Integration)", () => {
           { isAdmin: false, scopes: otVerifierScopes },
         ),
       ).rejects.toThrow(/Zuständigkeitsgebiet/);
+    });
+
+    // Gate-B K1: Widerruf ist SYMMETRISCH gebietsgebunden — ein Ortsteil-
+    // Verifier kann den stadtweiten Aktions-QR des Admins nicht abschießen.
+    it("Widerruf: Ortsteil-Verifier kann stadtweiten Admin-QR NICHT widerrufen", async () => {
+      const stadtQr = await qrErstellenCore(
+        db as never,
+        tenantId,
+        verifierId,
+        { scopeLevel: "stadt", maxRedemptions: 5, gueltigkeitStunden: 24 },
+        ADMIN,
+      );
+      const wr = await qrWiderrufenCore(
+        db as never,
+        tenantId,
+        otVerifier,
+        stadtQr.qrId,
+        { isAdmin: false, scopes: otVerifierScopes },
+      );
+      expect(wr.ok).toBe(false);
+      expect(wr.error).toMatch(/Zuständigkeitsgebiet/);
+      // QR ist NICHT widerrufen worden.
+      const [row] = await db.select().from(qrCodes).where(eq(qrCodes.id, stadtQr.qrId));
+      expect(row.revokedAt).toBeNull();
+
+      // Der Admin darf ihn weiterhin widerrufen.
+      const wrAdmin = await qrWiderrufenCore(db as never, tenantId, verifierId, stadtQr.qrId, ADMIN);
+      expect(wrAdmin.ok).toBe(true);
+    });
+
+    it("Widerruf: Ortsteil-Verifier darf QR im EIGENEN Ortsteil widerrufen", async () => {
+      const otQr = await qrErstellenCore(
+        db as never,
+        tenantId,
+        otVerifier,
+        {
+          scopeLevel: "ortsteil",
+          scopeCode: "OT-A",
+          maxRedemptions: 5,
+          gueltigkeitStunden: 24,
+        },
+        { isAdmin: false, scopes: otVerifierScopes },
+      );
+      const wr = await qrWiderrufenCore(
+        db as never,
+        tenantId,
+        otVerifier,
+        otQr.qrId,
+        { isAdmin: false, scopes: otVerifierScopes },
+      );
+      expect(wr.ok).toBe(true);
     });
 
     it("Admin: alle Ebenen erlaubt (auch fremder Ortsteil)", async () => {

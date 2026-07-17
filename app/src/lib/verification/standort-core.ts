@@ -37,7 +37,7 @@
  * behält ihre 09:00-Wandzeit vor und nach der Umstellung.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gt, lt, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import {
   verificationLocations,
@@ -45,6 +45,7 @@ import {
   auditEvents,
 } from "@/db/schema";
 import { addMonths } from "@/lib/verification/qr-core";
+import { istPgFehler, PG_UNIQUE_VIOLATION } from "@/lib/db/pg-errors";
 
 export const STANDORT_LIMITS = {
   NAME_MIN: 3,
@@ -57,8 +58,17 @@ export const STANDORT_LIMITS = {
   SLOT_DAUER_MAX: 120,
   /** Harter Cap generierter Slots je Aufruf (Schutz vor Massen-Inserts). */
   MAX_SLOTS_PRO_AUFRUF: 200,
-  /** Wochenserien reichen höchstens 6 Monate in die Zukunft. */
-  SERIE_MAX_MONATE: 6,
+  /** Sprechzeiten (einzeln UND Serie) reichen höchstens 6 Monate in die Zukunft. */
+  MAX_MONATE_ZUKUNFT: 6,
+  /**
+   * Tiefenverteidigung (Gate-B MAJOR): harte Obergrenze der Kalendertage einer
+   * Serie, geprüft VOR der Generierung. Mit „vonDatum nicht in der Vergangenheit"
+   * + 6-Monats-Horizont ist die Spanne ohnehin ≤ ~185 Tage — dieser Deckel
+   * schützt gegen künftige Refactors, die eine der beiden Prüfungen lockern
+   * (die Generierung läuft synchron; eine Jahrhundert-Spanne fröre den
+   * Event-Loop der gesamten Multi-Tenant-Instanz ein).
+   */
+  MAX_SERIE_TAGE: 200,
 } as const;
 
 /** Einheitliches, serialisierbares Ergebnis der Standort-Mutationen. */
@@ -68,19 +78,9 @@ export interface StandortResult {
   error?: string;
 }
 
-/** Postgres-Fehlercode für Unique-Verletzungen (tenant+name bzw. location+starts_at). */
-const PG_UNIQUE_VIOLATION = "23505";
-
-/**
- * Erkennt eine Unique-Verletzung robust: drizzle wickelt den PostgresError je
- * nach Pfad in einen DrizzleQueryError (der 23505 liegt dann auf `cause`) —
- * beide Ebenen prüfen, sonst rauscht der Konflikt als harter Fehler durch
- * (im Integrationstest verifiziert).
- */
+/** Unique-Konflikt (tenant+name bzw. location+starts_at) — gemeinsamer Helfer. */
 function istUniqueKonflikt(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const e = err as { code?: string; cause?: { code?: string } };
-  return e.code === PG_UNIQUE_VIOLATION || e.cause?.code === PG_UNIQUE_VIOLATION;
+  return istPgFehler(err, PG_UNIQUE_VIOLATION);
 }
 
 export interface StandortInput {
@@ -242,16 +242,23 @@ export async function standortAktivSetzenCore(
 // ---------------------------------------------------------------------------
 
 /**
+ * Prozessweit EIN Formatter (Gate-B MAJOR): Intl.DateTimeFormat-Konstruktion
+ * ist teuer (~0,1 ms) — bei Serien-Generierung wird der Offset je Slot 2×
+ * bestimmt; ohne Cache dominierte die Konstruktion die Laufzeit.
+ */
+const BERLIN_OFFSET_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Europe/Berlin",
+  timeZoneName: "longOffset",
+});
+
+/**
  * UTC-Offset von Europe/Berlin (in Minuten) zum gegebenen Zeitpunkt — über
  * Intl `timeZoneName: "longOffset"` (z. B. „GMT+02:00"), NICHT hartkodiert.
  */
 function berlinOffsetMinuten(zeitpunkt: Date): number {
-  const teil = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Europe/Berlin",
-    timeZoneName: "longOffset",
-  })
-    .formatToParts(zeitpunkt)
-    .find((p) => p.type === "timeZoneName")?.value;
+  const teil = BERLIN_OFFSET_FORMATTER.formatToParts(zeitpunkt).find(
+    (p) => p.type === "timeZoneName",
+  )?.value;
   // „GMT" ohne Offset-Anteil = UTC±00:00 (theoretisch; Berlin ist +01/+02).
   const m = teil?.match(/GMT([+-])(\d{2}):(\d{2})/);
   if (!m) return 0;
@@ -326,18 +333,40 @@ function zeitAusMinuten(min: number): string {
   return `${h}:${m}`;
 }
 
+/** Ergebnis der Serien-Generierung (siehe generiereSerienSlotZeiten). */
+export interface SerienSlotZeiten {
+  slots: { startsAt: Date; endsAt: Date }[];
+  /**
+   * Verworfene Slots, deren Wandzeit-Fenster real nicht existiert: bei der
+   * DST-FRÜHJAHRS-Umstellung (z. B. 29.03.2026 springt die Uhr 02:00→03:00)
+   * bilden Start- und Endzeit auf denselben (oder rückläufige) UTC-Zeitpunkte
+   * ab — endsAt <= startsAt würde den DB-CHECK
+   * verification_slots_ends_after_starts verletzen und die GESAMTE Serie mit
+   * einem harten Fehler versenken (Gate-B). Sie werden hier aussortiert und
+   * vom Aufrufer als „übersprungen" gezählt.
+   */
+  dstVerworfen: number;
+}
+
 /**
  * Erzeugt die Slot-Zeitpunkte einer Wochenserie — REINE Funktion (direkt
- * unit-testbar, auch für die DST-Grenze mit fixen Daten). Je Kalendertag im
+ * unit-testbar, auch für die DST-Grenzen mit fixen Daten). Je Kalendertag im
  * Zeitraum, dessen Wochentag gewählt ist, entstehen Slots von vonZeit bis
  * bisZeit im slotDauer-Raster (der letzte Slot endet spätestens um bisZeit).
  * Jede Wandzeit wird EINZELN via berlinDate übersetzt — dadurch bleibt eine
  * Serie über die DST-Umstellung auf ihrer Wandzeit (09:00 bleibt 09:00).
  * Die Tages-Iteration läuft über UTC-Tagesnummern (DST-neutral).
+ *
+ * NOTBREMSE (Gate-B MAJOR, Tiefenverteidigung): die Schleife bricht ab, sobald
+ * mehr als MAX_SLOTS_PRO_AUFRUF Slots erzeugt wurden — der Aufrufer lehnt dann
+ * ohnehin ab. Die eigentlichen Grenzen (vonDatum nicht in der Vergangenheit,
+ * Tages-Spannen-Deckel) prüft sprechzeitenAnlegenCore VOR dem Aufruf; ohne
+ * diese Bremse könnte ein direkter Aufruf mit Jahrhundert-Spanne den
+ * Event-Loop synchron minutenlang blockieren.
  */
 export function generiereSerienSlotZeiten(
   serie: Omit<SprechzeitSerieInput, "art" | "kapazitaet">,
-): { startsAt: Date; endsAt: Date }[] {
+): SerienSlotZeiten {
   const vonMin = minutenAusZeit(serie.vonZeit);
   const bisMin = minutenAusZeit(serie.bisZeit);
   const wochentage = new Set(serie.wochentage);
@@ -348,20 +377,29 @@ export function generiereSerienSlotZeiten(
   const bisTagUtc = Date.UTC(bj, bm - 1, bt);
 
   const slots: { startsAt: Date; endsAt: Date }[] = [];
+  let dstVerworfen = 0;
   for (let tag = vonTagUtc; tag <= bisTagUtc; tag += 86_400_000) {
+    // Notbremse: über dem Cap bricht der Aufrufer ohnehin ab — nicht weiter
+    // generieren (Event-Loop-Schutz, siehe Funktionskommentar).
+    if (slots.length > STANDORT_LIMITS.MAX_SLOTS_PRO_AUFRUF) break;
     const d = new Date(tag);
     // Kalender-Wochentag des Datums selbst (UTC-Mitternacht ⇒ getUTCDay ist
     // der Wochentag des Kalendertags, unabhängig von Zeitzone/DST).
     if (!wochentage.has(d.getUTCDay())) continue;
     const datum = d.toISOString().slice(0, 10);
     for (let min = vonMin; min + serie.slotDauerMinuten <= bisMin; min += serie.slotDauerMinuten) {
-      slots.push({
-        startsAt: berlinDate(datum, zeitAusMinuten(min)),
-        endsAt: berlinDate(datum, zeitAusMinuten(min + serie.slotDauerMinuten)),
-      });
+      const startsAt = berlinDate(datum, zeitAusMinuten(min));
+      const endsAt = berlinDate(datum, zeitAusMinuten(min + serie.slotDauerMinuten));
+      // DST-Frühjahrslücke: nicht-existente Stunde ⇒ endsAt <= startsAt ⇒
+      // aussortieren statt DB-CHECK-Bruch (siehe SerienSlotZeiten.dstVerworfen).
+      if (endsAt.getTime() <= startsAt.getTime()) {
+        dstVerworfen++;
+        continue;
+      }
+      slots.push({ startsAt, endsAt });
     }
   }
-  return slots;
+  return { slots, dstVerworfen };
 }
 
 /**
@@ -408,7 +446,7 @@ export async function sprechzeitenAnlegenCore(
     };
   }
 
-  const { KAPAZITAET_MIN, KAPAZITAET_MAX, SLOT_DAUER_MIN, SLOT_DAUER_MAX, MAX_SLOTS_PRO_AUFRUF, SERIE_MAX_MONATE } = STANDORT_LIMITS;
+  const { KAPAZITAET_MIN, KAPAZITAET_MAX, SLOT_DAUER_MIN, SLOT_DAUER_MAX, MAX_SLOTS_PRO_AUFRUF, MAX_MONATE_ZUKUNFT, MAX_SERIE_TAGE } = STANDORT_LIMITS;
   const kapazitaet = input.kapazitaet;
   if (!Number.isInteger(kapazitaet) || kapazitaet < KAPAZITAET_MIN || kapazitaet > KAPAZITAET_MAX) {
     return { ok: false, error: `Kapazität muss zwischen ${KAPAZITAET_MIN} und ${KAPAZITAET_MAX} liegen.` };
@@ -421,10 +459,21 @@ export async function sprechzeitenAnlegenCore(
   // Slot-Zeiten bestimmen (JS-Dates — landen NUR als gebundene Insert-Werte in
   // der DB, nie in Roh-SQL).
   const jetzt = new Date();
+  const horizont = addMonths(jetzt, MAX_MONATE_ZUKUNFT);
   let zeiten: { startsAt: Date; endsAt: Date }[];
+  let dstVerworfen = 0;
   if (input.art === "einzeln") {
     if (input.startsAt.getTime() <= jetzt.getTime()) {
       return { ok: false, error: "Der Termin muss in der Zukunft liegen." };
+    }
+    // Gate-B: derselbe 6-Monats-Horizont wie bei der Serie — sonst wären
+    // Jahres-Tippfehler-Slots (2062 statt 2026) dauerhaft buchbar und nach
+    // der ersten Buchung nicht mehr löschbar.
+    if (input.startsAt.getTime() > horizont.getTime()) {
+      return {
+        ok: false,
+        error: `Der Termin darf höchstens ${MAX_MONATE_ZUKUNFT} Monate in der Zukunft liegen.`,
+      };
     }
     zeiten = [
       {
@@ -442,15 +491,49 @@ export async function sprechzeitenAnlegenCore(
     if (input.vonDatum > input.bisDatum) {
       return { ok: false, error: "Das Von-Datum liegt nach dem Bis-Datum." };
     }
+    // Gate-B MAJOR: vonDatum darf nicht vor dem heutigen Berlin-Kalendertag
+    // liegen. Ohne diese Untergrenze ließe ein Jahres-Tippfehler („1026" statt
+    // „2026") die synchrone Generierung über Jahrhunderte iterieren und fröre
+    // den Event-Loop der gesamten Multi-Tenant-Instanz ein — der 200er-Cap
+    // griff erst NACH der Generierung.
+    const heuteBerlin = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Berlin",
+    }).format(jetzt); // en-CA ⇒ YYYY-MM-DD, direkt string-vergleichbar
+    if (input.vonDatum < heuteBerlin) {
+      return { ok: false, error: "Der Zeitraum darf nicht in der Vergangenheit beginnen." };
+    }
     // Serien-Horizont: höchstens 6 Monate in die Zukunft (kalendergenau).
-    if (berlinDate(input.bisDatum, "00:00") > addMonths(jetzt, SERIE_MAX_MONATE)) {
+    if (berlinDate(input.bisDatum, "00:00") > horizont) {
       return {
         ok: false,
-        error: `Der Zeitraum darf höchstens ${SERIE_MAX_MONATE} Monate in die Zukunft reichen.`,
+        error: `Der Zeitraum darf höchstens ${MAX_MONATE_ZUKUNFT} Monate in die Zukunft reichen.`,
+      };
+    }
+    // Tiefenverteidigung (Gate-B MAJOR): Tages-Spanne VOR der Generierung
+    // deckeln — mit den beiden Prüfungen oben strukturell unerreichbar, schützt
+    // aber gegen künftige Lockerungen einer der Grenzen (siehe MAX_SERIE_TAGE).
+    const [vj, vm, vt] = input.vonDatum.split("-").map(Number);
+    const [bj, bm, bt] = input.bisDatum.split("-").map(Number);
+    const spanneTage = (Date.UTC(bj, bm - 1, bt) - Date.UTC(vj, vm - 1, vt)) / 86_400_000 + 1;
+    if (!Number.isFinite(spanneTage) || spanneTage > MAX_SERIE_TAGE) {
+      return {
+        ok: false,
+        error: `Der Zeitraum darf höchstens ${MAX_SERIE_TAGE} Tage umfassen.`,
+      };
+    }
+
+    const generiert = generiereSerienSlotZeiten(input);
+    dstVerworfen = generiert.dstVerworfen;
+    // Notbremsen-Fall (Generator hat über dem Cap abgebrochen) SOFORT ablehnen —
+    // die Zählung wäre unvollständig, ein Teil-Insert irreführend.
+    if (generiert.slots.length > MAX_SLOTS_PRO_AUFRUF) {
+      return {
+        ok: false,
+        error: `Zu viele Termine auf einmal (mehr als ${MAX_SLOTS_PRO_AUFRUF} erlaubt). Bitte den Zeitraum verkleinern.`,
       };
     }
     // Vergangene Slots (Serie beginnt heute) still überspringen — nur Zukunft.
-    zeiten = generiereSerienSlotZeiten(input).filter((s) => s.startsAt.getTime() > jetzt.getTime());
+    zeiten = generiert.slots.filter((s) => s.startsAt.getTime() > jetzt.getTime());
     if (zeiten.length === 0) {
       return { ok: false, error: "Im gewählten Zeitraum liegen keine zukünftigen Termine." };
     }
@@ -463,9 +546,43 @@ export async function sprechzeitenAnlegenCore(
     };
   }
 
+  // ÜBERLAPPUNGS-Schutz (Gate-B): nicht nur IDENTISCHE Startzeiten (UNIQUE)
+  // überspringen, sondern jede ZEITLICHE Überlappung mit bestehenden Slots des
+  // Standorts — sonst erzeugten versetzte Serien (09:00er- und 09:30er-Raster)
+  // unbemerkt doppelte Parallel-Kapazität am Schalter. Die Prüfung ist ein
+  // Vorab-Filter (gezählt als „übersprungen"); das UNIQUE(location, starts_at)
+  // + onConflictDoNothing bleibt als DB-Netz für identische Startzeiten im
+  // Race-Fall bestehen. JS-Dates nur als gebundene Parameter (lt/gt-Operatoren).
+  const fensterVon = new Date(Math.min(...zeiten.map((z) => z.startsAt.getTime())));
+  const fensterBis = new Date(Math.max(...zeiten.map((z) => z.endsAt.getTime())));
+  const bestehende = (await db
+    .select({ startsAt: verificationSlots.startsAt, endsAt: verificationSlots.endsAt })
+    .from(verificationSlots)
+    .where(
+      and(
+        eq(verificationSlots.locationId, locationId),
+        lt(verificationSlots.startsAt, fensterBis),
+        gt(verificationSlots.endsAt, fensterVon),
+      ),
+    )) as { startsAt: Date; endsAt: Date }[];
+  const ohneUeberlappung = zeiten.filter(
+    (z) =>
+      !bestehende.some(
+        (b) => z.startsAt.getTime() < b.endsAt.getTime() && z.endsAt.getTime() > b.startsAt.getTime(),
+      ),
+  );
+  const ueberlapptVerworfen = zeiten.length - ohneUeberlappung.length;
+  zeiten = ohneUeberlappung;
+
+  if (zeiten.length === 0) {
+    // Alles kollidiert (z. B. identische Serie erneut angelegt) — idempotentes
+    // Erfolgs-Ergebnis wie bisher, nur ohne Insert/Audit-Rauschen.
+    return { ok: true, angelegt: 0, uebersprungen: ueberlapptVerworfen + dstVerworfen };
+  }
+
   return db.transaction(async (tx: Db) => {
-    // Idempotent wie der Seed: UNIQUE(location_id, starts_at) — vorhandene
-    // Startzeiten werden übersprungen und gezählt statt zu scheitern.
+    // Idempotent wie der Seed: UNIQUE(location_id, starts_at) — im Race noch
+    // entstandene identische Startzeiten werden übersprungen statt zu scheitern.
     const inserted = await tx
       .insert(verificationSlots)
       .values(
@@ -482,7 +599,9 @@ export async function sprechzeitenAnlegenCore(
       .returning({ id: verificationSlots.id });
 
     const angelegt = inserted.length;
-    const uebersprungen = zeiten.length - angelegt;
+    // Übersprungen = überlappend + DST-verworfen + Race-Konflikte beim Insert.
+    const uebersprungen =
+      ueberlapptVerworfen + dstVerworfen + (zeiten.length - angelegt);
 
     await tx.insert(auditEvents).values({
       tenantId,
@@ -505,6 +624,18 @@ export async function sprechzeitenAnlegenCore(
  * trägt keine tenant_id). 0 Zeilen ⇒ Slot hat Buchungen, ist fremd oder
  * existiert nicht — bewusst EINE unspezifische Meldung (kein Orakel über
  * fremde Tenants).
+ *
+ * HISTORIE (Gate-B, bewusste Entscheidung): das DELETE reißt per ON DELETE
+ * CASCADE auch STORNIERTE/VERFALLENE Buchungs-Zeilen des Slots mit — das ist
+ * GEWOLLT (Datenminimierung: abgesagte Termine ohne Verifizierungs-Wirkung
+ * brauchen keine Aufbewahrung; die PII-freie Audit-Spur in audit_events
+ * bleibt bestehen). VERIFIZIERUNGS-Nachweise (status='wahrgenommen') können
+ * dagegen NICHT verschwinden: booked_count wird ausschließlich beim Storno
+ * einer OFFENEN Buchung dekrementiert (cancelBookingCore) — weder
+ * bookingWahrnehmenCore noch expireVergangeneTermine geben Kapazität zurück.
+ * Damit gilt invariant booked_count >= Anzahl wahrgenommener Buchungen, und
+ * die booked_count=0-Bedingung dieses DELETEs schließt Slots mit
+ * Wahrnehmungs-Nachweis strukturell aus (per Integrationstest abgesichert).
  */
 export async function slotLoeschenCore(
   db: Db,

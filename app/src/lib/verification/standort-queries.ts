@@ -146,16 +146,43 @@ export interface SlotAdminItem {
 /** Anzeige-Obergrenze der Slot-Liste je Standort (Schutz vor Riesen-Seiten). */
 export const SLOTS_ADMIN_MAX = 300;
 
+export interface SlotsFuerStandortAdmin {
+  /** Die nächsten (max. SLOTS_ADMIN_MAX) künftigen Slots, aufsteigend. */
+  slots: SlotAdminItem[];
+  /**
+   * Gesamtzahl der künftigen Slots (Gate-B): realistische Serien überschreiten
+   * die 300 — die UI weist dann „die nächsten 300 von N" aus, statt still zu
+   * kappen (weitere Slots wären sonst buchbar, aber unsichtbar/unverwaltbar).
+   */
+  gesamt: number;
+}
+
 /**
  * Künftige Slots eines Standorts (aufsteigend), tenant-scoped über den
- * Standort-Join (verification_slots trägt keine tenant_id). Max 300.
+ * Standort-Join (verification_slots trägt keine tenant_id). Liefert die
+ * nächsten SLOTS_ADMIN_MAX Slots PLUS die Gesamtzahl (siehe oben).
  */
 export async function getSlotsFuerStandortAdmin(
   db: Db,
   tenantId: string,
   locationId: string,
-): Promise<SlotAdminItem[]> {
-  return db
+): Promise<SlotsFuerStandortAdmin> {
+  const zukunftFilter = and(
+    eq(verificationLocations.tenantId, tenantId),
+    eq(verificationSlots.locationId, locationId),
+    gt(verificationSlots.startsAt, sql`now()`),
+  );
+
+  const gesamtRows = await db
+    .select({ c: count() })
+    .from(verificationSlots)
+    .innerJoin(
+      verificationLocations,
+      eq(verificationLocations.id, verificationSlots.locationId),
+    )
+    .where(zukunftFilter);
+
+  const slots = await db
     .select({
       slotId: verificationSlots.id,
       startsAt: verificationSlots.startsAt,
@@ -168,13 +195,9 @@ export async function getSlotsFuerStandortAdmin(
       verificationLocations,
       eq(verificationLocations.id, verificationSlots.locationId),
     )
-    .where(
-      and(
-        eq(verificationLocations.tenantId, tenantId),
-        eq(verificationSlots.locationId, locationId),
-        gt(verificationSlots.startsAt, sql`now()`),
-      ),
-    )
+    .where(zukunftFilter)
     .orderBy(asc(verificationSlots.startsAt))
     .limit(SLOTS_ADMIN_MAX);
+
+  return { slots, gesamt: Number(gesamtRows[0]?.c ?? 0) };
 }

@@ -85,12 +85,15 @@ export default async function AdminStandortePage({ params }: PageProps) {
 
   const standorteVM = standorte.map((s, i) => ({
     ...s,
-    slots: slotsJeStandort[i].map((slot) => ({
+    slots: slotsJeStandort[i].slots.map((slot) => ({
       slotId: slot.slotId,
       label: formatSlotLabel(slot.startsAt, slot.endsAt),
       capacity: slot.capacity,
       bookedCount: slot.bookedCount,
     })),
+    // Gate-B: Gesamtzahl mitgeben — die UI weist eine gekappte Liste aus,
+    // statt weitere (buchbare) Slots still zu verschweigen.
+    slotsGesamt: slotsJeStandort[i].gesamt,
   }));
 
   return (

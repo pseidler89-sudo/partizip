@@ -66,7 +66,14 @@ const standortSchema = z.object({
 
 const datumSchema = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datum.");
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datum.")
+  // Gate-B: Kalender-Gültigkeit per UTC-Roundtrip — fängt sowohl Werte, die
+  // Date.parse werfen ließen („2026-13-01" → NaN → berlinDate-Exception → 500),
+  // als auch stilles Überrollen („2026-02-30" → 2. März, Slot am falschen Tag).
+  .refine((s) => {
+    const t = Date.parse(`${s}T00:00:00Z`);
+    return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
+  }, "Ungültiges Datum.");
 const zeitSchema = z
   .string()
   .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Ungültige Uhrzeit.");

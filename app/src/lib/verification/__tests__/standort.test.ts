@@ -40,7 +40,7 @@ import {
   getSlotsFuerStandortAdmin,
   getStandorteFuerAdmin,
 } from "@/lib/verification/standort-queries";
-import { bookSlotCore } from "@/lib/verification/booking-core";
+import { bookSlotCore, bookingWahrnehmenCore } from "@/lib/verification/booking-core";
 import {
   getOffeneTermineFuerVerifier,
   getStandorteMitFreienSlots,
@@ -102,8 +102,8 @@ describe("berlinDate (Unit)", () => {
 });
 
 describe("generiereSerienSlotZeiten (Unit)", () => {
-  it("DST-Grenze: Serie 23.–26.10.2026 behält die Wandzeit 09:00", () => {
-    const slots = generiereSerienSlotZeiten({
+  it("DST-Grenze (Herbst): Serie 23.–26.10.2026 behält die Wandzeit 09:00", () => {
+    const { slots, dstVerworfen } = generiereSerienSlotZeiten({
       vonDatum: "2026-10-23",
       bisDatum: "2026-10-26",
       wochentage: [0, 1, 2, 3, 4, 5, 6],
@@ -112,6 +112,7 @@ describe("generiereSerienSlotZeiten (Unit)", () => {
       slotDauerMinuten: 60,
     });
     expect(slots.length).toBe(4); // Fr, Sa, So (Umstellung), Mo
+    expect(dstVerworfen).toBe(0);
     for (const s of slots) {
       expect(berlinWandzeit(s.startsAt)).toBe("09:00");
       expect(berlinWandzeit(s.endsAt)).toBe("10:00");
@@ -123,9 +124,43 @@ describe("generiereSerienSlotZeiten (Unit)", () => {
     expect(slots[3].startsAt.getUTCHours()).toBe(8); // Mo 26.10.
   });
 
+  it("DST-Frühjahrslücke (Gate-B): 29.03.2026 01:30–03:30 verwirft den Slot der nicht-existenten Stunde", () => {
+    // Am 29.03.2026 springt die Uhr 02:00→03:00: der 02:30–03:30-Slot bildet
+    // auf endsAt <= startsAt ab und würde den DB-CHECK
+    // verification_slots_ends_after_starts verletzen (500 für die GANZE Serie).
+    const { slots, dstVerworfen } = generiereSerienSlotZeiten({
+      vonDatum: "2026-03-29",
+      bisDatum: "2026-03-29",
+      wochentage: [0], // Sonntag
+      vonZeit: "01:30",
+      bisZeit: "03:30",
+      slotDauerMinuten: 60,
+    });
+    expect(slots.length).toBe(1); // nur der 01:30-Slot bleibt
+    expect(dstVerworfen).toBe(1); // der degenerierte 02:30-Slot ist aussortiert
+    for (const s of slots) {
+      expect(s.endsAt.getTime()).toBeGreaterThan(s.startsAt.getTime());
+    }
+  });
+
+  it("Notbremse (Gate-B MAJOR): Generierung bricht knapp über dem 200er-Cap ab statt endlos zu laufen", () => {
+    // 300 Tage × 8 Slots/Tag wären 2400 — die Schleife muss beim
+    // Überschreiten des Caps abbrechen (Aufrufer lehnt dann ab).
+    const { slots } = generiereSerienSlotZeiten({
+      vonDatum: "2026-01-01",
+      bisDatum: "2026-10-27",
+      wochentage: [0, 1, 2, 3, 4, 5, 6],
+      vonZeit: "09:00",
+      bisZeit: "17:00",
+      slotDauerMinuten: 60,
+    });
+    expect(slots.length).toBeGreaterThan(200); // Cap-Überschreitung erkennbar …
+    expect(slots.length).toBeLessThanOrEqual(208); // … aber höchstens +1 Tagespaket
+  });
+
   it("nur gewählte Wochentage; letzter Slot endet spätestens um bisZeit", () => {
     // 2026-07-06 (Mo) bis 2026-07-19 (So): 14 Tage ⇒ jeder Wochentag genau 2×.
-    const slots = generiereSerienSlotZeiten({
+    const { slots } = generiereSerienSlotZeiten({
       vonDatum: "2026-07-06",
       bisDatum: "2026-07-19",
       wochentage: [2], // nur Dienstag
@@ -352,7 +387,7 @@ describe("Standort-Verwaltung (Integration)", () => {
     expect(r.angelegt).toBe(4);
     expect(r.uebersprungen).toBe(0);
 
-    const slots = await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!);
+    const { slots } = await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!);
     expect(slots.length).toBe(4);
     for (const s of slots) {
       expect(s.capacity).toBe(3);
@@ -406,7 +441,7 @@ describe("Standort-Verwaltung (Integration)", () => {
       dauerMinuten: 30,
       kapazitaet: 2,
     });
-    const [slot] = await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!);
+    const [slot] = (await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!)).slots;
 
     // Buchung über die ECHTE Buchungs-Logik.
     const buerger = await makeUser(tenantId);
@@ -425,7 +460,7 @@ describe("Standort-Verwaltung (Integration)", () => {
       dauerMinuten: 30,
       kapazitaet: 2,
     });
-    const slots = await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!);
+    const { slots } = await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!);
     const frei = slots.find((s) => s.bookedCount === 0)!;
     const iso = await slotLoeschenCore(db as never, tenant2Id, adminId, frei.slotId);
     expect(iso.ok).toBe(false);
@@ -446,7 +481,7 @@ describe("Standort-Verwaltung (Integration)", () => {
       dauerMinuten: 30,
       kapazitaet: 3,
     });
-    const [slot] = await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!);
+    const [slot] = (await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!)).slots;
 
     const b1 = await bookSlotCore(db as never, tenantId, await makeUser(tenantId), slot.slotId);
     const b2 = await bookSlotCore(db as never, tenantId, await makeUser(tenantId), slot.slotId);
@@ -483,7 +518,7 @@ describe("Standort-Verwaltung (Integration)", () => {
       dauerMinuten: 30,
       kapazitaet: 2,
     });
-    const [slot] = await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!);
+    const [slot] = (await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!)).slots;
     const buerger = await makeUser(tenantId);
     const buchung = await bookSlotCore(db as never, tenantId, buerger, slot.slotId);
     expect(buchung.ok).toBe(true);
@@ -530,7 +565,7 @@ describe("Standort-Verwaltung (Integration)", () => {
       dauerMinuten: 30,
       kapazitaet: 4,
     });
-    const [slot] = await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!);
+    const [slot] = (await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!)).slots;
     const b = await bookSlotCore(db as never, tenantId, await makeUser(tenantId), slot.slotId);
     expect(b.ok).toBe(true);
     await standortAktivSetzenCore(db as never, tenantId, adminId, st.locationId!, false);
@@ -546,5 +581,138 @@ describe("Standort-Verwaltung (Integration)", () => {
     // Tenant-Isolation der Admin-Sicht.
     const fremd = await getStandorteFuerAdmin(db as never, tenant2Id);
     expect(fremd.find((s) => s.name === "Kennzahl-Standort")).toBeUndefined();
+  });
+
+  // --- Gate-B-Folge-Härtung ------------------------------------------------
+
+  it.skipIf(SKIP)("Serie: vonDatum in der Vergangenheit wird abgelehnt (Event-Loop-Schutz)", async () => {
+    const st = await standortErstellenCore(db as never, tenantId, adminId, { name: "Vergangenheits-Standort" });
+    const r = await sprechzeitenAnlegenCore(db as never, tenantId, adminId, st.locationId!, {
+      art: "serie",
+      vonDatum: isoPlusTage(-30),
+      bisDatum: isoPlusTage(2),
+      wochentage: [0, 1, 2, 3, 4, 5, 6],
+      vonZeit: "09:00",
+      bisZeit: "10:00",
+      slotDauerMinuten: 30,
+      kapazitaet: 1,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/Vergangenheit/);
+  });
+
+  it.skipIf(SKIP)("Einzeltermin: derselbe 6-Monats-Horizont wie die Serie (kein Jahr-9999-Slot)", async () => {
+    const st = await standortErstellenCore(db as never, tenantId, adminId, { name: "Horizont-Standort" });
+    const r = await sprechzeitenAnlegenCore(db as never, tenantId, adminId, st.locationId!, {
+      art: "einzeln",
+      startsAt: new Date(Date.now() + 8 * 30 * DAY), // ~8 Monate
+      dauerMinuten: 30,
+      kapazitaet: 2,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/6 Monate/);
+    // Es ist KEIN Slot entstanden.
+    const { gesamt } = await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!);
+    expect(gesamt).toBe(0);
+  });
+
+  it.skipIf(SKIP)("Überlappung: zeitlich versetzte Slots werden übersprungen (keine Doppel-Kapazität)", async () => {
+    const st = await standortErstellenCore(db as never, tenantId, adminId, { name: "Überlapp-Standort" });
+    const basis = Date.now() + 20 * DAY;
+    const erster = await sprechzeitenAnlegenCore(db as never, tenantId, adminId, st.locationId!, {
+      art: "einzeln",
+      startsAt: new Date(basis),
+      dauerMinuten: 60,
+      kapazitaet: 2,
+    });
+    expect(erster.ok).toBe(true);
+    expect(erster.angelegt).toBe(1);
+
+    // 30 min versetzt, überlappt den bestehenden Slot → übersprungen, NICHT
+    // angelegt (das UNIQUE auf starts_at allein hätte das durchgelassen).
+    const versetzt = await sprechzeitenAnlegenCore(db as never, tenantId, adminId, st.locationId!, {
+      art: "einzeln",
+      startsAt: new Date(basis + 30 * 60_000),
+      dauerMinuten: 60,
+      kapazitaet: 2,
+    });
+    expect(versetzt.ok).toBe(true);
+    expect(versetzt.angelegt).toBe(0);
+    expect(versetzt.uebersprungen).toBe(1);
+
+    // Direkt anschließend (Start = Ende des ersten) überlappt NICHT → angelegt.
+    const anschliessend = await sprechzeitenAnlegenCore(db as never, tenantId, adminId, st.locationId!, {
+      art: "einzeln",
+      startsAt: new Date(basis + 60 * 60_000),
+      dauerMinuten: 30,
+      kapazitaet: 2,
+    });
+    expect(anschliessend.ok).toBe(true);
+    expect(anschliessend.angelegt).toBe(1);
+
+    const { gesamt } = await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!);
+    expect(gesamt).toBe(2);
+  });
+
+  it.skipIf(SKIP)("Verifizierungs-Nachweis: Slot mit wahrgenommener Buchung bleibt unlöschbar (booked_count-Invariante)", async () => {
+    const st = await standortErstellenCore(db as never, tenantId, adminId, { name: "Nachweis-Standort" });
+    await sprechzeitenAnlegenCore(db as never, tenantId, adminId, st.locationId!, {
+      art: "einzeln",
+      startsAt: new Date(Date.now() + 21 * DAY),
+      dauerMinuten: 30,
+      kapazitaet: 2,
+    });
+    const [slot] = (await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!)).slots;
+    const buerger = await makeUser(tenantId);
+    const b = await bookSlotCore(db as never, tenantId, buerger, slot.slotId);
+    expect(b.ok).toBe(true);
+
+    // Wahrnehmen (Stufe-2-Nachweis) gibt die Kapazität NICHT zurück —
+    // booked_count bleibt >= Anzahl wahrgenommener Buchungen …
+    const w = await bookingWahrnehmenCore(db as never, tenantId, adminId, b.booking!.bookingId);
+    expect(w.ok).toBe(true);
+    const [after] = await db
+      .select()
+      .from(verificationSlots)
+      .where(eq(verificationSlots.id, slot.slotId));
+    expect(after.bookedCount).toBe(1);
+
+    // … und damit schließt die booked_count=0-Bedingung des DELETEs Slots mit
+    // Wahrnehmungs-Nachweis strukturell aus (kein CASCADE-Verlust der Historie).
+    const del = await slotLoeschenCore(db as never, tenantId, adminId, slot.slotId);
+    expect(del.ok).toBe(false);
+  });
+
+  it.skipIf(SKIP)("Race: Slot wird während der Buchung gelöscht → freundlicher Fehler statt 500 (FK 23503)", async () => {
+    const st = await standortErstellenCore(db as never, tenantId, adminId, { name: "Race-Standort" });
+    await sprechzeitenAnlegenCore(db as never, tenantId, adminId, st.locationId!, {
+      art: "einzeln",
+      startsAt: new Date(Date.now() + 22 * DAY),
+      dauerMinuten: 30,
+      kapazitaet: 2,
+    });
+    const [slot] = (await getSlotsFuerStandortAdmin(db as never, tenantId, st.locationId!)).slots;
+
+    // Das Race deterministisch nachstellen: der Slot verschwindet GENAU
+    // zwischen dem Vorab-Select von bookSlotCore und seiner Transaktion —
+    // ein Proxy löscht ihn unmittelbar vor db.transaction (echte FK-23503-
+    // Verletzung beim Buchungs-Insert, keine gespiegelte Logik).
+    const echteDb = db as unknown as Record<string | symbol, unknown>;
+    const racedDb = new Proxy(echteDb, {
+      get(target, prop) {
+        if (prop === "transaction") {
+          return async (cb: unknown) => {
+            await db.delete(verificationSlots).where(eq(verificationSlots.id, slot.slotId));
+            return (target.transaction as (cb2: unknown) => Promise<unknown>).call(target, cb);
+          };
+        }
+        const wert = Reflect.get(target, prop);
+        return typeof wert === "function" ? (wert as (...a: unknown[]) => unknown).bind(target) : wert;
+      },
+    });
+
+    const r = await bookSlotCore(racedDb as never, tenantId, await makeUser(tenantId), slot.slotId);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/nicht mehr verfügbar/);
   });
 });

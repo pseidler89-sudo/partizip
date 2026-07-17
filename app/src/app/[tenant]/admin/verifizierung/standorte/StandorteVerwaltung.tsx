@@ -48,6 +48,8 @@ export interface StandortVM {
   freiePlaetze: number;
   offeneBuchungen: number;
   slots: SlotVM[];
+  /** Gesamtzahl künftiger Slots — kann über slots.length (Kappung 300) liegen. */
+  slotsGesamt: number;
 }
 
 interface Props {
@@ -530,12 +532,19 @@ export function StandorteVerwaltung({ standorte }: Props) {
                       aria-expanded={offen}
                       className="pz-btn pz-btn-secondary pz-btn-sm"
                     >
-                      {offen ? "Sprechzeiten verbergen" : `Sprechzeiten anzeigen (${s.slots.length})`}
+                      {offen ? "Sprechzeiten verbergen" : `Sprechzeiten anzeigen (${s.slotsGesamt})`}
                     </button>
                   </div>
 
                   {offen && (
                     <div className="mt-4 space-y-5">
+                      {/* Gekappte Liste ausweisen (Gate-B): weitere Slots sind
+                          buchbar — nie still verschweigen. */}
+                      {s.slotsGesamt > s.slots.length && (
+                        <p className="text-xs" style={{ color: "var(--pz-muted)" }}>
+                          Zeige die nächsten {s.slots.length} von {s.slotsGesamt} Terminen.
+                        </p>
+                      )}
                       {/* Kommende Sprechzeiten */}
                       {s.slots.length === 0 ? (
                         <p className="text-sm" style={{ color: "var(--pz-muted)" }}>

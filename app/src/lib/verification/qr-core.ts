@@ -251,13 +251,43 @@ export async function qrErstellenCore(
 /**
  * Widerruft einen QR-Code (tenant-scoped). Setzt revokedAt nur, wenn noch nicht
  * widerrufen (idempotent). Berechtigung (canVerify) prüft die Action.
+ *
+ * GEBIETSBINDUNG (Gate-B K1, symmetrisch zur Erstellung): ein Nicht-Admin-
+ * Verifier darf nur QRs widerrufen, deren Gebietsknoten der ltree-Pfad einer
+ * seiner `verifier`-Rollen abdeckt — sonst könnte ein Ortsteil-Verifier den
+ * stadtweiten Aktions-QR des Admins mitten in der Aktion abschießen
+ * (Innentäter-DoS). Fail-closed: existiert der QR nicht (oder gehört er einem
+ * fremden Tenant), erhält der Nicht-Admin dieselbe Gebiets-Meldung — kein
+ * Existenz-Orakel. Admins bleiben tenant-weit unbeschränkt.
  */
 export async function qrWiderrufenCore(
   db: Db,
   tenantId: string,
   actorUserId: string,
   qrId: string,
+  caller: QrErstellerKontext,
 ): Promise<{ ok: boolean; error?: string }> {
+  if (!caller.isAdmin) {
+    const ziel = await db
+      .select({ path: sql<string>`${regions.path}::text` })
+      .from(qrCodes)
+      .innerJoin(regions, eq(regions.id, qrCodes.regionId))
+      .where(and(eq(qrCodes.id, qrId), eq(qrCodes.tenantId, tenantId)))
+      .limit(1);
+    const zielPath = ziel[0]?.path;
+    const gedeckt =
+      !!zielPath &&
+      caller.scopes.some(
+        (r) => r.roleType === "verifier" && pfadDecktAb(r.regionPath, zielPath),
+      );
+    if (!gedeckt) {
+      return {
+        ok: false,
+        error: "QR-Codes können Sie nur für Ihr eigenes Zuständigkeitsgebiet widerrufen.",
+      };
+    }
+  }
+
   return db.transaction(async (tx: Db) => {
     const updated = await tx
       .update(qrCodes)

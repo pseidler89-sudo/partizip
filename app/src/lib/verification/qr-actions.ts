@@ -156,7 +156,16 @@ export async function qrWiderrufen(
   const idParsed = z.string().uuid().safeParse(qrId);
   if (!idParsed.success) return { ok: false, error: "Ungültige QR-ID." };
 
-  return qrWiderrufenCore(ctx.db, ctx.tenant.id, ctx.userId, idParsed.data);
+  // GEBIETSBINDUNG (Gate-B K1): symmetrisch zu qrErstellen — Admin-Status +
+  // Rollen-Gebiete serverseitig laden, der Core erzwingt die Abdeckung
+  // (Ortsteil-Verifier kann keine stadtweiten QRs mehr widerrufen).
+  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
+  const scopes = await getUserRolesMitScope(ctx.db, ctx.tenant.id, ctx.userId);
+
+  return qrWiderrufenCore(ctx.db, ctx.tenant.id, ctx.userId, idParsed.data, {
+    isAdmin: isAdmin(roleTypes),
+    scopes,
+  });
 }
 
 // ---------------------------------------------------------------------------
