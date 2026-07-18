@@ -218,6 +218,13 @@
       "when": 1784255821314,
       "tag": "0030_familiar_unus",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784332691555,
+      "tag": "0031_lowly_red_ghost",
+      "breakpoints": true
     }
   ]
 }
