@@ -412,11 +412,25 @@ export const users = pgTable(
     // Datenschutz-Formulierung „optionale Benachrichtigungen, jederzeit abbestellen").
     // Bei Konto-Löschung wird das Flag auf false gesetzt (keine Mails an gelöschte Konten).
     notifyNewPolls: boolean("notify_new_polls").notNull().default(true),
+    // Block J2a (Vorgriff J2c): granulare Benachrichtigungs-Opt-outs. Additiv +
+    // verhaltensneutral (Default true); Versand-Logik/UI folgen in J2c. Bei
+    // Konto-Löschung analog notify_new_polls auf false zu setzen (keine Mails an
+    // gelöschte Konten) — das übernimmt J2c mit der Versand-Logik.
+    //   notify_anliegen_updates — Statuswechsel/Antworten zu gefolgten Anliegen.
+    //   notify_reverify         — Erinnerung vor Ablauf der Wohnsitz-Verifizierung.
+    notifyAnliegenUpdates: boolean("notify_anliegen_updates").notNull().default(true),
+    notifyReverify: boolean("notify_reverify").notNull().default(true),
     // M6: $onUpdate
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`).$onUpdate(() => new Date()),
   },
   (t) => [
-    unique("users_tenant_email_unique").on(t.tenantId, t.email),
+    // Block J2a (F-A): funktionaler UNIQUE-Index auf (tenant_id, lower(email))
+    // ersetzt den alten case-SENSITIVEN unique("users_tenant_email_unique").
+    // users.email wird an allen Boundaries kanonisch (trim+lowercase) gespeichert
+    // (lib/auth/email.normalizeEmail); dieser Index ist das DB-Netz darunter und
+    // liefert bei künftigen Kollisionen die richtige Fehlerdiagnose. Der DROP des
+    // alten Constraints + Backfill stehen in Migration 0033.
+    uniqueIndex("users_tenant_email_lower_unique").on(t.tenantId, sql`lower(${t.email})`),
     check(
       "users_birth_month_check",
       sql`${t.birthMonth} IS NULL OR (${t.birthMonth} >= 1 AND ${t.birthMonth} <= 12)`
