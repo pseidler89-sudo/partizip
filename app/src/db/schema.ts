@@ -430,7 +430,7 @@ export const users = pgTable(
     // (lib/auth/email.normalizeEmail); dieser Index ist das DB-Netz darunter und
     // liefert bei künftigen Kollisionen die richtige Fehlerdiagnose. Der DROP des
     // alten Constraints + Backfill stehen in Migration 0033.
-    uniqueIndex("users_tenant_email_lower_unique").on(t.tenantId, sql`lower(${t.email})`),
+    uniqueIndex("users_tenant_email_lower_unique").on(t.tenantId, sql`lower(btrim(${t.email}))`),
     check(
       "users_birth_month_check",
       sql`${t.birthMonth} IS NULL OR (${t.birthMonth} >= 1 AND ${t.birthMonth} <= 12)`

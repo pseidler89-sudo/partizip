@@ -3518,7 +3518,7 @@
               "nulls": "last"
             },
             {
-              "expression": "lower(\"email\")",
+              "expression": "lower(btrim(\"email\"))",
               "asc": true,
               "isExpression": true,
               "nulls": "last"
