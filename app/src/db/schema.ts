@@ -383,6 +383,19 @@ export const users = pgTable(
     // Verifizierungs-Zyklus versendet; wird bei Re-Verifizierung (qr-core) auf NULL
     // zurückgesetzt, damit im nächsten Zyklus erneut erinnert werden kann.
     reverifyReminderSentAt: timestamp("reverify_reminder_sent_at", { withTimezone: true }),
+    // Block J1: Öffentliche Identität für ROLLENTRÄGER (verifier/redakteur/
+    // beobachter/kommune_admin/super_admin). Klarname + optionale Funktions-/
+    // Amtsbezeichnung — Rollenausübung = Verantwortungsübernahme, daher öffentlich
+    // sichtbar (Fragesteller-Badge, Team-Sicht). BÜRGER bleiben pseudonym: bei
+    // ihnen bleiben beide Felder NULL (die Konto-UI bietet sie nur Rollenträgern
+    // an). Additiv+nullable (Migration 0032), KEIN Backfill — Rollenträger setzen
+    // den Namen selbst; fehlt er, greift überall ein neutraler Institutions-
+    // Fallback (weiche Durchsetzung per Nudge, keine harte Sperre). Grenzen werden
+    // serverseitig in zod erzwungen (display_name 2..80, funktion ≤ 80), nicht als
+    // DB-Constraint — der einzige Admin (Patrick) darf sich nie selbst aussperren.
+    // display_name/funktion sind PII → Art.-15-Export + Lösch-Anonymisierung.
+    displayName: text("display_name"),
+    funktion: text("funktion"),
     // N2: account_status als pgEnum statt freier Text
     accountStatus: accountStatusEnum("account_status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),

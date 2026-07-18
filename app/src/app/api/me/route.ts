@@ -18,6 +18,7 @@ import { validateSession } from "@/lib/auth/session";
 import { apiError } from "@/lib/api-error";
 import { getStufe } from "@/lib/eligibility/stufe";
 import { getUserRoleTypes, isAdmin } from "@/lib/auth/roles";
+import { istRollentraeger } from "@/lib/identity/anzeige";
 import { getEinrichtungsStatus } from "@/lib/konto/einrichtung";
 import { isDemoTenant } from "@/lib/demo/config";
 
@@ -71,6 +72,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       stufe: getStufe(user),
       // Admin-Sichtbarkeit (kommune_admin/super_admin) für die Verwaltung-Karte.
       isAdmin: isAdmin(roleTypes),
+      // Block J1: Rollenträger-Identität. Die Klarname-/Funktion-Sektion (und der
+      // Nudge) erscheinen im Konto NUR für Rollenträger — Bürger bleiben pseudonym.
+      istRollentraeger: istRollentraeger(roleTypes),
+      displayName: user.displayName ?? null,
+      funktion: user.funktion ?? null,
     },
     einrichtung,
     tenant: {

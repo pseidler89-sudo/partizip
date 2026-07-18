@@ -89,7 +89,7 @@ export default function DatenschutzPage() {
           spätestens 24 Stunden nach Einlösung/Ablauf gelöscht, abgelaufene
           Sitzungen spätestens 30 Tage nach Ablauf. Ihr Konto bleibt bestehen,
           bis Sie es löschen — die Löschung können Sie jederzeit selbst im
-          Bereich „Mein Konto“ auslösen (siehe Ziff. 12).
+          Bereich „Mein Konto“ auslösen (siehe Ziff. 13).
         </p>
       </Abschnitt>
 
@@ -112,7 +112,26 @@ export default function DatenschutzPage() {
         </p>
       </Abschnitt>
 
-      <Abschnitt titel="7. Anliegen-Tracker">
+      <Abschnitt titel="7. Klarname und Funktion von Rollenträgern">
+        <p>
+          Wer auf der Plattform eine Rolle ausübt (z. B. Verifizierung,
+          Redaktion, Verwaltung), kann im Konto freiwillig einen Klarnamen und
+          eine Funktions- bzw. Amtsbezeichnung hinterlegen. Diese Angaben werden
+          öffentlich sichtbar gemacht, aber ausschließlich im Zusammenhang mit
+          der Rollenausübung — etwa als Hinweis „Gestellt von …“ an einer
+          Abstimmung oder in der internen Team-Übersicht. Zweckbindung ist die
+          transparente Zuordnung von Verantwortung; Rechtsgrundlage: Art. 6
+          Abs. 1 lit. e/f DSGVO (Transparenz kommunaler Beteiligung) bzw. bei
+          freiwilliger Angabe Art. 6 Abs. 1 lit. a DSGVO. Die Angabe ist
+          freiwillig, für die namentliche Rollenanzeige aber erforderlich; ohne
+          Klarnamen erscheint nur der Name der Institution. Sie können den
+          Klarnamen jederzeit im Konto ändern oder entfernen. Die reine Teilnahme
+          als Bürgerin oder Bürger (Abstimmen, Anliegen) bleibt hiervon
+          unberührt und pseudonym — Bürgerkonten führen keinen Klarnamen.
+        </p>
+      </Abschnitt>
+
+      <Abschnitt titel="8. Anliegen-Tracker">
         <p>
           Eingereichte Anliegen speichern wir mit Text, Kategorie/Ortsteil und
           Bearbeitungsstatus. Ihr Anliegen wird pseudonymisiert geführt
@@ -126,7 +145,7 @@ export default function DatenschutzPage() {
         </p>
       </Abschnitt>
 
-      <Abschnitt titel="8. E-Mail-Versand">
+      <Abschnitt titel="9. E-Mail-Versand">
         <p>
           Anmelde-Links und Benachrichtigungen versenden wir über einen
           eigenen SMTP-Server in Deutschland. E-Mail-Adressen werden nicht zu
@@ -134,7 +153,7 @@ export default function DatenschutzPage() {
         </p>
       </Abschnitt>
 
-      <Abschnitt titel="9. Ratsinformationen und Digests">
+      <Abschnitt titel="10. Ratsinformationen und Digests">
         <p>
           Die Plattform bereitet öffentliche Dokumente der kommunalen
           Ratsinformationssysteme zu verständlichen Zusammenfassungen auf.
@@ -158,7 +177,7 @@ export default function DatenschutzPage() {
         )}
       </Abschnitt>
 
-      <Abschnitt titel="10. Kanäle auf Drittplattformen">
+      <Abschnitt titel="11. Kanäle auf Drittplattformen">
         <p>
           Diese Website ist unser eigentlicher Kanal: Alle Zusammenfassungen
           sind hier und per RSS vollständig verfügbar — ohne Konto, ohne
@@ -176,7 +195,7 @@ export default function DatenschutzPage() {
         </p>
       </Abschnitt>
 
-      <Abschnitt titel="11. Cookies: nur funktional, kein Tracking">
+      <Abschnitt titel="12. Cookies: nur funktional, kein Tracking">
         <p>
           Wir setzen ausschließlich vier funktionale, technisch notwendige Cookies
           ein — <strong>keine</strong> Analyse-Dienste, externen Schriftarten/CDNs
@@ -217,7 +236,7 @@ export default function DatenschutzPage() {
         </ul>
       </Abschnitt>
 
-      <Abschnitt titel="12. Ihre Rechte">
+      <Abschnitt titel="13. Ihre Rechte">
         <p>
           Sie haben das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung
           (Art. 16), Löschung (Art. 17), Einschränkung (Art. 18),
@@ -242,7 +261,7 @@ export default function DatenschutzPage() {
         </p>
       </Abschnitt>
 
-      <Abschnitt titel="13. Keine automatisierte Entscheidungsfindung">
+      <Abschnitt titel="14. Keine automatisierte Entscheidungsfindung">
         <p>
           Es findet keine automatisierte Entscheidungsfindung einschließlich
           Profiling im Sinne des Art. 22 DSGVO statt. Veröffentlichungen und
@@ -250,7 +269,7 @@ export default function DatenschutzPage() {
         </p>
       </Abschnitt>
 
-      <Abschnitt titel="14. Änderungen">
+      <Abschnitt titel="15. Änderungen">
         <p>
           Wir passen diese Erklärung an, wenn sich Funktionsumfang oder
           Rechtslage ändern. Es gilt die hier veröffentlichte Fassung.

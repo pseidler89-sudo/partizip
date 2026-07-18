@@ -38,6 +38,10 @@ import WiderstandMitmachen from "../../WiderstandMitmachen";
 import { TeilenButton } from "../../TeilenButton";
 import { PollTypBadge } from "../../PollTypBadge";
 import { isDemoTenant } from "@/lib/demo/config";
+import { getUserRoleTypes } from "@/lib/auth/roles";
+import { fragestellerBadge, istRollentraeger } from "@/lib/identity/anzeige";
+import { regionDisplayName } from "@/lib/brand";
+import { FragestellerBadge } from "../../FragestellerBadge";
 import type { Metadata } from "next";
 import { kuerzen } from "@/lib/channels/types";
 
@@ -78,6 +82,8 @@ async function getPublicPoll(tenantSlug: string, pollId: string) {
       regionId: polls.regionId,
       regionTyp: regions.typ,
       punkteBudget: polls.punkteBudget,
+      // Block J1: Ersteller-FK (nullable, SET NULL) für den Fragesteller-Badge.
+      erstelltVon: polls.erstelltVon,
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
     })
@@ -133,6 +139,34 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
   if (!data) notFound();
 
   const { tenant, db, poll } = data;
+
+  // Block J1: Fragesteller-Badge. Institution (Kommune) ist das primäre
+  // Vertrauenssignal und steht immer; die Person erscheint nur, wenn der Ersteller
+  // (noch) Rollenträger ist UND einen Klarnamen hinterlegt hat. Ersteller +
+  // Rollenstatus tenant-scoped nachladen (nur wenn erstellt_von gesetzt).
+  const institution = regionDisplayName(tenant.name);
+  let erstellerVM: {
+    displayName: string | null;
+    funktion: string | null;
+    istRollentraeger: boolean;
+  } | null = null;
+  if (poll.erstelltVon) {
+    const erstellerRows = await db
+      .select({ displayName: users.displayName, funktion: users.funktion })
+      .from(users)
+      .where(and(eq(users.id, poll.erstelltVon), eq(users.tenantId, tenant.id)))
+      .limit(1);
+    const ersteller = erstellerRows[0];
+    if (ersteller) {
+      const erstellerRoleTypes = await getUserRoleTypes(db, tenant.id, poll.erstelltVon);
+      erstellerVM = {
+        displayName: ersteller.displayName,
+        funktion: ersteller.funktion,
+        istRollentraeger: istRollentraeger(erstellerRoleTypes),
+      };
+    }
+  }
+  const badge = fragestellerBadge(institution, erstellerVM);
 
   // Gemeinsame Beendet-Semantik (ADR-022): Beleg-Liste UND Ergebnis-
   // Aufschlüsselung werden nach Poll-Ende öffentlich — deckungsgleich mit
@@ -236,6 +270,7 @@ export default async function UmfrageDetailPage({ params }: PageProps) {
         <h1 className="mt-3 text-2xl font-semibold" style={{ color: "var(--pz-ink)" }}>
           {poll.frage}
         </h1>
+        <FragestellerBadge badge={badge} className="mt-3" />
       </div>
 
       <div className="pz-card p-6">

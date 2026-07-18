@@ -22,6 +22,8 @@ const user: UserRow = {
   id: "user-1",
   tenantId: "tenant-1",
   email: "max@example.org",
+  displayName: "Max Mustermann",
+  funktion: "Ortsvorsteher",
   birthYear: 1990,
   birthMonth: 5,
   ortsteilId: "ortsteil-1",
@@ -113,6 +115,10 @@ describe("buildExportDocument", () => {
     expect(doc.konto.email).toBe("max@example.org");
     expect(doc.konto.birthYear).toBe(1990);
     expect(doc.konto.id).toBe("user-1");
+    // Block J1: Rollenträger-Identität (Klarname + Funktion) muss im Art.-15-
+    // Export enthalten sein.
+    expect(doc.konto.displayName).toBe("Max Mustermann");
+    expect(doc.konto.funktion).toBe("Ortsvorsteher");
     // Benachrichtigungs-Motor: Opt-in-Status muss im Datenexport enthalten sein.
     expect(doc.konto.notifyNewPolls).toBe(true);
   });
