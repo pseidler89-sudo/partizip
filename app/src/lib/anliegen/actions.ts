@@ -37,6 +37,7 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getStufe } from "@/lib/eligibility/stufe";
 import { getUserRoleTypes, isAdmin } from "@/lib/auth/roles";
 import { computeCreatorRef } from "@/lib/anliegen/creator-ref";
+import { getAnliegenFollowerEmails } from "@/lib/anliegen/follower-recipients";
 import { generateUniqueTrackingCode } from "@/lib/anliegen/tracking-code";
 import { checkAnliegenRateLimit } from "@/lib/anliegen/rate-limit";
 import { clientIpFromForwardedFor } from "@/lib/client-ip";
@@ -404,13 +405,9 @@ export async function changeAnliegenStatus(
 
   // Follower benachrichtigen (außerhalb Transaktion — Fehler blockieren nicht)
   try {
-    const followerRows = await ctx.db
-      .select({ email: users.email })
-      .from(anliegenFollowers)
-      .innerJoin(users, eq(anliegenFollowers.userId, users.id))
-      .where(eq(anliegenFollowers.anliegenId, anliegenId));
-
-    const followerEmails = followerRows.map((r: { email: string }) => r.email);
+    // Block J2c: Versandfilter (Opt-out notify_anliegen_updates + Hygiene) im
+    // testbaren Lese-Helfer — nur zustellbare Opt-in-Follower erhalten die Mail.
+    const followerEmails = await getAnliegenFollowerEmails(ctx.db, anliegenId);
 
     const notifyResult = await notifyFollowersStatusChanged({
       trackingCode: currentAnliegen.trackingCode,

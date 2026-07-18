@@ -110,6 +110,31 @@ describe("getReVerifyFaellige / markReVerifyReminded (Integration)", () => {
     expect(danach).toHaveLength(0);
   });
 
+  it.skipIf(SKIP)("Block J2c: Opt-out (notifyReverify=false) + Tombstones/Demo ausgeschlossen", async () => {
+    const [t] = await db.insert(tenants).values({ slug: `rv-optout-${Date.now()}`, name: "RV-Optout" }).returning();
+    const now = new Date();
+    const inWindow = new Date(now.getTime() + TAG);
+
+    const [optin] = await db
+      .insert(users)
+      .values({ tenantId: t.id, email: `optin-${Date.now()}@t.de`, residencyVerifiedUntil: inWindow })
+      .returning();
+    await db.insert(users).values([
+      // Opt-out: erhält keine Erinnerung mehr.
+      { tenantId: t.id, email: `optout-${Date.now()}@t.de`, residencyVerifiedUntil: inWindow, notifyReverify: false },
+      // Gelöschtes Konto (Tombstone deletedAt).
+      { tenantId: t.id, email: `del-${Date.now()}@t.de`, residencyVerifiedUntil: inWindow, deletedAt: now },
+      // Anonymisierter Tombstone (@deleted.invalid).
+      { tenantId: t.id, email: `geloescht-x@deleted.invalid`, residencyVerifiedUntil: inWindow },
+      // Ephemeres Demo-Konto (@demo.invalid).
+      { tenantId: t.id, email: `demo-${Date.now()}@demo.invalid`, residencyVerifiedUntil: inWindow },
+    ]);
+
+    const faellig = await getReVerifyFaellige(db as never, { now, tenantId: t.id });
+    // Nur das Opt-in-Konto ist fällig — alle anderen sind gefiltert.
+    expect(faellig.map((f) => f.userId)).toEqual([optin.id]);
+  });
+
   it.skipIf(SKIP)("markReVerifyReminded mit leerer Liste ist ein No-op", async () => {
     expect(await markReVerifyReminded(db as never, [], new Date())).toBe(0);
   });
