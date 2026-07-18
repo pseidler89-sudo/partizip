@@ -122,6 +122,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return neutralResponse();
   }
 
+  // --- 4b. KONTO-STATUS (Block K2, Gate-B MAJOR, Defense-in-Depth) ---
+  // Gesperrte/gelöschte Konten erhalten keinen Magic-Link: identische neutrale
+  // Antwort wie beim Rate-Limit (kein Enumeration-/Status-Leak), kein Token,
+  // keine Mail. Die harte Durchsetzung sitzt zusätzlich in /api/auth/verify
+  // (keine Session für accountStatus != 'active') — beide zusammen sorgen
+  // dafür, dass die IR-Sperre am Login wirklich wirkt.
+  if (existingUser && existingUser.accountStatus !== "active") {
+    return neutralResponse();
+  }
+
   // --- 5a/5b/5c: Token generieren (in allen Zweigen für Timing-Angleichung) ---
   const rawToken = generateRawToken();
   const tokenHash = sha256Hex(rawToken);

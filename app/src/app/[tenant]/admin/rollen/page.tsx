@@ -7,6 +7,9 @@
  * Zeigt: Liste aller User des Tenants mit ihren Rollen (E-Mail HIER erlaubt —
  * admin-only, tenant-intern; NICHT zu verwechseln mit der PII-freien
  * Audit-Log-Ansicht) + Entzug-Buttons; Formular zum Zuweisen einer Rolle.
+ * Block K2: zusätzlich je User die Anzahl aktiver Sitzungen (eine
+ * Aggregat-Query) für die Konto-Sicherheits-Aktionen (Sperren/Entsperren,
+ * Sitzungen beenden, Offboarding).
  *
  * Die anzubietenden roleTypes werden serverseitig nach der Caller-Rolle
  * gefiltert (manageableRoleTypes) — der Server erzwingt es zusätzlich in der
@@ -15,7 +18,7 @@
 
 import { notFound, redirect } from "next/navigation";
 import { headers, cookies } from "next/headers";
-import { and, eq, asc } from "drizzle-orm";
+import { and, eq, asc, count, gt, isNull } from "drizzle-orm";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
 import { users, roles, sessions, regions } from "@/db/schema";
@@ -85,11 +88,35 @@ export default async function AdminRollenPage({ params }: PageProps) {
     .where(eq(users.tenantId, tenant.id))
     .orderBy(asc(users.email));
 
+  // Block K2: Anzahl AKTIVER Sitzungen je User — EINE Aggregat-Query (kein N+1),
+  // rein informativ für die Konto-Sicherheits-Fläche. „Aktiv" = nicht revoziert
+  // und nicht abgelaufen (JS-Date nur als gebundener Drizzle-Parameter).
+  const sessionCountRows = await db
+    .select({ userId: sessions.userId, n: count() })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.tenantId, tenant.id),
+        isNull(sessions.revokedAt),
+        gt(sessions.expiresAt, now),
+      ),
+    )
+    .groupBy(sessions.userId);
+  const sessionCountMap = new Map<string, number>(
+    sessionCountRows.map((r: { userId: string; n: number }) => [r.userId, r.n]),
+  );
+
   // Nach User gruppieren.
   type RoleEntry = { roleId: string; roleType: string; regionTyp: string; regionName: string };
   const userMap = new Map<
     string,
-    { userId: string; email: string; accountStatus: string; roles: RoleEntry[] }
+    {
+      userId: string;
+      email: string;
+      accountStatus: string;
+      aktiveSitzungen: number;
+      roles: RoleEntry[];
+    }
   >();
   for (const row of userRows) {
     let entry = userMap.get(row.userId);
@@ -98,6 +125,7 @@ export default async function AdminRollenPage({ params }: PageProps) {
         userId: row.userId,
         email: row.email,
         accountStatus: row.accountStatus,
+        aktiveSitzungen: sessionCountMap.get(row.userId) ?? 0,
         roles: [],
       };
       userMap.set(row.userId, entry);
@@ -149,6 +177,7 @@ export default async function AdminRollenPage({ params }: PageProps) {
         tenantSlug={slugFromPath}
         users={tenantUsers}
         erlaubteRollen={erlaubteRollen}
+        callerUserId={session.userId}
       />
 
       <div className="mt-12 border-t border-pz-line pt-10">

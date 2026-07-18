@@ -128,6 +128,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return apiError(400, "TOKEN_INVALID", "Kein Konto zu diesem Token gefunden.");
   }
 
+  // --- 6b. KONTO-STATUS (Block K2, Gate-B MAJOR): Sperre muss am Login wirken ---
+  // Ein gesperrtes/gelöschtes Konto erhält KEINE neue Session — sonst entwertete
+  // ein Magic-Link-Re-Login die IR-Sperre binnen Minuten (kontoSperrenCore
+  // revoziert alle Sessions, aber ohne diesen Check wäre der Gesperrte sofort
+  // wieder eingeloggt). Generische Meldung im bestehenden Token-Fehler-Vokabular
+  // (kein Status-Oracle nach außen); PII-freies Audit für das IR-Lagebild.
+  // Muster: invitation-core lehnt Accept bei accountStatus != 'active' bereits ab.
+  if (user.accountStatus !== "active") {
+    await db.insert(auditEvents).values({
+      tenantId: tenant.id,
+      actorType: "user",
+      actorRef: user.id,
+      action: "auth.login_rejected",
+      metadata: { reason: "account_status" },
+    });
+    return apiError(400, "TOKEN_INVALID", "Dieser Link ist ungültig.");
+  }
+
   // --- H3: Übrige unverbrauchte Tokens derselben (tenant, email) invalidieren ---
   await scoped.authTokens.invalidateOtherTokens(consumed.email, tokenHash);
 
