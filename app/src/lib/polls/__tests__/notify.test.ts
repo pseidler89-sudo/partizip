@@ -69,6 +69,7 @@ function tenantRow(id: string, slug: string, name: string): TenantRow {
     logoUrl: null,
     welcomeText: null,
     isActive: true,
+    kiNeutralitaetsPflicht: false,
   };
 }
 

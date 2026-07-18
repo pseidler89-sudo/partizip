@@ -28,6 +28,7 @@ import { isAdmin, beobachterDarfSehen, getUserRolesMitScope } from "@/lib/auth/r
 import { regionTypLabel } from "@/lib/region/ebenen";
 import { erlaubteZielGebiete, istSuperAdminScope } from "@/lib/polls/composer-autoritaet";
 import { getAllPollsForAdmin, type PollAdminItem } from "@/lib/polls/queries";
+import { getLetztePruefungProPoll, type LetztePruefung } from "@/lib/ki/queries";
 import { isDemoTenant } from "@/lib/demo/config";
 import { istMusterstadtSeedPollId } from "@/lib/demo/seed-ids";
 import PollComposerForm from "./PollComposerForm";
@@ -40,8 +41,9 @@ interface PageProps {
 }
 
 
-const STATUS_TITLES: { key: "entwurf" | "aktiv" | "geschlossen"; titel: string; hint: string }[] = [
+const STATUS_TITLES: { key: "entwurf" | "in_pruefung" | "aktiv" | "geschlossen"; titel: string; hint: string }[] = [
   { key: "entwurf", titel: "Entwürfe", hint: "Noch nicht veröffentlicht — aktivieren oder löschen." },
+  { key: "in_pruefung", titel: "In Prüfung", hint: "Warten auf die Neutralitätsprüfung — freigeben oder anhalten." },
   { key: "aktiv", titel: "Aktive Abstimmungen", hint: "Bürger:innen stimmen mit." },
   { key: "geschlossen", titel: "Geschlossene Abstimmungen", hint: "Beendet — Ergebnis bleibt erhalten." },
 ];
@@ -119,6 +121,14 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
       );
   const byStatus = (s: string) => allPolls.filter((p) => p.status === s);
 
+  // Block L (ADR-028): KI-Neutralitäts-Check-Status für diesen Tenant + die letzte
+  // Prüf-Begründung je Umfrage (für die amber „angehalten"-Karte im Entwurf-Zweig).
+  const kiPflicht = tenant.kiNeutralitaetsPflicht;
+  const pruefLink = `/${slugFromPath}/transparenz`;
+  const letztePruefung = admin
+    ? await getLetztePruefungProPoll(db, tenant.id)
+    : new Map<string, LetztePruefung>();
+
   // Demo-Mandant: Composer bietet nur „stadt" (jede Demo-Frage bleibt in der
   // Bürger-Sicht sichtbar, MINOR-4) und die kuratierten Seed-Fragen werden als
   // „Beispiel" gekennzeichnet + ohne (am Seed-Guard scheiternde) Aktions-Buttons
@@ -168,6 +178,10 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
       <div className="mt-10 space-y-10">
         {STATUS_TITLES.map(({ key, titel, hint }) => {
           const items = byStatus(key);
+          // „In Prüfung" nur zeigen, wenn der Check aktiv ist ODER (historisch)
+          // noch Umfragen in diesem Status liegen — sonst blendet die Gruppe für
+          // Tenants ohne Neutralitäts-Check aus.
+          if (key === "in_pruefung" && !kiPflicht && items.length === 0) return null;
           return (
             <section key={key}>
               <div className="mb-3 flex items-baseline justify-between gap-3">
@@ -255,6 +269,24 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
                           {closes && <> · Ende: {closes}</>}
                         </p>
 
+                        {/* Block L: nach dem Anhalten sieht der Ersteller im
+                            Entwurf-Zweig die letzte Prüf-Begründung (dezent amber). */}
+                        {(() => {
+                          const lp = letztePruefung.get(p.id);
+                          if (p.status !== "entwurf" || lp?.verdict !== "angehalten") return null;
+                          return (
+                            <div
+                              className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900"
+                              role="note"
+                            >
+                              <strong>Angehalten (Neutralitätsprüfung):</strong> {lp.begruendung}
+                              {lp.verletzteRegel && (
+                                <span className="block mt-1">Verletzte Regel: {lp.verletzteRegel}</span>
+                              )}
+                            </div>
+                          );
+                        })()}
+
                         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
                           {admin && (
                             <PollAdminActions
@@ -262,6 +294,8 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
                               status={p.status}
                               demo={istDemo}
                               istBeispiel={istBeispiel}
+                              kiPflicht={kiPflicht}
+                              pruefLink={pruefLink}
                             />
                           )}
 

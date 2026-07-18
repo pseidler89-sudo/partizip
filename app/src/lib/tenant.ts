@@ -27,6 +27,9 @@ export type TenantRow = {
   logoUrl: string | null;
   welcomeText: string | null;
   isActive: boolean;
+  // Block L (ADR-028): KI-Neutralitäts-Check je Tenant (Default false). Steuert, ob
+  // eine zur Aktivierung gebrachte Umfrage zuerst in den Zustand `in_pruefung` geht.
+  kiNeutralitaetsPflicht: boolean;
 };
 
 /**
@@ -60,6 +63,7 @@ export async function getTenantBySlug(slug: string): Promise<TenantRow | null> {
       logoUrl: tenants.logoUrl,
       welcomeText: tenants.welcomeText,
       isActive: tenants.isActive,
+      kiNeutralitaetsPflicht: tenants.kiNeutralitaetsPflicht,
     })
     .from(tenants)
     .where(eq(tenants.slug, slug))
