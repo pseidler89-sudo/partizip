@@ -29,6 +29,10 @@ import {
   kontoSperrenPerEmail,
 } from "@/lib/admin/konto-sicherheit-actions";
 import { regionTypLabel } from "@/lib/region/ebenen";
+// K4 (Teil A): „Zuletzt aktiv" als Kalendertag-Differenz (Europe/Berlin) —
+// reine, zeitstabil getestete Funktion (Gate-B-Fund: MS-Division machte den
+// „heute"-Zweig unerreichbar).
+import { zuletztAktivLabel } from "@/lib/format/zuletzt-aktiv";
 import BestaetigungsDialog from "../../BestaetigungsDialog";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -60,6 +64,8 @@ interface TenantUser {
   accountStatus: string;
   /** Anzahl aktiver (nicht revozierter, nicht abgelaufener) Sitzungen — informativ. */
   aktiveSitzungen: number;
+  /** K4: ISO-String des letzten Logins (max sessions.created_at) oder null. */
+  letzterLogin: string | null;
   roles: RoleEntry[];
 }
 
@@ -311,6 +317,8 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
                       {u.aktiveSitzungen === 1
                         ? "1 aktive Sitzung"
                         : `${u.aktiveSitzungen} aktive Sitzungen`}
+                      {" · "}
+                      {zuletztAktivLabel(u.letzterLogin)}
                     </span>
                   </div>
                 </div>

@@ -121,7 +121,7 @@ export default async function AdminVerifizierungPage({ params }: PageProps) {
           reine Verifier bestätigen Termine, verwalten aber keine Standorte
           (die Unterseite + Actions erzwingen isAdmin zusätzlich serverseitig). */}
       {callerIstAdmin && (
-        <section className="mb-10">
+        <section className="mb-10 grid gap-4 sm:grid-cols-2">
           <Link
             href={`/${slugFromPath}/admin/verifizierung/standorte`}
             className="pz-card block p-5 transition-shadow hover:shadow-md"
@@ -132,6 +132,19 @@ export default async function AdminVerifizierungPage({ params }: PageProps) {
             <p className="mt-1 text-sm" style={{ color: "var(--pz-muted)" }}>
               Verifizierungs-Standorte anlegen, Sprechzeiten (einzeln oder als
               Wochenserie) einstellen — die Termine, die Bürger:innen buchen können.
+            </p>
+          </Link>
+          {/* Block K4: rein lesende Aktivitäts-/Anomalie-Sicht — nur Admins. */}
+          <Link
+            href={`/${slugFromPath}/admin/verifizierung/aktivitaet`}
+            className="pz-card block p-5 transition-shadow hover:shadow-md"
+          >
+            <h2 className="text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
+              Aktivität &amp; Auffälligkeiten →
+            </h2>
+            <p className="mt-1 text-sm" style={{ color: "var(--pz-muted)" }}>
+              Einlösungen je Verifizierer:in, QR-Ausschöpfung und wahrgenommene
+              Termine — Aggregate, die möglichen Missbrauch sichtbar machen.
             </p>
           </Link>
         </section>
