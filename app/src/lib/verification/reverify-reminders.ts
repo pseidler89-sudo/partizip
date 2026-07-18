@@ -12,7 +12,7 @@
  * Zeitstempel (kein PII), der Mehrfach-Versand pro Zyklus verhindert.
  */
 
-import { and, eq, isNull, gt, lte, inArray } from "drizzle-orm";
+import { and, eq, isNull, gt, lte, inArray, notLike } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { users, tenants } from "@/db/schema";
 import { BRAND_COLOR } from "@/lib/brand";
@@ -47,9 +47,16 @@ export async function getReVerifyFaellige(
 
   const conds = [
     eq(users.accountStatus, "active"),
+    // Block J2c: das Opt-out „notify_reverify" wirksam machen.
+    eq(users.notifyReverify, true),
     isNull(users.reverifyReminderSentAt),
     gt(users.residencyVerifiedUntil, now),
     lte(users.residencyVerifiedUntil, windowEnd),
+    // Hygiene-Parität zum notifyNewPolls-Muster (bisher fehlend): gelöschte/
+    // anonymisierte Tombstones und ephemere Demo-Adressen (RFC-2606) ausschließen.
+    isNull(users.deletedAt),
+    notLike(users.email, "%@deleted.invalid"),
+    notLike(users.email, "%@demo.invalid"),
   ];
   if (opts?.tenantId) conds.push(eq(users.tenantId, opts.tenantId));
 

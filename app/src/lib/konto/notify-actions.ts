@@ -93,3 +93,75 @@ export async function setNeuePollBenachrichtigung(
 
   return { ok: true };
 }
+
+/**
+ * Setzt das Flag „E-Mail bei Statusänderung meiner gefolgten Anliegen" für das
+ * eigene Konto (eingeloggt, self + tenant-scoped). Wirkt als Versandfilter in
+ * lib/anliegen/follower-recipients.ts. Audit PII-frei (nur Flag-Wert).
+ *
+ * @param aktiv  true = Status-Mails erhalten, false = abbestellen.
+ */
+export async function setAnliegenBenachrichtigung(
+  aktiv: boolean,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await getAuthContext();
+  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+
+  const updated = await ctx.db
+    .update(users)
+    .set({ notifyAnliegenUpdates: aktiv })
+    .where(and(eq(users.tenantId, ctx.tenant.id), eq(users.id, ctx.userId)))
+    .returning({ id: users.id });
+
+  if (updated.length === 0) {
+    return { ok: false, error: "Benutzer nicht gefunden." };
+  }
+
+  await ctx.db.insert(auditEvents).values({
+    tenantId: ctx.tenant.id,
+    actorType: "user",
+    actorRef: ctx.userId,
+    action: "konto.notify_anliegen_updates",
+    targetType: "user",
+    targetId: ctx.userId,
+    metadata: { notifyAnliegenUpdates: aktiv },
+  });
+
+  return { ok: true };
+}
+
+/**
+ * Setzt das Flag „Erinnerung, wenn meine Wohnsitz-Verifizierung ausläuft" für das
+ * eigene Konto (eingeloggt, self + tenant-scoped). Wirkt als Versandfilter in
+ * lib/verification/reverify-reminders.ts. Audit PII-frei (nur Flag-Wert).
+ *
+ * @param aktiv  true = Erinnerung erhalten, false = abbestellen.
+ */
+export async function setReverifyBenachrichtigung(
+  aktiv: boolean,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await getAuthContext();
+  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+
+  const updated = await ctx.db
+    .update(users)
+    .set({ notifyReverify: aktiv })
+    .where(and(eq(users.tenantId, ctx.tenant.id), eq(users.id, ctx.userId)))
+    .returning({ id: users.id });
+
+  if (updated.length === 0) {
+    return { ok: false, error: "Benutzer nicht gefunden." };
+  }
+
+  await ctx.db.insert(auditEvents).values({
+    tenantId: ctx.tenant.id,
+    actorType: "user",
+    actorRef: ctx.userId,
+    action: "konto.notify_reverify",
+    targetType: "user",
+    targetId: ctx.userId,
+    metadata: { notifyReverify: aktiv },
+  });
+
+  return { ok: true };
+}

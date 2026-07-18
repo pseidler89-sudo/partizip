@@ -69,6 +69,22 @@ export async function getNachfahren(db: Db, id: string): Promise<RegionRow[]> {
 }
 
 /**
+ * Lesbarer Pfad eines Knotens „Land › Kreis › Gemeinde › Ortsteil" (Wurzel →
+ * Knoten, inkl. Selbst), Namen mit „ › " verbunden. Rein lesend; null, wenn der
+ * Knoten nicht existiert. Nutzt die Vorfahren-Kette (getVorfahren, ohne Selbst)
+ * plus den Knoten selbst — dieselbe nlevel-Ordnung von der Wurzel abwärts.
+ *
+ * BEWUSST kein "use server" (Lese-Helfer, kein RPC): wird serverseitig in
+ * /api/me aufgelöst, damit die Client-Konto-Seite fertige Strings bekommt.
+ */
+export async function regionPfad(db: Db, id: string): Promise<string | null> {
+  const selbst = await getRegion(db, id);
+  if (!selbst) return null;
+  const vorfahren = await getVorfahren(db, id);
+  return [...vorfahren, selbst].map((r) => r.name).join(" › ");
+}
+
+/**
  * „Vertikale Scheibe": der Knoten selbst + alle Vorfahren (bis Bund) + seine
  * direkten Kinder. Das ist die Baum-Primitive hinter der Standard-Sicht
  * (GEBIETSMODELL §5) — die tenant-scoped Poll-Auflösung baut in Etappe 2 darauf

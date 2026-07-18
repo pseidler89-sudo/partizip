@@ -21,6 +21,9 @@ import { getUserRoleTypes, isAdmin } from "@/lib/auth/roles";
 import { istRollentraeger } from "@/lib/identity/anzeige";
 import { getEinrichtungsStatus } from "@/lib/konto/einrichtung";
 import { isDemoTenant } from "@/lib/demo/config";
+import { regionPfad } from "@/lib/region/tree";
+import { getOrtsteileForTenant } from "@/lib/region/queries";
+import { resolveOrtsteilCodeForRegionId } from "@/lib/region/scope";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const host = getEffectiveHost(request);
@@ -58,6 +61,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ? null
     : await getEinrichtungsStatus(db, tenant, user, user.id);
 
+  // Block J2c: Wohnort-Sektion. Anzeige-Wohnort = home_region_id (weich, frei
+  // setzbar); verbindlicher Wohnsitz = residency_region_id (nur per QR). Die
+  // Pfade serverseitig auflösen, damit die Client-Konto-Seite fertige Strings
+  // bekommt. Ortsteil-Dropdown: Optionen + aktuelle Auswahl (aus home_region_id).
+  const homeRegionPfad = user.homeRegionId
+    ? await regionPfad(db, user.homeRegionId)
+    : null;
+  const residencyRegionPfad = user.residencyRegionId
+    ? await regionPfad(db, user.residencyRegionId)
+    : null;
+  const ortsteilOptionen = await getOrtsteileForTenant(db, tenant.id);
+  const homeOrtsteilCode = user.homeRegionId
+    ? await resolveOrtsteilCodeForRegionId(db, tenant.id, user.homeRegionId)
+    : null;
+
   return NextResponse.json({
     user: {
       id: user.id,
@@ -69,6 +87,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         : null,
       // Benachrichtigungs-Motor: aktueller Opt-in-Status (für den Konto-Umschalter).
       notifyNewPolls: user.notifyNewPolls,
+      // Block J2c: granulare Opt-outs (Anliegen-Status-Mails, Reverify-Erinnerung).
+      notifyAnliegenUpdates: user.notifyAnliegenUpdates,
+      notifyReverify: user.notifyReverify,
+      // Block J2c: Wohnort. Roh-Ids + serverseitig aufgelöste, lesbare Pfade.
+      homeRegionId: user.homeRegionId ?? null,
+      ortsteilId: user.ortsteilId ?? null,
+      residencyRegionId: user.residencyRegionId ?? null,
+      homeRegionPfad,
+      residencyRegionPfad,
+      // Ortsteil-Dropdown der Wohnort-Sektion (nur falls die Gemeinde welche hat).
+      ortsteilOptionen,
+      homeOrtsteilCode,
       stufe: getStufe(user),
       // Admin-Sichtbarkeit (kommune_admin/super_admin) für die Verwaltung-Karte.
       isAdmin: isAdmin(roleTypes),

@@ -85,6 +85,33 @@ export async function resolveOrtsteilRegionId(
 }
 
 /**
+ * Umkehrung von `resolveOrtsteilRegionId`: zu einem Regionsknoten (z. B.
+ * users.home_region_id) den zugehörigen Ortsteil-Code des Tenants finden — für
+ * die aktuelle Auswahl des Ortsteil-Dropdowns im Konto. Rein lesend; null, wenn
+ * der Knoten kein Ortsteil des Tenants ist (dann steht das Dropdown auf „Ganze
+ * Kommune"). Join über die identische Normalisierung (regions_ltree_label).
+ */
+export async function resolveOrtsteilCodeForRegionId(
+  db: Db,
+  tenantId: string,
+  regionId: string
+): Promise<string | null> {
+  const rows = (await db.execute(
+    sql`
+      SELECT o.code AS code
+      FROM ortsteile o
+      JOIN regions r
+        ON r.typ = 'ortsteil'
+       AND r.path_label = regions_ltree_label(o.code)
+      WHERE o.tenant_id = ${tenantId}::uuid
+        AND r.id = ${regionId}::uuid
+      LIMIT 1
+    `
+  )) as unknown as Array<{ code: string }>;
+  return rows[0]?.code ?? null;
+}
+
+/**
  * Gemeinde-Knoten eines Tenants (Stadt-Ebene, viewer_path-Fallback). Rein lesend
  * (KEIN Provisioning); null, wenn der Baum für den Tenant noch nicht geseedet ist.
  */

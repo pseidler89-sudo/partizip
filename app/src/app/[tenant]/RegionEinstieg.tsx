@@ -27,9 +27,16 @@ import {
 export function RegionEinstieg({
   tenantName,
   variante = "landing",
+  onErfolg,
 }: {
   tenantName: string;
   variante?: "landing" | "eingeloggt";
+  /**
+   * Optional (Block J2c, Konto-Wohnort): nach erfolgreichem Setzen aufrufen —
+   * die Client-Konto-Seite lädt daraufhin /api/me neu (router.refresh() reicht
+   * dort nicht, da die Seite ihre Daten selbst per fetch holt).
+   */
+  onErfolg?: () => void;
 }) {
   const router = useRouter();
   const [plz, setPlz] = useState("");
@@ -46,6 +53,7 @@ export function RegionEinstieg({
       const res = await regionAusPlz(plz);
       if (res.ok) {
         router.refresh();
+        onErfolg?.();
         return;
       }
       if (res.nichtGefunden) {
@@ -74,6 +82,7 @@ export function RegionEinstieg({
           setGeoBusy(false);
           if (res.ok) {
             router.refresh();
+            onErfolg?.();
             return;
           }
           if (res.nichtGefunden) {
@@ -97,8 +106,10 @@ export function RegionEinstieg({
     setFehler(null);
     startTransition(async () => {
       const res = await regionUebernehmen();
-      if (res.ok) router.refresh();
-      else setFehler(res.error ?? "Das hat nicht geklappt.");
+      if (res.ok) {
+        router.refresh();
+        onErfolg?.();
+      } else setFehler(res.error ?? "Das hat nicht geklappt.");
     });
   }
 

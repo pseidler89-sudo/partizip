@@ -77,6 +77,8 @@ describe("konto/notify-actions (Integration, echte Action)", () => {
   let otherUserId: string;
 
   let setNeuePollBenachrichtigung: typeof import("@/lib/konto/notify-actions").setNeuePollBenachrichtigung;
+  let setAnliegenBenachrichtigung: typeof import("@/lib/konto/notify-actions").setAnliegenBenachrichtigung;
+  let setReverifyBenachrichtigung: typeof import("@/lib/konto/notify-actions").setReverifyBenachrichtigung;
 
   let counter = 0;
   const nextSlug = (p: string) => `${p}-${Date.now()}-${++counter}`;
@@ -128,6 +130,8 @@ describe("konto/notify-actions (Integration, echte Action)", () => {
 
     const mod = await import("@/lib/konto/notify-actions");
     setNeuePollBenachrichtigung = mod.setNeuePollBenachrichtigung;
+    setAnliegenBenachrichtigung = mod.setAnliegenBenachrichtigung;
+    setReverifyBenachrichtigung = mod.setReverifyBenachrichtigung;
 
     await loginAls(userId);
   });
@@ -165,6 +169,57 @@ describe("konto/notify-actions (Integration, echte Action)", () => {
     for (const a of audit) {
       expect(JSON.stringify(a.metadata)).not.toContain("@");
     }
+  });
+
+  it.skipIf(SKIP)("setAnliegenBenachrichtigung setzt NUR notify_anliegen_updates (andere Flags unberührt)", async () => {
+    // Ausgangszustand: alle drei true.
+    await db
+      .update(users)
+      .set({ notifyNewPolls: true, notifyAnliegenUpdates: true, notifyReverify: true })
+      .where(eq(users.id, userId));
+
+    const res = await setAnliegenBenachrichtigung(false);
+    expect(res.ok).toBe(true);
+
+    const [row] = await db.select().from(users).where(eq(users.id, userId));
+    expect(row.notifyAnliegenUpdates).toBe(false);
+    // Die anderen beiden Flags bleiben unberührt.
+    expect(row.notifyNewPolls).toBe(true);
+    expect(row.notifyReverify).toBe(true);
+
+    // Fremd-User (anderer Tenant) unverändert (Isolation).
+    const [other] = await db.select().from(users).where(eq(users.id, otherUserId));
+    expect(other.notifyAnliegenUpdates).toBe(true);
+
+    // PII-freies Audit.
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "konto.notify_anliegen_updates"), eq(auditEvents.targetId, userId)));
+    expect(audit.length).toBeGreaterThanOrEqual(1);
+    for (const a of audit) expect(JSON.stringify(a.metadata)).not.toContain("@");
+  });
+
+  it.skipIf(SKIP)("setReverifyBenachrichtigung setzt NUR notify_reverify (andere Flags unberührt)", async () => {
+    await db
+      .update(users)
+      .set({ notifyNewPolls: true, notifyAnliegenUpdates: true, notifyReverify: true })
+      .where(eq(users.id, userId));
+
+    const res = await setReverifyBenachrichtigung(false);
+    expect(res.ok).toBe(true);
+
+    const [row] = await db.select().from(users).where(eq(users.id, userId));
+    expect(row.notifyReverify).toBe(false);
+    expect(row.notifyNewPolls).toBe(true);
+    expect(row.notifyAnliegenUpdates).toBe(true);
+
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "konto.notify_reverify"), eq(auditEvents.targetId, userId)));
+    expect(audit.length).toBeGreaterThanOrEqual(1);
+    for (const a of audit) expect(JSON.stringify(a.metadata)).not.toContain("@");
   });
 
   it.skipIf(SKIP)("ohne Session → nicht authentifiziert (kein UPDATE)", async () => {
