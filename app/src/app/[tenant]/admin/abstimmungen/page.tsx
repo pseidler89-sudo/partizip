@@ -17,15 +17,16 @@
 
 import { notFound, redirect } from "next/navigation";
 import { headers, cookies } from "next/headers";
-import { and, eq, asc } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import Link from "next/link";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
-import { ortsteile as ortsteileTable, sessions } from "@/db/schema";
+import { sessions } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin, beobachterDarfSehen, getUserRolesMitScope } from "@/lib/auth/roles";
 import { regionTypLabel } from "@/lib/region/ebenen";
+import { erlaubteZielGebiete, istSuperAdminScope } from "@/lib/polls/composer-autoritaet";
 import { getAllPollsForAdmin, type PollAdminItem } from "@/lib/polls/queries";
 import { isDemoTenant } from "@/lib/demo/config";
 import { istMusterstadtSeedPollId } from "@/lib/demo/seed-ids";
@@ -108,13 +109,6 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
   const hatBeobachterRolle = roleTypes.includes("beobachter");
   if (!admin && !hatBeobachterRolle) redirect(`/${slugFromPath}/anmelden`);
 
-  // Ortsteile (für das Ortsteil-Dropdown) + alle Umfragen mit Zählern.
-  const ortsteilRows = await db
-    .select({ code: ortsteileTable.code, name: ortsteileTable.name })
-    .from(ortsteileTable)
-    .where(eq(ortsteileTable.tenantId, tenant.id))
-    .orderBy(asc(ortsteileTable.name));
-
   const allPollsUnfiltered = await getAllPollsForAdmin(db, tenant.id);
   // Beobachter: nur Abstimmungen im eigenen Scope (fail-closed über die reine
   // Funktion beobachterDarfSehen); Admins sehen alle des Tenants.
@@ -131,6 +125,18 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
   // gezeigt (MINOR-5).
   const istDemo = isDemoTenant(tenant.slug);
 
+  // Block H — server-getriebener Composer-Picker: die für DIESEN Admin erlaubten
+  // Ziel-Gebiete (eigene Rollen-Scheibe abwärts; super_admin die Gemeinde-Scheibe).
+  // Nur für Admins berechnet (Beobachter sehen kein Formular). Demo-Fence: der
+  // Ortsteil-Zweig wird ausgeblendet (Demo-Konten ohne Ortsteil-Anker sähen die
+  // Frage nie) — die Durchsetzung liegt zusätzlich serverseitig in pollErstellen.
+  const gebieteAlle = admin
+    ? await erlaubteZielGebiete(db, tenant.id, roleRows, istSuperAdminScope(roleRows))
+    : [];
+  const gebiete = istDemo
+    ? gebieteAlle.filter((g) => g.typ === "gemeinde")
+    : gebieteAlle;
+
   return (
     <main className="min-h-screen px-6 py-10 max-w-4xl mx-auto">
       <div className="mb-8">
@@ -146,7 +152,7 @@ export default async function AdminAbstimmungenPage({ params }: PageProps) {
 
       {/* Erstellen-Formular (nur Admins; Beobachter: reine Lese-Ansicht) */}
       {admin ? (
-        <PollComposerForm ortsteile={ortsteilRows} demo={istDemo} />
+        <PollComposerForm gebiete={gebiete} demo={istDemo} />
       ) : (
         <div
           className="rounded-lg border p-4 text-sm"
