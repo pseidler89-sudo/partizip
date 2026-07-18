@@ -407,7 +407,7 @@ export async function changeAnliegenStatus(
   try {
     // Block J2c: Versandfilter (Opt-out notify_anliegen_updates + Hygiene) im
     // testbaren Lese-Helfer — nur zustellbare Opt-in-Follower erhalten die Mail.
-    const followerEmails = await getAnliegenFollowerEmails(ctx.db, anliegenId);
+    const followerEmails = await getAnliegenFollowerEmails(ctx.db, ctx.tenant.id, anliegenId);
 
     const notifyResult = await notifyFollowersStatusChanged({
       trackingCode: currentAnliegen.trackingCode,

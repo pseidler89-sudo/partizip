@@ -25,6 +25,7 @@ import { anliegenFollowers, users } from "@/db/schema";
  */
 export async function getAnliegenFollowerEmails(
   db: Db,
+  tenantId: string,
   anliegenId: string,
 ): Promise<string[]> {
   const rows = await db
@@ -34,6 +35,10 @@ export async function getAnliegenFollowerEmails(
     .where(
       and(
         eq(anliegenFollowers.anliegenId, anliegenId),
+        // Defense-in-Depth: expliziter Tenant-Guard (die anliegenId ist beim
+        // Aufrufer bereits tenant-scoped, aber wir setzen den Filter wie überall
+        // konsequent — schützt gegen künftige Cross-Tenant-Follow-Pfade/Datenfehler).
+        eq(users.tenantId, tenantId),
         // Block J2c: das Opt-out wirksam machen.
         eq(users.notifyAnliegenUpdates, true),
         // Hygiene-Parität zum notifyNewPolls-Muster (bisher fehlend):

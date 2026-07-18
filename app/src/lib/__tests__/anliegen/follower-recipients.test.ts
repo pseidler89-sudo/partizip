@@ -87,11 +87,22 @@ describe("getAnliegenFollowerEmails (Integration, Versandfilter)", () => {
       .values({ tenantId: t.id, email: `demo-${Date.now()}@demo.invalid`, notifyAnliegenUpdates: true })
       .returning();
 
-    for (const u of [optin, optout, deleted, tombstone, demo]) {
+    // Fremd-Tenant-Follower (Defense-in-Depth: darf trotz Follow nie in den
+    // Verteiler geraten — der explizite Tenant-Guard schließt ihn aus).
+    const [fremdTenant] = await db
+      .insert(tenants)
+      .values({ slug: `fr2-${Date.now()}`, name: "FR2" })
+      .returning();
+    const [fremd] = await db
+      .insert(users)
+      .values({ tenantId: fremdTenant.id, email: `fremd-${Date.now()}@t.de`, notifyAnliegenUpdates: true })
+      .returning();
+
+    for (const u of [optin, optout, deleted, tombstone, demo, fremd]) {
       await db.insert(anliegenFollowers).values({ anliegenId: a.id, userId: u.id });
     }
 
-    const emails = await getAnliegenFollowerEmails(db as never, a.id);
+    const emails = await getAnliegenFollowerEmails(db as never, t.id, a.id);
     expect(emails).toEqual([optin.email]);
   });
 });

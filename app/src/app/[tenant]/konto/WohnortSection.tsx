@@ -93,7 +93,10 @@ export function WohnortSection({
             </button>
           </div>
           <p className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
-            Der Anzeige-Wohnort bestimmt, welche Umfragen Sie sehen. Sie können ihn
+            Der Anzeige-Wohnort bestimmt, welche Umfragen Sie sehen — und wo Ihre
+            Stimme bei <em>unverbindlichen</em> Stimmungsbildern zählt. Ihre{" "}
+            <strong>verbindliche</strong> Stimme richtet sich dagegen allein nach
+            Ihrem verifizierten Wohnsitz (siehe unten). Sie können den Anzeige-Wohnort
             jederzeit frei ändern.
           </p>
 
