@@ -12,7 +12,9 @@
  *      'email_change') geht ausschließlich an die neue Adresse, TTL wie Login,
  *      single-use via CAS-consume.
  *   3. Kein Adress-Oracle: Antwort der Anforderung ist IMMER neutral. Ist die
- *      Ziel-Adresse im Tenant bereits vergeben → KEINE Mail, Antwort identisch.
+ *      Ziel-Adresse im Tenant bereits vergeben → KEINE Mail, Antwort identisch —
+ *      auch ZEITLICH: beide Zweige machen dieselben DB-Writes, SMTP liegt
+ *      außerhalb des Antwortpfads (Timing-Invariante im Anfordern-Rumpf).
  *   4. Bestätigen erfordert die Session DESSELBEN Users (userId-Bindung am
  *      Token). GET prüft nur (kein Verbrauch), POST konsumiert.
  *   5. Konsum atomar (CAS) → account_status erneut prüfen → UPDATE users.email;
@@ -61,9 +63,10 @@ export type AnfordernErgebnis =
   | { kind: "demo_blocked" }
   /**
    * Neutralfall: nach außen IMMER identisch. `mailVersendet` ist rein intern
-   * (Tests/Audit) — verrät nach außen nichts (die Action mappt beide auf denselben
-   * Text). true = Token angelegt + Mail an die neue Adresse; false = Ziel bereits
-   * vergeben (oder Konto nicht aktiv), keine Mail.
+   * (Tests) — verrät nach außen nichts (die Action mappt beide auf denselben
+   * Text). true = Mail an die neue Adresse angestoßen; false = Ziel bereits
+   * vergeben (oder Konto nicht aktiv), keine Mail. Beide Zweige führen exakt
+   * dieselben DB-Writes aus (Timing-Invariante, siehe Funktionsrumpf).
    */
   | { kind: "neutral"; mailVersendet: boolean };
 
@@ -125,21 +128,34 @@ export async function emailAenderungAnfordernCore(
   });
   if (!rl.allowed) return { kind: "rate_limited" };
 
-  // Token-Bytes IMMER erzeugen (Timing-Angleichung frei vs. vergeben) —
-  // im Vergeben-Zweig verworfen.
+  // ---------------------------------------------------------------------------
+  // TIMING-INVARIANTE (Gate-B MAJOR, Spec-Punkt 3 „Kein Adress-Oracle"):
+  // Ab hier führen der frei- und der vergeben-Zweig EXAKT dieselben DB-Schritte
+  // in derselben Reihenfolge aus (1 UPDATE Invalidierung + 1 SELECT Verfügbarkeit
+  // + 1 INSERT Token + 1 INSERT Audit). Der SMTP-Versand liegt NICHT im
+  // Antwortpfad (fire-and-forget hier, after()-Scheduling in der Action).
+  // Die Antwortzeit verrät damit nicht, ob die Ziel-Adresse im Tenant
+  // registriert ist. Bei Änderungen: Schritt-Parität beider Zweige erhalten!
+  // ---------------------------------------------------------------------------
   const rawToken = generateRawToken();
   const tokenHash = sha256Hex(rawToken);
   const expiresAt = new Date(now.getTime() + ttlMin() * 60 * 1000);
 
+  // Nur EIN offenes Ziel je User: alte offene email_change-Tokens IMMER
+  // entwerten — in BEIDEN Zweigen (semantisch unbedenklich: ein alter Token
+  // auf ein inzwischen vergebenes Ziel hätte ohnehin nur zu 'taken' geführt).
+  await scoped.authTokens.invalidateEmailChangeTokensForUser(opts.userId);
+
   // (3) Verfügbarkeit der Ziel-Adresse — NUR für den Mail-Entscheid, Antwort
   //     bleibt neutral. Vergeben → keine Mail (auch keine Info-Mail an das Ziel:
-  //     Spam-/Belästigungsvektor), kein Token.
+  //     Spam-/Belästigungsvektor).
   const belegt = await scoped.users.findByEmail(neueEmail);
-  if (belegt) return { kind: "neutral", mailVersendet: false };
 
-  // Freie Ziel-Adresse: nur EIN offenes Ziel je User — alte offene
-  // email_change-Tokens des Users entwerten, dann neu anlegen.
-  await scoped.authTokens.invalidateEmailChangeTokensForUser(opts.userId);
+  // Token-Zeile IMMER anlegen (auch bei vergebener Ziel-Adresse — identische
+  // Write-Last beider Zweige). Ein solcher Token erreicht mangels Mail niemanden;
+  // würde er dennoch konsumiert, fängt der Bestätigungs-Pfad die vergebene
+  // Adresse über den 23505-Pfad am funktionalen Unique-Index ab (Token bleibt
+  // konsumiert, freundlicher Fehler — kein Retry-Oracle).
   await scoped.authTokens.create({
     email: neueEmail,
     tokenHash,
@@ -148,9 +164,9 @@ export async function emailAenderungAnfordernCore(
     userId: opts.userId,
   });
 
-  await opts.sendBestaetigungsMail(neueEmail, rawToken);
-
-  // Audit PII-frei: kein E-Mail-String in metadata.
+  // Audit PII-frei und in BEIDEN Zweigen identisch: kein E-Mail-String und
+  // KEINE frei/vergeben-Unterscheidung in metadata (sonst wäre der Write
+  // unterschiedlich und das Audit selbst ein Adress-Orakel).
   await db.insert(auditEvents).values({
     tenantId: opts.tenantId,
     actorType: "user",
@@ -160,6 +176,21 @@ export async function emailAenderungAnfordernCore(
     targetId: opts.userId,
     metadata: {},
   });
+
+  if (belegt) return { kind: "neutral", mailVersendet: false };
+
+  // Mail nur im Frei-Fall — bewusst OHNE await (fire-and-forget): der Versand
+  // (hunderte ms SMTP) darf die Antwortzeit nicht beeinflussen. Die Action
+  // verlegt den eigentlichen Versand zusätzlich via after() hinter die Antwort;
+  // Fehler dürfen die neutrale Antwort nicht verändern (best-effort wie
+  // notifyNewPoll, PII-freies Logging in der Action).
+  try {
+    void Promise.resolve(opts.sendBestaetigungsMail(neueEmail, rawToken)).catch(
+      () => {},
+    );
+  } catch {
+    // Synchroner Callback-Fehler: neutrale Antwort bleibt unverändert.
+  }
 
   return { kind: "neutral", mailVersendet: true };
 }
@@ -246,7 +277,10 @@ export async function emailAenderungBestaetigenCore(
   if (token.userId !== opts.sessionUserId) return { kind: "wrong_account" };
 
   // (5) Atomarer CAS-Konsum (single-use, tenant-scoped).
-  const consumed = await scoped.authTokens.consume(tokenHash);
+  // J2b-MIN1: purpose 'email_change' HART gefiltert — ein Login-Token kann hier
+  // nicht konsumiert werden (der purpose-Check oben greift zwar schon vor dem
+  // Laden, der CAS-Filter ist die strukturelle Absicherung in der WHERE-Klausel).
+  const consumed = await scoped.authTokens.consume(tokenHash, EMAIL_CHANGE_PURPOSE);
   if (!consumed) {
     if (token.consumedAt !== null) return { kind: "used" };
     if (token.expiresAt <= now) return { kind: "expired" };

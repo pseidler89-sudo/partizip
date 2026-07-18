@@ -2,9 +2,11 @@
  * email-change-actions.ts — Server Actions „E-Mail-Adresse ändern" (Block J2b).
  *
  * Dünne "use server"-Wrapper um die testbare Kern-Logik (email-change-core.ts):
+ *   - Origin-Check als Defense-in-Depth (J2b-MIN3, Muster H1 der Auth-Routen),
  *   - Auth-Kontext (Tenant aus Host, Session aus Cookie),
  *   - Demo-Fence (isDemoTenant → an den Kern durchgereicht, fail-closed),
- *   - konkreter Mailversand (Bestätigungs-Mail an NEU, Info-Mail an ALT),
+ *   - konkreter Mailversand (Bestätigungs-Mail an NEU, Info-Mail an ALT) —
+ *     via after() NACH der Antwort (Timing-Invariante, s. email-change-core.ts),
  *   - Mapping der Kern-Ergebnisse auf „Sie"-Texte für die UI.
  *
  * "use server"-Datei → exportiert AUSSCHLIESSLICH Server Actions.
@@ -12,6 +14,7 @@
 
 "use server";
 
+import { after } from "next/server";
 import { cookies, headers } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { createDb, type Db } from "@/db/client";
@@ -21,6 +24,7 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { clientIpFromForwardedFor } from "@/lib/client-ip";
 import { isDemoTenant } from "@/lib/demo/config";
+import { istSameOrigin } from "@/lib/auth/origin";
 import { ANBIETER } from "@/lib/legal/anbieter";
 import {
   sendEmailChangeConfirmationEmail,
@@ -47,6 +51,42 @@ type AuthContext = {
   proto: string;
   ipAddress: string | null;
 };
+
+/**
+ * J2b-MIN3: Origin-Check als Defense-in-Depth am Anfang BEIDER Actions (Muster
+ * „H1" aus /api/auth/request + /api/auth/verify). Next prüft Server-Action-
+ * Origins zwar selbst, wir verlassen uns nicht allein darauf.
+ * true = Verstoß (Aufrufer antwortet mit generischem Fehler).
+ */
+async function originVerletzt(): Promise<boolean> {
+  const headerStore = await headers();
+  return !istSameOrigin(headerStore.get("origin"), headerStore.get("host"));
+}
+
+/**
+ * Verlegt den Mail-Versand HINTER die Antwort (Gate-B MAJOR, Timing-Invariante):
+ * bevorzugt via Next.js after() (läuft nach dem Senden der Response); außerhalb
+ * eines Request-Scopes (z. B. Tests) Fallback auf fire-and-forget. Fehler werden
+ * PII-frei geloggt (KEINE Adresse — Fehlermeldungen von SMTP-Bibliotheken können
+ * Empfänger enthalten, deshalb nur die Fehlerklasse) und verändern die neutrale
+ * Antwort nie.
+ */
+function versandNachAntwort(task: () => Promise<unknown>): void {
+  const sicher = async () => {
+    try {
+      await task();
+    } catch (err) {
+      const klasse = err instanceof Error ? err.name : typeof err;
+      console.error(`email-change: Mail-Versand fehlgeschlagen (${klasse})`);
+    }
+  };
+  try {
+    after(sicher);
+  } catch {
+    // Kein Request-Scope (z. B. Vitest): best-effort im Hintergrund.
+    void sicher();
+  }
+}
 
 async function getAuthContext(): Promise<AuthContext | null> {
   const headerStore = await headers();
@@ -100,6 +140,11 @@ export type EmailAenderungAnfordernResult = {
 export async function emailAenderungAnfordern(
   neueEmail: string,
 ): Promise<EmailAenderungAnfordernResult> {
+  // J2b-MIN3: Origin-Check vor allem anderen — generischer Fehler, kein Detail.
+  if (await originVerletzt()) {
+    return { ok: false, error: "Diese Anfrage konnte nicht verarbeitet werden." };
+  }
+
   const ctx = await getAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
 
@@ -111,9 +156,12 @@ export async function emailAenderungAnfordern(
     neueEmailRaw: neueEmail,
     istDemo,
     ipAddress: ctx.ipAddress,
+    // Gate-B MAJOR (Timing): Callback registriert den Versand nur — der
+    // eigentliche SMTP-Versand läuft via after() NACH der Antwort und kann
+    // die Antwortzeit (frei vs. vergeben) nicht beeinflussen.
     sendBestaetigungsMail: async (adresse, rawToken) => {
       const url = `${ctx.proto}://${ctx.host}/${ctx.tenant.slug}/konto/email-bestaetigen?token=${rawToken}`;
-      await sendEmailChangeConfirmationEmail(adresse, url);
+      versandNachAntwort(() => sendEmailChangeConfirmationEmail(adresse, url));
     },
   });
 
@@ -145,6 +193,15 @@ export type EmailAenderungBestaetigenResult = {
 export async function emailAenderungBestaetigen(
   tokenRaw: string,
 ): Promise<EmailAenderungBestaetigenResult> {
+  // J2b-MIN3: Origin-Check vor allem anderen — generischer Fehler, kein Detail.
+  if (await originVerletzt()) {
+    return {
+      ok: false,
+      code: "INVALID",
+      error: "Diese Anfrage konnte nicht verarbeitet werden.",
+    };
+  }
+
   const ctx = await getAuthContext();
   if (!ctx) return { ok: false, code: "UNAUTHENTICATED", error: "Nicht authentifiziert." };
 
@@ -155,8 +212,10 @@ export async function emailAenderungBestaetigen(
     sessionUserId: ctx.userId,
     tokenRaw,
     istDemo,
+    // Best-effort (Spec 6a) — ebenfalls via after() hinter die Antwort verlegt
+    // (kein Sicherheitsgrund, aber gleicher Mechanismus: SMTP nie im Antwortpfad).
     sendInfoMailAnAlt: async (alteEmail) => {
-      await sendEmailChangedInfoEmail(alteEmail, ANBIETER.email);
+      versandNachAntwort(() => sendEmailChangedInfoEmail(alteEmail, ANBIETER.email));
     },
   });
 

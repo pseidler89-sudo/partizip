@@ -142,11 +142,16 @@ export function scopedDb(db: Db, tenantId: string) {
       },
 
       /**
-       * Atomares Einlösen — CAS: UPDATE ... WHERE tenant_id = ? AND consumed_at IS NULL AND expires_at > now().
+       * Atomares Einlösen — CAS: UPDATE ... WHERE tenant_id = ? AND purpose = ?
+       *   AND consumed_at IS NULL AND expires_at > now().
        * Gibt den Token-Datensatz zurück wenn erfolgreich, sonst null.
        * MIN3: tenantId in WHERE-Klausel aufgenommen (verhindert Cross-Tenant-Consume).
+       * J2b-MIN1: `purpose` ist PFLICHT und wird HART in der WHERE-Klausel gefiltert
+       *   — ein 'email_change'-Token darf sich niemals am Login-Endpoint (purpose
+       *   'login') einlösen lassen und umgekehrt. Beide Aufrufer geben ihre Richtung
+       *   explizit an (verify/route.ts → 'login', email-change-core → 'email_change').
        */
-      consume: async (tokenHash: string) => {
+      consume: async (tokenHash: string, purpose: string) => {
         const now = new Date();
         const rows = await db
           .update(authTokens)
@@ -155,6 +160,7 @@ export function scopedDb(db: Db, tenantId: string) {
             and(
               eq(authTokens.tenantId, tenantId),
               eq(authTokens.tokenHash, tokenHash),
+              eq(authTokens.purpose, purpose),
               isNull(authTokens.consumedAt),
               gt(authTokens.expiresAt, now)
             )

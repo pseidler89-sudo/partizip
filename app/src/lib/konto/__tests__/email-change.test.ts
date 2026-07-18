@@ -148,7 +148,7 @@ describe("E-Mail-Änderung (Integration, Block J2b)", () => {
     expect(rows[0]?.email).toBe(neu);
   });
 
-  it("Anfordern: besetzte Ziel-Adresse → neutral OHNE Mail; Antwort-Discriminant identisch", async () => {
+  it("Anfordern: besetzte Ziel-Adresse → neutral OHNE Mail; DB-Writes identisch zum Frei-Fall (Timing-Invariante)", async () => {
     if (SKIP) return console.log(`SKIP: ${skipMsg}`);
     const user = await seedUser(nextEmail());
     const belegt = nextEmail();
@@ -168,7 +168,72 @@ describe("E-Mail-Änderung (Integration, Block J2b)", () => {
     expect(res.kind).toBe("neutral");
     expect(res).toEqual({ kind: "neutral", mailVersendet: false });
     expect(mail).not.toHaveBeenCalled();
-    expect(await tokenCountForUser(user.id)).toBe(0);
+
+    // Gate-B MAJOR (Timing-Oracle): der vergeben-Zweig macht EXAKT dieselben
+    // DB-Writes wie der Frei-Fall — Token-Zeile UND Audit-Event existieren,
+    // OHNE dass eine Mail rausging (der Token erreicht mangels Mail niemanden).
+    expect(await tokenCountForUser(user.id)).toBe(1);
+    const tok = await db
+      .select()
+      .from(authTokens)
+      .where(and(eq(authTokens.tenantId, tenantId), eq(authTokens.userId, user.id)));
+    expect(tok[0]?.purpose).toBe(EMAIL_CHANGE_PURPOSE);
+    expect(tok[0]?.consumedAt).toBeNull();
+    const audits = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.tenantId, tenantId),
+          eq(auditEvents.action, "konto.email_change_requested"),
+          eq(auditEvents.actorRef, user.id),
+        ),
+      );
+    expect(audits.length).toBe(1);
+    // Audit unterscheidet frei/vergeben NICHT (sonst wäre es selbst ein Orakel).
+    expect(audits[0]?.metadata).toEqual({});
+  });
+
+  it("Anfordern: Token aus dem vergeben-Zweig landet beim Konsum im 23505-Pfad ('taken')", async () => {
+    if (SKIP) return console.log(`SKIP: ${skipMsg}`);
+    const user = await seedUser(nextEmail());
+    const belegt = nextEmail();
+    await seedUser(belegt);
+
+    const res = await emailAenderungAnfordernCore(db, {
+      tenantId,
+      userId: user.id,
+      neueEmailRaw: belegt,
+      istDemo: false,
+      ipAddress: null,
+      sendBestaetigungsMail: bestaetigungsSpy(),
+    });
+    expect(res).toEqual({ kind: "neutral", mailVersendet: false });
+
+    // Der Roh-Token ist unbekannt (es ging keine Mail raus) — für den Test den
+    // Hash auf einen bekannten Wert setzen und den Konsum-Pfad durchspielen:
+    // der funktionale Unique-Index fängt die vergebene Adresse ab ('taken'),
+    // der Token ist danach konsumiert (kein Retry-Oracle).
+    const rows = await db
+      .select()
+      .from(authTokens)
+      .where(and(eq(authTokens.tenantId, tenantId), eq(authTokens.userId, user.id)));
+    expect(rows.length).toBe(1);
+    const raw = `raw-taken-${Date.now()}-${counter}`;
+    await db
+      .update(authTokens)
+      .set({ tokenHash: sha256Hex(raw) })
+      .where(eq(authTokens.id, rows[0]!.id));
+
+    const konsum = await emailAenderungBestaetigenCore(db, {
+      tenantId,
+      sessionUserId: user.id,
+      tokenRaw: raw,
+      istDemo: false,
+      sendInfoMailAnAlt: infoSpy(),
+    });
+    expect(konsum.kind).toBe("taken");
+    expect(await currentEmail(user.id)).not.toBe(belegt);
   });
 
   it("Anfordern: neu == alt (normalisiert) → 'same', kein Token, keine Mail", async () => {
@@ -428,6 +493,44 @@ describe("E-Mail-Änderung (Integration, Block J2b)", () => {
     });
     expect(res.kind).toBe("locked");
     expect(await currentEmail(user.id)).toBe(alt);
+  });
+
+  it("MIN1: Login-Token lässt sich am email_change-Konsum NICHT einlösen (purpose hart gefiltert)", async () => {
+    if (SKIP) return console.log(`SKIP: ${skipMsg}`);
+    const user = await seedUser(nextEmail());
+    const raw = `login-als-change-${Date.now()}-${counter}`;
+    // Login-Token MIT user_id (böswilligst mögliche Konstellation: selbst wenn
+    // eine userId-Bindung vorläge, darf der purpose-Filter nicht überwindbar sein).
+    await db.insert(authTokens).values({
+      tenantId,
+      email: user.email,
+      tokenHash: sha256Hex(raw),
+      purpose: "login",
+      userId: user.id,
+      expiresAt: new Date(Date.now() + 3600_000),
+    });
+
+    const res = await emailAenderungBestaetigenCore(db, {
+      tenantId,
+      sessionUserId: user.id,
+      tokenRaw: raw,
+      istDemo: false,
+      sendInfoMailAnAlt: infoSpy(),
+    });
+    expect(res.kind).toBe("invalid");
+
+    // Token unverbraucht (weder Diagnose-Pfad noch CAS haben ihn konsumiert) —
+    // und der CAS selbst filtert purpose hart in der WHERE-Klausel:
+    const { scopedDb } = await import("@/lib/db/tenant-scope");
+    const scoped = scopedDb(db, tenantId);
+    expect(await scoped.authTokens.consume(sha256Hex(raw), "email_change")).toBeNull();
+    const nachher = await db
+      .select()
+      .from(authTokens)
+      .where(eq(authTokens.tokenHash, sha256Hex(raw)));
+    expect(nachher[0]?.consumedAt).toBeNull();
+    // Richtige Richtung funktioniert weiterhin (Gegenprobe).
+    expect(await scoped.authTokens.consume(sha256Hex(raw), "login")).not.toBeNull();
   });
 
   it("Bestätigen: Demo-Fence (fail-closed) → 'demo_blocked', Token NICHT konsumiert", async () => {

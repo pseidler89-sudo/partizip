@@ -633,6 +633,58 @@ describe("Magic-Link Auth Integration", () => {
     expect(await zaehleSessions()).toBe(1);
   });
 
+  // -------------------------------------------------------------------------
+  // J2b-MIN1: purpose-Trennung — ein email_change-Token darf am LOGIN-Endpoint
+  // NICHT einlösbar sein (consume() filtert purpose hart in der WHERE-Klausel).
+  // -------------------------------------------------------------------------
+  it("J2b-MIN1: email_change-Token an /api/auth/verify → TOKEN_INVALID, keine Session, Token unverbraucht", async () => {
+    if (SKIP) return console.log(`SKIP: ${skipMsg}`);
+
+    const email = "purpose-mix@test.com";
+    const [user] = await db!
+      .insert(schema.users)
+      .values({ tenantId: tenantAId, email, minAgeConfirmedAt: new Date() })
+      .onConflictDoNothing()
+      .returning();
+
+    const rawToken = generateRawToken();
+    const tokenHash = sha256Hex(rawToken);
+    await db!.insert(schema.authTokens).values({
+      tenantId: tenantAId,
+      email,
+      tokenHash,
+      purpose: "email_change",
+      userId: user?.id ?? null,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
+
+    const res = await verifyHandler(
+      makeRequest("http://test-a.localhost/api/auth/verify", {
+        body: { token: rawToken },
+        host: "test-a.localhost",
+      })
+    );
+    const body = (await res.json()) as { error?: { code?: string } };
+    expect(res.status).toBe(400);
+    // Generisch (Fallback-Pfad) — kein Hinweis auf die purpose-Verwechslung.
+    expect(body.error?.code).toBe("TOKEN_INVALID");
+
+    // Token bleibt unverbraucht (der CAS hat ihn wegen purpose='login' nie erfasst)
+    // und es ist KEINE Session entstanden.
+    const [tok] = await db!
+      .select()
+      .from(schema.authTokens)
+      .where(eq(schema.authTokens.tokenHash, tokenHash));
+    expect(tok.consumedAt).toBeNull();
+    if (user) {
+      const sessionsRows = await db!
+        .select({ n: count() })
+        .from(schema.sessions)
+        .where(eq(schema.sessions.userId, user.id));
+      expect(sessionsRows[0]?.n ?? 0).toBe(0);
+    }
+  });
+
   it("überspringt alle Tests wenn DATABASE_URL_TEST nicht gesetzt", () => {
     if (!TEST_DB_URL) {
       console.log(`SKIP: ${skipMsg}`);

@@ -95,7 +95,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // --- 5. Atomarer CAS-Update (race-sicher, MIN3: tenantId in WHERE) ---
-  const consumed = await scoped.authTokens.consume(tokenHash);
+  // J2b-MIN1: purpose 'login' HART gefiltert — ein 'email_change'-Token kann sich
+  // hier nicht einlösen (CAS liefert null → Fallback TOKEN_INVALID unten).
+  const consumed = await scoped.authTokens.consume(tokenHash, "login");
 
   if (!consumed) {
     // CAS gescheitert: Token entweder schon verbraucht oder abgelaufen.
