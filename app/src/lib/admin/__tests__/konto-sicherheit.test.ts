@@ -43,6 +43,7 @@ import {
   kontoSperrenPerEmailCore,
 } from "@/lib/admin/konto-sicherheit-core.js";
 import type { RoleType } from "@/lib/auth/roles";
+import { istPgFehler, PG_UNIQUE_VIOLATION } from "@/lib/db/pg-errors";
 import type { Db } from "@/db/client";
 
 const { tenants, users, roles, sessions, auditEvents } = schema;
@@ -578,43 +579,45 @@ describe("Konto-Sicherheit (Block K2, Integration)", () => {
     expect(unbekannt.error).toBe("Konto nicht gefunden.");
   });
 
-  it.skipIf(SKIP)("10b. kontoSperrenPerEmail sperrt Case-Zwillinge deterministisch BEIDE (Gate-B MAJOR)", async () => {
-    // users_tenant_email_unique ist case-SENSITIV und der Signup normalisiert
-    // nicht — „Max@…" und „max@…" können als ZWEI Konten existieren. Die
-    // IR-Sperre muss die Adresse KOMPLETT stilllegen, nicht ein planner-
-    // abhängiges Einzelkonto.
+  it.skipIf(SKIP)("10b. J2a: Case-Zwillinge sind unmöglich; Sperre per E-Mail ist case-insensitiv (Gate-B MAJOR, F-A)", async () => {
+    // Seit J2a (F-A) verhindert der funktionale Unique-Index
+    // users_tenant_email_lower_unique, dass „Max@…" und „max@…" als ZWEI Konten
+    // existieren — die Wurzel des K2-MAJOR ist damit an der Quelle beseitigt.
     const basis = `zwilling-${Date.now()}-${++counter}@konto-test.de`;
-    const emailGross = `Max.${basis}`;
     const emailKlein = `max.${basis}`;
-    const [zwillingA] = await db.insert(users).values({ tenantId, email: emailGross }).returning();
-    const [zwillingB] = await db.insert(users).values({ tenantId, email: emailKlein }).returning();
-    await createSession(zwillingA.id);
-    await createSession(zwillingB.id);
+    const emailGross = `Max.${basis}`;
+    const [konto] = await db.insert(users).values({ tenantId, email: emailKlein }).returning();
 
+    // (1) Ein zweiter Insert mit anderer Schreibweise wird vom Index abgewiesen.
+    let err: unknown = null;
+    try {
+      await db.insert(users).values({ tenantId, email: emailGross }).returning();
+    } catch (e) {
+      err = e;
+    }
+    expect(istPgFehler(err, PG_UNIQUE_VIOLATION)).toBe(true);
+
+    // (2) Die IR-Sperre findet das Konto auch bei abweichender Schreibweise der
+    //     Eingabe (normalizeEmail) und legt es komplett still.
+    await createSession(konto.id);
     const res = await kontoSperrenPerEmailCore(
-      db, tenantId, SUPER, callerAdminId, emailKlein,
+      db, tenantId, SUPER, callerAdminId, emailGross,
     );
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("2 Konten gesperrt");
+    expect(res.message).toContain("1 Konto");
 
-    // BEIDE Konten gesperrt, BEIDE Sessions beendet — kein Re-Login über die
-    // andere Schreibweise möglich.
-    for (const z of [zwillingA, zwillingB]) {
-      const [row] = await db.select().from(users).where(eq(users.id, z.id));
-      expect(row.accountStatus).toBe("locked");
-      expect((await aktiveSessions(z.id)).length).toBe(0);
-      // Audit je Konto (aus kontoSperrenCore).
-      const audit = await db
-        .select()
-        .from(auditEvents)
-        .where(and(eq(auditEvents.action, "account.locked"), eq(auditEvents.targetId, z.id)));
-      expect(audit.length).toBe(1);
-    }
+    const [row] = await db.select().from(users).where(eq(users.id, konto.id));
+    expect(row.accountStatus).toBe("locked");
+    expect((await aktiveSessions(konto.id)).length).toBe(0);
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "account.locked"), eq(auditEvents.targetId, konto.id)));
+    expect(audit.length).toBe(1);
 
-    // Teilergebnis: erneuter Aufruf — beide bereits gesperrt ⇒ ok:false mit
-    // präziser Begründung, kein stiller „Erfolg".
+    // Teilergebnis: erneuter Aufruf — bereits gesperrt ⇒ ok:false, kein stiller „Erfolg".
     const nochmal = await kontoSperrenPerEmailCore(
-      db, tenantId, SUPER, callerAdminId, emailGross,
+      db, tenantId, SUPER, callerAdminId, emailKlein,
     );
     expect(nochmal.ok).toBe(false);
     expect(nochmal.error).toContain("nicht aktiv");

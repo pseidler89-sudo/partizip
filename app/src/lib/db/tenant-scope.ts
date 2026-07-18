@@ -16,6 +16,7 @@
 import { and, eq, gt, isNull, count, ne } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { users, authTokens, sessions, anliegen } from "@/db/schema";
+import { normalizeEmail } from "@/lib/auth/email";
 
 export type ScopedDb = ReturnType<typeof scopedDb>;
 
@@ -26,10 +27,12 @@ export function scopedDb(db: Db, tenantId: string) {
     // -------------------------------------------------------------------------
     users: {
       findByEmail: async (email: string) => {
+        // Defense-in-Depth (J2a): Input kanonisch, auch wenn Aufrufer es schon
+        // getan hat — der Bestand ist normalisiert, eq reicht (Index als Netz).
         const rows = await db
           .select()
           .from(users)
-          .where(and(eq(users.tenantId, tenantId), eq(users.email, email)))
+          .where(and(eq(users.tenantId, tenantId), eq(users.email, normalizeEmail(email))))
           .limit(1);
         return rows[0] ?? null;
       },
@@ -48,7 +51,7 @@ export function scopedDb(db: Db, tenantId: string) {
           .insert(users)
           .values({
             tenantId,
-            email,
+            email: normalizeEmail(email),
             minAgeConfirmedAt,
           })
           .returning();
@@ -69,7 +72,7 @@ export function scopedDb(db: Db, tenantId: string) {
           .where(
             and(
               eq(authTokens.tenantId, tenantId),
-              eq(authTokens.email, email),
+              eq(authTokens.email, normalizeEmail(email)),
               gt(authTokens.createdAt, since)
             )
           );
@@ -86,7 +89,7 @@ export function scopedDb(db: Db, tenantId: string) {
           .insert(authTokens)
           .values({
             tenantId,
-            email: opts.email,
+            email: normalizeEmail(opts.email),
             tokenHash: opts.tokenHash,
             purpose: opts.purpose ?? "login",
             expiresAt: opts.expiresAt,
@@ -130,7 +133,7 @@ export function scopedDb(db: Db, tenantId: string) {
           .where(
             and(
               eq(authTokens.tenantId, tenantId),
-              eq(authTokens.email, email),
+              eq(authTokens.email, normalizeEmail(email)),
               isNull(authTokens.consumedAt),
               ne(authTokens.tokenHash, exceptTokenHash)
             )

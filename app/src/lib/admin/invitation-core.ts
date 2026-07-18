@@ -43,6 +43,7 @@ import {
   type RoleType,
 } from "@/lib/auth/roles";
 import { generateRawToken, sha256Hex } from "@/lib/auth/crypto";
+import { normalizeEmail } from "@/lib/auth/email";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
 
 type ScopeLevel = "ortsteil" | "stadt" | "kreis" | "land";
@@ -50,10 +51,6 @@ const VALID_SCOPE_LEVELS: readonly string[] = ["ortsteil", "stadt", "kreis", "la
 
 /** Gültigkeitsdauer einer Einladung (Standard 14 Tage). Konfigurierbar via env. */
 export const INVITATION_TTL_DAYS = Number(process.env.INVITATION_TTL_DAYS ?? "14");
-
-function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
 
 function expiresInDays(days: number): Date {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);

@@ -22,6 +22,7 @@ import { and, eq, gt, count } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { rateLimitEvents, auditEvents } from "@/db/schema";
 import { hmacRateLimit } from "./crypto";
+import { normalizeEmail } from "./email";
 
 const EMAIL_WINDOW_MIN = 15;
 const EMAIL_MAX_REQUESTS = 3;
@@ -44,7 +45,9 @@ export async function writeRateLimitEvents(
     ipAddress: string | null;
   }
 ): Promise<void> {
-  const emailKeyHash = hmacRateLimit(`${opts.tenantId}:${opts.email}`);
+  // J2a: E-Mail kanonisch VOR dem HMAC — sonst bekämen Case-Varianten
+  // (a@x.de vs. A@x.de) getrennte Budgets (Rate-Limit-Bypass).
+  const emailKeyHash = hmacRateLimit(`${opts.tenantId}:${normalizeEmail(opts.email)}`);
   const toInsert: Array<{ scope: string; keyHash: string }> = [
     { scope: "email", keyHash: emailKeyHash },
   ];
@@ -72,8 +75,8 @@ export async function checkRateLimit(
     actorRef: string | null; // user-id falls bekannt, sonst null
   }
 ): Promise<RateLimitResult> {
-  // --- 1. Email-Rate-Limit ---
-  const emailKeyHash = hmacRateLimit(`${opts.tenantId}:${opts.email}`);
+  // --- 1. Email-Rate-Limit (kanonische E-Mail, s. writeRateLimitEvents) ---
+  const emailKeyHash = hmacRateLimit(`${opts.tenantId}:${normalizeEmail(opts.email)}`);
   const emailSince = new Date(Date.now() - EMAIL_WINDOW_MIN * 60 * 1000);
 
   const emailRows = await db

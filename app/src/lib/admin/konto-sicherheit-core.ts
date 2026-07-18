@@ -46,6 +46,7 @@ import { and, count, eq, isNull, ne, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { users, roles, sessions, auditEvents, roleAppointments, invitations } from "@/db/schema";
 import { ADMIN_ROLES, canManageRole, isAdmin } from "@/lib/auth/roles";
+import { normalizeEmail } from "@/lib/auth/email";
 import { identitaetPiiEntfernenWennKeinRollentraeger } from "@/lib/identity/pii-cleanup";
 
 /** Einheitliches, serialisierbares Ergebnis aller Konto-Sicherheits-Aktionen. */
@@ -476,14 +477,14 @@ export async function offboardingCore(
     }
 
     // (b) offene Einladungen an die E-Mail des Ziels widerrufen.
-    // invitations.email ist normalisiert (trim+lowercase) gespeichert,
-    // users.email nicht → beidseitig normalisiert vergleichen (Muster delete.ts).
+    // invitations.email UND users.email sind seit J2a kanonisch gespeichert;
+    // normalizeEmail ist hier nur defensiv (idempotent auf normalisiertem Bestand).
     const zielEmailRows = await tx
       .select({ email: users.email })
       .from(users)
       .where(and(eq(users.tenantId, tenantId), eq(users.id, targetUserId)))
       .limit(1);
-    const zielEmailNormalisiert = (zielEmailRows[0]?.email ?? "").trim().toLowerCase();
+    const zielEmailNormalisiert = normalizeEmail(zielEmailRows[0]?.email ?? "");
     const widerrufeneEinladungen = zielEmailNormalisiert
       ? await tx
           .update(invitations)
@@ -545,20 +546,19 @@ export async function offboardingCore(
  * kontoSperrenCore (IR-Fall: Bürger:in ohne Rolle, die nicht in der
  * Rollen-Liste steht).
  *
- * users.email ist NICHT normalisiert gespeichert — der Vergleich läuft IMMER
- * `lower(trim(...))` beidseitig (Muster invitation-core). Nicht gefunden ⇒
- * bewusst GENERISCH „Konto nicht gefunden." (keine Bestätigung, ob eine
- * Adresse ein Konto hat — gleiches Verhalten wie fremder Tenant).
+ * users.email ist seit J2a kanonisch (trim+lowercase) gespeichert; der Input
+ * wird über normalizeEmail normalisiert, der `lower(users.email)`-Vergleich
+ * bleibt als Netz. Nicht gefunden ⇒ bewusst GENERISCH „Konto nicht gefunden."
+ * (keine Bestätigung, ob eine Adresse ein Konto hat — wie fremder Tenant).
  *
- * Gate-B K2 (MAJOR): weil users.email case-SENSITIV unique ist und der
- * Signup-Pfad nicht normalisiert, können Case-Zwillinge („Max@…" und „max@…")
- * als ZWEI Konten im selben Tenant existieren. Ein `limit(1)` ohne ORDER BY
- * sperrte davon ein planner-abhängiges, willkürliches Konto — der IR-Notfall
- * träfe ggf. das falsche und meldete Erfolg. Deshalb werden ALLE nicht-
- * gelöschten Treffer deterministisch NACHEINANDER gesperrt (IR-Zweck: die
- * Adresse ist komplett still); Teilergebnisse werden präzise gemeldet. Audit
- * passiert je Konto in kontoSperrenCore. Die Wurzel (E-Mail-Normalisierung
- * beim Signup + Unique auf lower(email)) ist bewusst Backlog, nicht K2.
+ * Gate-B K2 (MAJOR, historisch): solange users.email case-SENSITIV unique war
+ * und der Signup-Pfad nicht normalisierte, konnten Case-Zwillinge („Max@…" und
+ * „max@…") als ZWEI Konten im selben Tenant existieren. Diese Wurzel ist mit
+ * J2a (F-A) behoben: normalizeEmail an allen Boundaries + funktionaler Unique-
+ * Index auf (tenant_id, lower(email)) → keine neuen Zwillinge mehr. Die ALLE-
+ * Treffer-Schleife (kein limit, deterministisch nach id) bleibt als Netz für
+ * etwaige vor-J2a angelegte Alt-Zwillinge; Teilergebnisse werden präzise
+ * gemeldet, Audit je Konto in kontoSperrenCore.
  */
 export async function kontoSperrenPerEmailCore(
   db: Db,
@@ -571,7 +571,7 @@ export async function kontoSperrenPerEmailCore(
     return { ok: false, error: "Keine Berechtigung (Admin erforderlich)." };
   }
 
-  const email = targetEmail.trim().toLowerCase();
+  const email = normalizeEmail(targetEmail);
   if (!email) {
     return { ok: false, error: "Bitte eine E-Mail-Adresse angeben." };
   }

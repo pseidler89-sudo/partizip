@@ -23,6 +23,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { emailSchema } from "@/lib/auth/email";
 import { createDb } from "@/db/client";
 import { scopedDb } from "@/lib/db/tenant-scope";
 import { getTenantFromHost } from "@/lib/tenant";
@@ -40,7 +41,9 @@ export const dynamic = "force-dynamic";
 const MAGIC_LINK_TTL_MIN = Number(process.env.MAGIC_LINK_TTL_MIN ?? "15");
 
 const RequestSchema = z.object({
-  email: z.string().email(),
+  // J2a: emailSchema normalisiert (trim+lowercase) VOR der Validierung — ab hier
+  // ist `email` kanonisch für Rate-Limit-HMAC, Lookup, Token-Anlage und Versand.
+  email: emailSchema,
   minAgeConfirmed: z.boolean().optional(),
 });
 

@@ -40,6 +40,7 @@ import { auditEvents, regions, roleAppointments, roles, users } from "@/db/schem
 import { canManageRole, isAdmin, type RoleType } from "@/lib/auth/roles";
 import { istPgFehler, PG_UNIQUE_VIOLATION } from "@/lib/db/pg-errors";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
+import { normalizeEmail } from "@/lib/auth/email";
 
 type ScopeLevel = "ortsteil" | "stadt" | "kreis" | "land";
 const VALID_SCOPE_LEVELS: readonly string[] = ["ortsteil", "stadt", "kreis", "land"];
@@ -82,8 +83,8 @@ export interface ErnennungVorschlagenInput {
 /**
  * Schlägt die Ernennung einer Person (per Ziel-E-Mail) zur Rolle `verifier`
  * vor — tenant-scoped, eskalationsgeschützt, auditiert. Guards wie
- * assignRoleCore; die E-Mail wird beidseitig normalisiert verglichen
- * (lower/trim — users.email ist historisch nicht normalisiert gespeichert).
+ * assignRoleCore; die Ziel-E-Mail wird über normalizeEmail kanonisch gemacht
+ * (J2a: Bestand ist normalisiert; der sql-lower(trim)-Vergleich bleibt als Netz).
  */
 export async function verifierErnennungVorschlagenCore(
   db: Db,
@@ -104,7 +105,7 @@ export async function verifierErnennungVorschlagenCore(
 
   const scopeLevel: ScopeLevel = input.scopeLevel ?? "stadt";
   const scopeCode = input.scopeCode ?? null;
-  const targetEmail = input.targetEmail.trim().toLowerCase();
+  const targetEmail = normalizeEmail(input.targetEmail);
 
   if (!targetEmail) {
     return { ok: false, error: "Bitte eine Ziel-E-Mail angeben." };

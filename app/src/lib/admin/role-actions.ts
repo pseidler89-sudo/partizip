@@ -32,6 +32,7 @@ import {
   type RoleType,
 } from "@/lib/auth/roles";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
+import { normalizeEmail } from "@/lib/auth/email";
 import { verifierErnennungVorschlagenCore } from "@/lib/admin/appointment-core";
 import { identitaetPiiEntfernenWennKeinRollentraeger } from "@/lib/identity/pii-cleanup";
 
@@ -86,7 +87,7 @@ export async function assignRoleCore(
   const roleType = input.roleType;
   const scopeLevel: ScopeLevel = input.scopeLevel ?? "stadt";
   const scopeCode = input.scopeCode ?? null;
-  const targetEmail = input.targetEmail.trim().toLowerCase();
+  const targetEmail = normalizeEmail(input.targetEmail);
 
   // 2. ESKALATIONSGRENZE — serverseitig hart. UI ist nur Komfort.
   if (!canManageRole(callerRoleTypes, roleType)) {

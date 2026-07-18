@@ -172,6 +172,25 @@ describe("Rollen-Verwaltung (Integration)", () => {
   });
 
   // -------------------------------------------------------------------------
+  // J2a (F-A): assignRole findet ein Konto auch bei anderer Schreibweise der
+  // Eingabe (Regression: :89 lowercased den Input, :111 verglich exakt → ein
+  // MixedCase-Lookup fand ein kanonisch gespeichertes Konto nie). normalizeEmail
+  // an beiden Enden schließt die Lücke.
+  // -------------------------------------------------------------------------
+  it.skipIf(SKIP)("J2a: assignRole findet Konto bei MixedCase-Eingabe (F-A-Regression)", async () => {
+    const target = await createUser("mixedcase"); // Konto kanonisch (lowercase) angelegt
+
+    const res = await assignRoleCore(db, tenantId, KOMMUNE, callerAdminId, {
+      targetEmail: target.email.toUpperCase(), // Admin tippt in Großschreibung
+      roleType: "redakteur",
+    });
+    expect(res.ok).toBe(true);
+
+    const rts = await getUserRoleTypes(db, tenantId, target.id);
+    expect(rts).toContain("redakteur");
+  });
+
+  // -------------------------------------------------------------------------
   // 2. Idempotenz
   // -------------------------------------------------------------------------
   // K3: `verifier` läuft jetzt über den Ernennungs-Vorschlag (appointment.test.ts)
