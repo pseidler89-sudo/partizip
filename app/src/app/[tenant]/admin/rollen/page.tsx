@@ -154,6 +154,7 @@ export default async function AdminRollenPage({ params }: PageProps) {
   // zusätzlich atomar in der Action/dem Core.
   const ernennungen = (await offeneErnennungenListeCore(db, tenant.id)).map((e) => ({
     id: e.id,
+    targetUserId: e.targetUserId,
     targetEmail: e.targetEmail,
     roleType: e.roleType,
     regionTyp: e.regionTyp,

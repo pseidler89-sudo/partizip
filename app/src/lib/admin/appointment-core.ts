@@ -58,6 +58,9 @@ const SOD_FEHLER =
   "Vier-Augen-Prinzip: Der Vorschlag muss durch eine zweite Administratorin " +
   "oder einen zweiten Administrator bestätigt werden.";
 
+/** Gate-B MINOR: Die BEGÜNSTIGTE Person entscheidet nie über die eigene Ernennung. */
+const SOD_ZIEL_FEHLER = "Sie können Ihre eigene Ernennung nicht bestätigen.";
+
 const NICHT_GEFUNDEN = "Vorschlag nicht gefunden oder bereits entschieden.";
 
 /** Erfolgs-Meldung des Vorschlags — erklärt den zweistufigen Weg (Vier-Augen). */
@@ -218,8 +221,8 @@ class EntscheidenRollback extends Error {
  * Entscheidet einen offenen Ernennungs-Vorschlag — ATOMAR und race-frei:
  *
  *   1. Bedingter UPDATE pending→approved/rejected (WHERE id AND tenant AND
- *      status='pending' AND SoD-Guard, RETURNING) — gewinnt genau EINER; die
- *      Selbst-Bestätigungs-Sperre steht als Bedingung IM UPDATE (kein TOCTOU).
+ *      status='pending' AND SoD-Guards, RETURNING) — gewinnt genau EINER; die
+ *      Selbst-Bestätigungs-Sperren stehen als Bedingung IM UPDATE (kein TOCTOU).
  *   2. Bei „bestaetigen“: Ziel-Konto MUSS noch aktiv sein — sonst Rollback der
  *      Flanke (Vorschlag bleibt pending) mit Fehler.
  *   3. Rollenvergabe idempotent (onConflictDoNothing auf den roles-UNIQUE):
@@ -228,6 +231,14 @@ class EntscheidenRollback extends Error {
  *      onConflictDoNothing IST die 23505-Behandlung innerhalb der Transaktion.
  *   4. Audits in DERSELBEN Transaktion: role.appointment_approved + role.granted
  *      (nur bei echter Vergabe; Muster role-actions) bzw. role.appointment_rejected.
+ *
+ * SoD gilt NUR für „bestaetigen“ (Gate-B MINOR): Das ABLEHNEN des eigenen
+ * Vorschlags ist funktional ein Zurückziehen mit anderem Endstatus — es vergibt
+ * nichts und braucht kein Vier-Augen (sonst UI-Sackgasse mit irreführendem
+ * Fehlertext). Zwei Sperren bei Bestätigung (außer allowSelfApproval):
+ *   - proposedBy ≠ caller  (Vorschlagende:r bestätigt nicht selbst)
+ *   - targetUserId ≠ caller (die BEGÜNSTIGTE Person bestätigt nicht die eigene
+ *     Ernennung — auch wenn ein anderer Admin vorgeschlagen hat; Gate-B MINOR)
  */
 export async function verifierErnennungEntscheidenCore(
   db: Db,
@@ -250,6 +261,7 @@ export async function verifierErnennungEntscheidenCore(
       status: roleAppointments.status,
       roleType: roleAppointments.roleType,
       proposedBy: roleAppointments.proposedBy,
+      targetUserId: roleAppointments.targetUserId,
     })
     .from(roleAppointments)
     .where(and(eq(roleAppointments.tenantId, tenantId), eq(roleAppointments.id, input.appointmentId)))
@@ -264,24 +276,39 @@ export async function verifierErnennungEntscheidenCore(
     return { ok: false, error: "Keine Berechtigung, diese Rolle zu vergeben." };
   }
 
-  // SoD-Vorprüfung (freundlicher Fehler; atomarer Backstop im UPDATE unten).
-  if (!allowSelfApproval && appt.proposedBy === callerUserId) {
-    return { ok: false, error: SOD_FEHLER };
+  // NUR die BESTÄTIGUNG unterliegt dem Vier-Augen-Prinzip — Ablehnen des
+  // eigenen Vorschlags ist ein Zurückziehen mit anderem Endstatus (s. Docblock).
+  const istBestaetigung = input.entscheidung === "bestaetigen";
+
+  // SoD-Vorprüfungen (freundliche Fehler; atomarer Backstop im UPDATE unten).
+  if (istBestaetigung && !allowSelfApproval) {
+    if (appt.proposedBy === callerUserId) {
+      return { ok: false, error: SOD_FEHLER };
+    }
+    if (appt.targetUserId === callerUserId) {
+      return { ok: false, error: SOD_ZIEL_FEHLER };
+    }
   }
 
-  const neuerStatus = input.entscheidung === "bestaetigen" ? "approved" : "rejected";
+  const neuerStatus = istBestaetigung ? "approved" : "rejected";
 
   try {
     return await db.transaction(async (tx: Db) => {
-      // SoD-Sperre ATOMAR: ohne Überbrückung schlägt das UPDATE fehl, wenn die
-      // entscheidende Person selbst vorgeschlagen hat (proposedBy NULL — z. B.
-      // Vorschlagende:r gelöscht — zählt als „andere Person“: Vier-Augen erfüllt).
-      const sodGuard = allowSelfApproval
-        ? undefined
-        : or(
-            isNull(roleAppointments.proposedBy),
-            ne(roleAppointments.proposedBy, callerUserId),
-          );
+      // SoD-Sperren ATOMAR (nur bei Bestätigung, ohne Überbrückung): das UPDATE
+      // schlägt fehl, wenn (a) die entscheidende Person selbst vorgeschlagen hat
+      // (proposedBy NULL — z. B. Vorschlagende:r gelöscht — zählt als „andere
+      // Person“: Vier-Augen erfüllt) oder (b) sie selbst die BEGÜNSTIGTE der
+      // Ernennung ist (Gate-B MINOR: Ziel-Admin bestätigt eigene Beförderung).
+      const sodGuard =
+        !istBestaetigung || allowSelfApproval
+          ? undefined
+          : and(
+              or(
+                isNull(roleAppointments.proposedBy),
+                ne(roleAppointments.proposedBy, callerUserId),
+              ),
+              ne(roleAppointments.targetUserId, callerUserId),
+            );
 
       const updated = await tx
         .update(roleAppointments)
@@ -307,27 +334,35 @@ export async function verifierErnennungEntscheidenCore(
         });
 
       if (updated.length === 0) {
-        // Ursache unterscheiden: SoD-Sperre oder bereits entschieden/weg.
+        // Ursache unterscheiden: SoD-Sperren oder bereits entschieden/weg.
         const cur = await tx
-          .select({ status: roleAppointments.status, proposedBy: roleAppointments.proposedBy })
+          .select({
+            status: roleAppointments.status,
+            proposedBy: roleAppointments.proposedBy,
+            targetUserId: roleAppointments.targetUserId,
+          })
           .from(roleAppointments)
           .where(
             and(eq(roleAppointments.tenantId, tenantId), eq(roleAppointments.id, input.appointmentId)),
           )
           .limit(1);
-        if (
-          cur[0]?.status === "pending" &&
-          !allowSelfApproval &&
-          cur[0].proposedBy === callerUserId
-        ) {
-          return { ok: false as const, error: SOD_FEHLER };
+        if (cur[0]?.status === "pending" && istBestaetigung && !allowSelfApproval) {
+          if (cur[0].proposedBy === callerUserId) {
+            return { ok: false as const, error: SOD_FEHLER };
+          }
+          if (cur[0].targetUserId === callerUserId) {
+            return { ok: false as const, error: SOD_ZIEL_FEHLER };
+          }
         }
         return { ok: false as const, error: NICHT_GEFUNDEN };
       }
 
       const flanke = updated[0];
-      // Überbrückte Selbst-Bestätigung EXPLIZIT sichtbar machen (nie unsichtbar).
-      const selfApproval = allowSelfApproval && flanke.proposedBy === callerUserId;
+      // Überbrückte Selbst-Bestätigung EXPLIZIT sichtbar machen (nie unsichtbar):
+      // sowohl „eigenen Vorschlag bestätigt“ als auch „eigene Ernennung bestätigt“.
+      const selfApproval =
+        allowSelfApproval &&
+        (flanke.proposedBy === callerUserId || flanke.targetUserId === callerUserId);
 
       if (input.entscheidung === "ablehnen") {
         await tx.insert(auditEvents).values({
@@ -341,7 +376,6 @@ export async function verifierErnennungEntscheidenCore(
             appointmentId: flanke.id,
             roleType: flanke.roleType,
             regionId: flanke.regionId,
-            ...(selfApproval ? { selfApproval: true } : {}),
           },
         });
         return { ok: true as const, message: "Vorschlag abgelehnt. Es wurde keine Rolle vergeben." };
@@ -490,6 +524,8 @@ export async function verifierErnennungZurueckziehenCore(
 
 export interface ErnennungRow {
   id: string;
+  /** UserId des Ziel-Kontos (UI: Ziel-Person bestätigt nie die eigene Ernennung). */
+  targetUserId: string;
   /** E-Mail des Ziel-Kontos (Admin-Fläche, tenant-intern — wie Rollen-Liste). */
   targetEmail: string;
   roleType: string;
@@ -515,6 +551,7 @@ export async function offeneErnennungenListeCore(
   const rows = await db
     .select({
       id: roleAppointments.id,
+      targetUserId: roleAppointments.targetUserId,
       targetEmail: users.email,
       roleType: roleAppointments.roleType,
       regionTyp: regions.typ,

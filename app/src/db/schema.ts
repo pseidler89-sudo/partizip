@@ -820,7 +820,10 @@ export const invitations = pgTable(
 //     der Code ausschließlich 'verifier'.
 //   - proposed_by/decided_by: SET NULL (invitations-Muster invited_by/…_by),
 //     damit Kontolöschungen die Ernennungs-Historie nicht blockieren.
-//   - target_user_id: CASCADE — User-Löschung räumt seine Ernennungen ab.
+//   - target_user_id: CASCADE — greift NUR bei hartem Row-Delete der users-
+//     Zeile (demo-reset/Test-Cleanup). Die PRODUKT-Löschung (DSGVO) ist eine
+//     ANONYMISIERUNG (Zeile bleibt) — offene Vorschläge werden dort explizit
+//     gecancelt (deleteKontoCore), ebenso beim Offboarding (offboardingCore).
 //   - Partieller UNIQUE-Index: höchstens EINE offene (pending) Ernennung je
 //     (tenant, target, role_type, region) — Doppel-Vorschläge race-fest
 //     abgefangen (Muster invitations_tenant_email_pending_unique).
@@ -840,7 +843,8 @@ export const roleAppointments = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
-    // Ziel der Ernennung. CASCADE: User-Löschung räumt seine Ernennungen ab.
+    // Ziel der Ernennung. CASCADE feuert nur bei HARTEM Row-Delete (demo-reset);
+    // die DSGVO-Produkt-Löschung anonymisiert nur → Cancel in deleteKontoCore.
     targetUserId: uuid("target_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),

@@ -50,9 +50,11 @@ import {
 } from "@/lib/admin/appointment-core";
 import { assignRoleCore } from "@/lib/admin/role-actions";
 import { einladenCore, einladungAnnehmenCore } from "@/lib/admin/invitation-core";
+import { offboardingCore } from "@/lib/admin/konto-sicherheit-core";
+import { deleteKontoCore } from "@/lib/konto/delete";
 import type { Db } from "@/db/client";
 
-const { tenants, users, roles, roleAppointments, auditEvents } = schema;
+const { tenants, users, roles, roleAppointments, auditEvents, invitations } = schema;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(__dirname, "../../../../../db/migrations");
@@ -597,6 +599,236 @@ describe("Vier-Augen-Verifier-Ernennung (Integration)", () => {
       );
     expect(appts.length).toBe(1);
     expect(appts[0].proposedBy).toBe(adminBId); // der ursprüngliche Vorschlag bleibt
+  });
+
+  // -------------------------------------------------------------------------
+  // Gate-B-Fixes (K3-Fix-Runde)
+  // -------------------------------------------------------------------------
+  it.skipIf(SKIP)("MAJOR 1: Umwidmung einer Einladung überträgt die Vorschlags-Verantwortung auf den Umwidmenden (keine SoD-Umgehung)", async () => {
+    const email = nextEmail("umwidmung");
+    // Admin B lädt als redakteur ein.
+    const invB = await einladenCore(db, tenantId, KOMMUNE, adminBId, { email, roleType: "redakteur" });
+    expect(invB.ok).toBe(true);
+
+    // Admin A widmet dieselbe Einladung auf verifier um → invited_by wechselt zu A.
+    const invA = await einladenCore(db, tenantId, KOMMUNE, adminAId, { email, roleType: "verifier" });
+    expect(invA.ok).toBe(true);
+    expect(invA.resent).toBe(true);
+    const [invRow] = await db
+      .select({ invitedBy: invitations.invitedBy })
+      .from(invitations)
+      .where(and(eq(invitations.tenantId, tenantId), eq(invitations.id, invA.invitationId!)));
+    expect(invRow.invitedBy).toBe(adminAId);
+
+    // Accept → Appointment mit proposedBy = A (dem Umwidmenden, NICHT B).
+    const konto = await createUser("umwidmung-konto");
+    await db.update(users).set({ email }).where(eq(users.id, konto.id));
+    const res = await einladungAnnehmenCore(db, tenantId, invA.rawToken!, { id: konto.id, email });
+    expect(res.ok).toBe(true);
+    expect(res.pendingApproval).toBe(true);
+    const appts = await db
+      .select()
+      .from(roleAppointments)
+      .where(and(eq(roleAppointments.tenantId, tenantId), eq(roleAppointments.targetUserId, konto.id)));
+    expect(appts.length).toBe(1);
+    expect(appts[0].proposedBy).toBe(adminAId);
+
+    // A kann den eigenen (umgewidmeten) Vorschlag NICHT selbst bestätigen (ohne Flag).
+    const decA = await verifierErnennungEntscheidenCore(db, tenantId, KOMMUNE, adminAId, {
+      appointmentId: appts[0].id,
+      entscheidung: "bestaetigen",
+    });
+    expect(decA.ok).toBe(false);
+    expect(decA.error).toMatch(/Vier-Augen/i);
+    expect((await apptById(appts[0].id)).status).toBe("pending");
+
+    // Ein ANDERER Admin (B) kann bestätigen.
+    const decB = await verifierErnennungEntscheidenCore(db, tenantId, KOMMUNE, adminBId, {
+      appointmentId: appts[0].id,
+      entscheidung: "bestaetigen",
+    });
+    expect(decB.ok).toBe(true);
+    expect(await getUserRoleTypes(db, tenantId, konto.id)).toContain("verifier");
+  });
+
+  it.skipIf(SKIP)("MAJOR 1 Gegenprobe: reines Erneut-Senden ohne Rollen-/Gebietsänderung behält invited_by", async () => {
+    const email = nextEmail("nur-resend");
+    const invB = await einladenCore(db, tenantId, KOMMUNE, adminBId, { email, roleType: "redakteur" });
+    expect(invB.ok).toBe(true);
+
+    // A sendet mit IDENTISCHER Rolle + Gebiet erneut → keine Umwidmung.
+    const invA = await einladenCore(db, tenantId, KOMMUNE, adminAId, { email, roleType: "redakteur" });
+    expect(invA.resent).toBe(true);
+    const [invRow] = await db
+      .select({ invitedBy: invitations.invitedBy, resentBy: invitations.resentBy })
+      .from(invitations)
+      .where(and(eq(invitations.tenantId, tenantId), eq(invitations.id, invA.invitationId!)));
+    expect(invRow.invitedBy).toBe(adminBId); // Verantwortung bleibt bei B
+    expect(invRow.resentBy).toBe(adminAId);
+  });
+
+  it.skipIf(SKIP)("MAJOR 2: Offboarding cancelt pending-Vorschläge UND widerruft offene Einladungen des Ziels", async () => {
+    const ziel = await createUser("offboarding-ziel");
+    // Ziel braucht mindestens eine Rolle (Offboarding-Vorbedingung).
+    const stadtRegion = await resolveRegionIdForScope(db, tenantId, "stadt", null);
+    await db.insert(roles).values({ tenantId, userId: ziel.id, roleType: "redakteur", regionId: stadtRegion });
+
+    // Offener Ernennungs-Vorschlag + offene Einladung an die Ziel-E-Mail.
+    const created = await vorschlagen(ziel.email);
+    expect(created.ok).toBe(true);
+    const inv = await einladenCore(db, tenantId, KOMMUNE, adminBId, {
+      email: ziel.email,
+      roleType: "verifier",
+    });
+    expect(inv.ok).toBe(true);
+
+    const res = await offboardingCore(db, tenantId, KOMMUNE, adminBId, ziel.id);
+    expect(res.ok).toBe(true);
+
+    // (a) Vorschlag ist cancelled (nicht mehr bestätigbar) + Audit via=offboarding.
+    const appt = await apptById(created.appointmentId!);
+    expect(appt.status).toBe("cancelled");
+    expect(appt.decidedBy).toBe(adminBId);
+    const dec = await verifierErnennungEntscheidenCore(db, tenantId, KOMMUNE, adminBId, {
+      appointmentId: created.appointmentId!,
+      entscheidung: "bestaetigen",
+    });
+    expect(dec.ok).toBe(false);
+    const cancelAudit = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "role.appointment_cancelled"), eq(auditEvents.targetId, ziel.id)));
+    expect(cancelAudit.length).toBe(1);
+    expect((cancelAudit[0].metadata as Record<string, unknown>).via).toBe("offboarding");
+    expect(JSON.stringify(cancelAudit[0].metadata)).not.toContain("@");
+
+    // (b) Einladung ist revoked → Accept legt KEINEN frischen pending mehr an.
+    const [invRow] = await db
+      .select({ status: invitations.status })
+      .from(invitations)
+      .where(and(eq(invitations.tenantId, tenantId), eq(invitations.id, inv.invitationId!)));
+    expect(invRow.status).toBe("revoked");
+    const accept = await einladungAnnehmenCore(db, tenantId, inv.rawToken!, {
+      id: ziel.id,
+      email: ziel.email,
+    });
+    expect(accept.ok).toBe(false);
+    expect(accept.reason).toBe("revoked");
+    const restPending = await db
+      .select({ id: roleAppointments.id })
+      .from(roleAppointments)
+      .where(
+        and(
+          eq(roleAppointments.tenantId, tenantId),
+          eq(roleAppointments.targetUserId, ziel.id),
+          eq(roleAppointments.status, "pending"),
+        ),
+      );
+    expect(restPending.length).toBe(0);
+    const revokeAudit = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "invitation.revoked"), eq(auditEvents.targetId, inv.invitationId!)));
+    expect(revokeAudit.length).toBe(1);
+    expect((revokeAudit[0].metadata as Record<string, unknown>).via).toBe("offboarding");
+  });
+
+  it.skipIf(SKIP)("MAJOR 2c: DSGVO-Konto-Löschung cancelt pending-Vorschläge (via=account_deletion)", async () => {
+    const ziel = await createUser("loeschung-ziel");
+    const created = await vorschlagen(ziel.email);
+    expect(created.ok).toBe(true);
+
+    const res = await deleteKontoCore(db, tenantId, ziel.id);
+    expect(res.ok).toBe(true);
+
+    const appt = await apptById(created.appointmentId!);
+    expect(appt.status).toBe("cancelled");
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "role.appointment_cancelled"), eq(auditEvents.targetId, ziel.id)));
+    expect(audit.length).toBe(1);
+    expect((audit[0].metadata as Record<string, unknown>).via).toBe("account_deletion");
+  });
+
+  it.skipIf(SKIP)("MINOR A: Ziel-Person (selbst Admin) kann die EIGENE Ernennung nicht bestätigen — mit Flag schon (selfApproval-Audit)", async () => {
+    // Ziel ist selbst kommune_admin.
+    const zielAdmin = await createUser("ziel-admin");
+    const stadtRegion = await resolveRegionIdForScope(db, tenantId, "stadt", null);
+    await db.insert(roles).values({ tenantId, userId: zielAdmin.id, roleType: "kommune_admin", regionId: stadtRegion });
+
+    // Admin B schlägt die Ernennung von zielAdmin vor (B ≠ Ziel).
+    const created = await verifierErnennungVorschlagenCore(db, tenantId, KOMMUNE, adminBId, {
+      targetEmail: zielAdmin.email,
+      scopeLevel: "ortsteil",
+      scopeCode: "sod-ziel-ot",
+    });
+    expect(created.ok).toBe(true);
+
+    // Ziel versucht die eigene Ernennung zu bestätigen → gesperrt, bleibt pending.
+    const dec = await verifierErnennungEntscheidenCore(db, tenantId, KOMMUNE, zielAdmin.id, {
+      appointmentId: created.appointmentId!,
+      entscheidung: "bestaetigen",
+    });
+    expect(dec.ok).toBe(false);
+    expect(dec.error).toMatch(/eigene Ernennung/i);
+    expect((await apptById(created.appointmentId!)).status).toBe("pending");
+
+    // Mit Pilot-Überbrückung erlaubt — und im Audit sichtbar markiert.
+    const dec2 = await verifierErnennungEntscheidenCore(db, tenantId, KOMMUNE, zielAdmin.id, {
+      appointmentId: created.appointmentId!,
+      entscheidung: "bestaetigen",
+      allowSelfApproval: isSelfApprovalAllowed({ ALLOW_SELF_APPROVAL: "true" }),
+    });
+    expect(dec2.ok).toBe(true);
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "role.appointment_approved"), eq(auditEvents.targetId, zielAdmin.id)));
+    expect(audit.length).toBe(1);
+    expect((audit[0].metadata as Record<string, unknown>).selfApproval).toBe(true);
+  });
+
+  it.skipIf(SKIP)("MINOR B: Vorschlagende:r kann den EIGENEN Vorschlag ablehnen (ohne Flag — kein Vier-Augen fürs Ablehnen)", async () => {
+    const ziel = await createUser("selbst-ablehnen");
+    const created = await vorschlagen(ziel.email); // Vorschlag durch adminA
+
+    const res = await verifierErnennungEntscheidenCore(db, tenantId, KOMMUNE, adminAId, {
+      appointmentId: created.appointmentId!,
+      entscheidung: "ablehnen",
+      allowSelfApproval: false,
+    });
+    expect(res.ok).toBe(true);
+    expect((await apptById(created.appointmentId!)).status).toBe("rejected");
+    expect((await verifierRollen(ziel.id)).length).toBe(0);
+  });
+
+  it.skipIf(SKIP)("MINOR C: Einladungs-Accept mit bereits vorhandener verifier-Rolle → kein Appointment, ok ohne pendingApproval", async () => {
+    const email = nextEmail("rolle-schon-da");
+    const konto = await createUser("rolle-schon-da-konto");
+    await db.update(users).set({ email }).where(eq(users.id, konto.id));
+
+    // Rolle existiert bereits am (Standard-stadt-)Gebietsknoten.
+    const stadtRegion = await resolveRegionIdForScope(db, tenantId, "stadt", null);
+    await db.insert(roles).values({ tenantId, userId: konto.id, roleType: "verifier", regionId: stadtRegion });
+
+    const inv = await einladenCore(db, tenantId, KOMMUNE, adminAId, { email, roleType: "verifier" });
+    const res = await einladungAnnehmenCore(db, tenantId, inv.rawToken!, { id: konto.id, email });
+    expect(res.ok).toBe(true);
+    expect(res.roleType).toBe("verifier");
+    expect(res.pendingApproval).toBeUndefined(); // Rolle besteht — nichts zu bestätigen
+
+    // KEIN Geister-Vorschlag; Einladung normal accepted.
+    const appts = await db
+      .select({ id: roleAppointments.id })
+      .from(roleAppointments)
+      .where(and(eq(roleAppointments.tenantId, tenantId), eq(roleAppointments.targetUserId, konto.id)));
+    expect(appts.length).toBe(0);
+    const [invRow] = await db
+      .select({ status: invitations.status })
+      .from(invitations)
+      .where(and(eq(invitations.tenantId, tenantId), eq(invitations.id, inv.invitationId!)));
+    expect(invRow.status).toBe("accepted");
   });
 
   // -------------------------------------------------------------------------

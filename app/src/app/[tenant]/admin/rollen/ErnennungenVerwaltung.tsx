@@ -29,6 +29,7 @@ import BestaetigungsDialog from "../../BestaetigungsDialog";
 
 export interface Ernennung {
   id: string;
+  targetUserId: string;
   targetEmail: string;
   roleType: string;
   regionTyp: string;
@@ -95,7 +96,11 @@ export function ErnennungenVerwaltung({ ernennungen, callerUserId, selfApprovalA
       <div className="mt-4 space-y-3">
         {ernennungen.map((e) => {
           const istVorschlagender = e.proposedBy === callerUserId;
-          const darfBestaetigen = !istVorschlagender || selfApprovalAllowed;
+          // Gate-B MINOR: auch die BEGÜNSTIGTE Person bestätigt nie die eigene
+          // Ernennung (außer Pilot-Überbrückung) — der Server erzwingt beides
+          // zusätzlich atomar; die UI blendet den Button nur aus (Komfort).
+          const istZiel = e.targetUserId === callerUserId;
+          const darfBestaetigen = (!istVorschlagender && !istZiel) || selfApprovalAllowed;
           const msg = rowMsg[e.id];
           return (
             <div key={e.id} className="rounded-md bg-pz-page px-4 py-3">
@@ -168,11 +173,13 @@ export function ErnennungenVerwaltung({ ernennungen, callerUserId, selfApprovalA
           <>
             <strong>{dialog?.ernennung.targetEmail}</strong> erhält die Rolle
             Verifizierer:in und kann damit Wohnsitz-Verifizierungen durchführen.
-            {dialog?.ernennung.proposedBy === callerUserId && selfApprovalAllowed ? (
+            {(dialog?.ernennung.proposedBy === callerUserId ||
+              dialog?.ernennung.targetUserId === callerUserId) &&
+            selfApprovalAllowed ? (
               <>
-                {" "}Hinweis: Sie bestätigen Ihren EIGENEN Vorschlag — das ist nur im
-                Pilotbetrieb (Ein-Personen-Verwaltung) zulässig und wird im
-                Protokoll sichtbar vermerkt.
+                {" "}Hinweis: Sie bestätigen Ihren EIGENEN Vorschlag bzw. Ihre eigene
+                Ernennung — das ist nur im Pilotbetrieb (Ein-Personen-Verwaltung)
+                zulässig und wird im Protokoll sichtbar vermerkt.
               </>
             ) : (
               <>
