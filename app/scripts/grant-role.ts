@@ -17,6 +17,11 @@
  * Env: DATABASE_URL (default: postgres://partizip:partizip@127.0.0.1:5433/partizip)
  *
  * Gate-B: Jede Rollen-Vergabe wird als audit_event gespeichert (PII-frei: kein E-Mail-Log).
+ *
+ * Block K3 (Vier-Augen): In der App wird die Rolle `verifier` zweistufig
+ * vergeben (Vorschlag → Bestätigung, role_appointments). Dieses Skript ist ein
+ * BEWUSSTER Betreiber-Bypass und bleibt unangetastet — es vergibt ohnehin nur
+ * die Admin-Rollen (VALID_ROLES), keinen `verifier`.
  */
 
 import postgres from "postgres";

@@ -69,6 +69,12 @@ interface Props {
   erlaubteRollen: string[];
   /** Eingeloggter Admin — auf der eigenen Karte werden KEINE Konto-Aktionen angeboten. */
   callerUserId: string;
+  /**
+   * K3: Pilot-Überbrückung (ALLOW_SELF_APPROVAL, serverseitig via
+   * isSelfApprovalAllowed()) — steuert NUR den Hinweistext beim Zuweisen der
+   * Rolle `verifier`; die SoD-Durchsetzung liegt beim Server.
+   */
+  selfApprovalAllowed: boolean;
 }
 
 /** Welcher Bestätigungs-Dialog ist offen? (K2-Konto-Aktionen) */
@@ -80,7 +86,7 @@ type KontoDialog =
   | { art: "sperrenPerEmail"; email: string }
   | null;
 
-export function RollenVerwaltung({ users, erlaubteRollen, callerUserId }: Props) {
+export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfApprovalAllowed }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -242,6 +248,15 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId }: Props)
                 </select>
               </div>
             </div>
+
+            {/* K3: Vier-Augen-Hinweis — `verifier` wird zweistufig vergeben. */}
+            {roleType === "verifier" && (
+              <p className="text-xs text-pz-muted">
+                {selfApprovalAllowed
+                  ? "Hinweis: Die Rolle Verifizierer:in wird als Vorschlag angelegt und muss anschließend ausdrücklich bestätigt werden. Im Pilotbetrieb (Ein-Personen-Verwaltung) dürfen Sie selbst bestätigen — der Bestätigungs-Klick bleibt erforderlich und wird protokolliert."
+                  : "Hinweis: Die Rolle Verifizierer:in wird als Vorschlag angelegt und muss von einer zweiten Administratorin oder einem zweiten Administrator bestätigt werden (Vier-Augen-Prinzip)."}
+              </p>
+            )}
 
             {formMsg && (
               <p
