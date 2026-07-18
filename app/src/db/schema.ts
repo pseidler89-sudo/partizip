@@ -149,6 +149,13 @@ export const tenants = pgTable("tenants", {
   // H1: Vier-Augen-Pflicht — wenn true, muss der Freigeber eines Digests ein
   // anderer sein als wer dessen Aussagen geprüft hat. Pilot: false (Ein-Personen-Betrieb).
   vierAugenPflicht: boolean("vier_augen_pflicht").notNull().default(false),
+  // Block L (ADR-028): KI-Neutralitäts-Check je Tenant. Ist er AN, geht eine zur
+  // Aktivierung gebrachte Umfrage zuerst in den Zustand `in_pruefung`; ein Betreiber
+  // bewertet sie ASSISTED anhand des öffentlich versionierten Prompts und gibt sie
+  // frei (→ aktiv) oder hält sie an (→ entwurf). Default AUS = heutiger Weg (Umfrage
+  // direkt aktivierbar). Muster: vierAugenPflicht. Einschalten = bewusste
+  // Owner-Entscheidung + separate Aktivierung (nicht im Feature-PR).
+  kiNeutralitaetsPflicht: boolean("ki_neutralitaets_pflicht").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
   // M6: $onUpdate sorgt für automatisches Aktualisieren bei jedem UPDATE
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`).$onUpdate(() => new Date()),
@@ -1165,6 +1172,15 @@ export const pollStatusEnum = pgEnum("poll_status", [
   "entwurf",
   "aktiv",
   "geschlossen",
+  // Block L (ADR-028): KI-Neutralitäts-Check. Ist `tenants.ki_neutralitaets_pflicht`
+  // AN, geht eine zur Aktivierung gebrachte Umfrage NICHT direkt live, sondern in
+  // diesen Zwischenzustand — bis ein Betreiber sie anhand des öffentlichen Prompts
+  // freigibt (→ aktiv) oder anhält (→ zurück auf entwurf). Bewusst am ENDE der
+  // Enum-Liste ergänzt (additive `ADD VALUE`, Muster 0029/0030): alle Wähler-Guards
+  // filtern hart `status='aktiv'` → `in_pruefung` ist automatisch fail-closed
+  // unsichtbar/unwählbar. Die UI-Reihenfolge (entwurf→in_pruefung→aktiv→geschlossen)
+  // regelt STATUS_TITLES, nicht die Enum-Deklaration.
+  "in_pruefung",
 ]);
 
 // Beteiligungsformate (ADR-025). ja_nein_enthaltung = binäres Stimmungsbild;
@@ -1363,6 +1379,64 @@ export const voteResistances = pgTable(
     index("idx_vote_resistances_tenant_voter").on(t.tenantId, t.voterRef),
     // Wertebereich als letztes Sicherheitsnetz (serverseitig ohnehin validiert).
     check("vote_resistances_wert_bereich", sql`${t.wert} >= 0 AND ${t.wert} <= 10`),
+  ]
+);
+
+// ---------------------------------------------------------------------------
+// Block L (ADR-028): KI-Neutralitäts-Check — Transparenz-Log.
+//
+// Jede assisted Neutralitätsprüfung einer Umfrage (Flag AN) wird hier als Zeile
+// festgehalten. Zwei Verdicts: `neutral` (Freigabe → Poll wird aktiv) oder
+// `angehalten` (Poll geht zurück auf entwurf, mit Begründung an den Ersteller).
+// Die KI lehnt NIE final ab — sie hält an; der Mensch bleibt letzte Instanz.
+//
+// ÖFFENTLICH vs. INTERN (Datensparsamkeit, Transparenz-Wahrheit):
+//   - ÖFFENTLICH (Transparenz-Log): Umfrage-Frage (ohnehin öffentlich), Verdict,
+//     Begründung, verletzte Regel, prompt_version, modell, Zeitpunkt.
+//   - INTERN, NIE öffentlich: geprueft_von (welcher Betreiber). Die öffentliche
+//     Sicht selektiert diese Spalte NICHT (Institutionsebene, keine Person).
+// PII-frei: die Frage enthält keinen Personenbezug von Nutzern; geprueft_von ist
+// eine User-UUID (kein Klarname/E-Mail) und bleibt der internen Sicht vorbehalten.
+// ---------------------------------------------------------------------------
+
+export const kiPruefungen = pgTable(
+  "ki_pruefungen",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    // Tenant-Redundanz für direkte Tenant-Isolation in JEDER Query (restrict:
+    // Tenant-Löschung explizit blockieren, konsistent mit polls/digests).
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    // Prüfung gehört zur Umfrage — Umfrage-Löschung löscht ihre Prüf-Historie.
+    pollId: uuid("poll_id")
+      .notNull()
+      .references(() => polls.id, { onDelete: "cascade" }),
+    // 'neutral' | 'angehalten' — CHECK als letztes Sicherheitsnetz (serverseitig
+    // ohnehin per zod validiert).
+    verdict: text("verdict").notNull(),
+    // Kurzbegründung (max. 2 Sätze; Länge serverseitig per zod begrenzt, nicht DB).
+    begruendung: text("begruendung").notNull(),
+    // Nur bei 'angehalten' gesetzt — die konkret verletzte Prompt-Regel (nummeriert).
+    verletzteRegel: text("verletzte_regel"),
+    // Wortgleiche Nachvollziehbarkeit: Version des öffentlichen Prompts + Modell.
+    promptVersion: text("prompt_version").notNull(),
+    modell: text("modell").notNull(),
+    // INTERN: welcher Betreiber die Prüfung eingetragen hat. SET NULL: Konto kann
+    // gelöscht werden, die Prüf-Zeile bleibt. NIE im öffentlichen Log selektieren.
+    geprueftVon: uuid("geprueft_von").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    // War die Freigabe ein menschlicher Override (Poll wiederholt eingereicht,
+    // Prüfer setzt bewusst frei) — auditierbar, im Transparenz-Log neutral geführt.
+    istOverride: boolean("ist_override").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (t) => [
+    index("idx_ki_pruefungen_tenant_poll").on(t.tenantId, t.pollId),
+    index("idx_ki_pruefungen_tenant_created").on(t.tenantId, t.createdAt.desc()),
+    // Wertebereich des Verdicts als DB-Netz.
+    check("ki_pruefungen_verdict_check", sql`${t.verdict} IN ('neutral', 'angehalten')`),
   ]
 );
 
