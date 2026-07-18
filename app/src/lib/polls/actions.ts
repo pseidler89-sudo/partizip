@@ -47,6 +47,13 @@ import { isDemoTenant } from "@/lib/demo/config";
 import { istMusterstadtSeedPollId } from "@/lib/demo/seed-ids";
 import { istGebietsZustaendig, waehleAnkerRegionId } from "@/lib/polls/gebiet";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
+import { getRegion } from "@/lib/region/tree";
+import { getUserRolesMitScope } from "@/lib/auth/roles";
+import {
+  pollGebietErlaubt,
+  istSuperAdminScope,
+  pollVerwaltungErlaubt,
+} from "@/lib/polls/composer-autoritaet";
 import { insertBelegCode } from "@/lib/polls/beleg";
 import { checkVoteRateLimit } from "@/lib/polls/rate-limit";
 import { isValidChoice } from "@/lib/polls/ergebnis";
@@ -682,6 +689,37 @@ export async function pollErstellen(
     return { ok: false, error: "Für die gewählte Ebene ist noch kein Gebiet hinterlegt." };
   }
 
+  // GEBIETS-AUTORITÄT (Block H, fail-closed): requireAdminCtx stellt nur „irgendein
+  // Admin des Tenants" sicher — HIER wird zusätzlich erzwungen, dass das aufgelöste
+  // Ziel-Gebiet vom eigenen Rollen-Pfad gedeckt ist (kommune_admin an sein Gebiet
+  // gebunden; super_admin bypass). Das schließt die bestehende Lücke: ein
+  // präparierter Request mit scopeLevel:"kreis"/"land" wird abgelehnt, obwohl
+  // resolveRegionIdForScope den groben Knoten tenant-intern auflösen würde.
+  const scopes = await getUserRolesMitScope(ctx.db, ctx.tenant.id, ctx.userId);
+  const istSuperAdmin = istSuperAdminScope(scopes);
+  const zielRegion = await getRegion(ctx.db, regionId);
+  const zielPath = zielRegion?.path ?? null;
+  // H bleibt bewusst ABWÄRTS: Poll-Erstellung nur auf Gemeinde-/Ortsteil-Ebene.
+  // kreis/land/bund gehören dem Separate-Tenant-Modell (PR #49) und werden hier
+  // hart abgelehnt — auch für super_admin (der Bypass gilt der Gebiets-Bindung
+  // pfadDecktAb, NICHT der Ebenen-Grenze). Sonst könnte ein Direkt-Action-Aufruf
+  // mit scopeLevel:"kreis" die Feed-Begrenzung umgehen.
+  const zielTypErlaubt = zielRegion?.typ === "gemeinde" || zielRegion?.typ === "ortsteil";
+  if (!zielPath || !zielTypErlaubt || !pollGebietErlaubt(scopes, istSuperAdmin, zielPath)) {
+    // Verstoß PII-frei protokollieren (nur Scope-Ebene, kein Poll-Inhalt); noch
+    // keine Poll → targetId null.
+    await ctx.db.insert(auditEvents).values({
+      tenantId: ctx.tenant.id,
+      actorType: "admin",
+      actorRef: ctx.userId,
+      action: "poll.create_denied",
+      targetType: "poll",
+      targetId: null,
+      metadata: { scopeLevel },
+    });
+    return { ok: false, error: "Für dieses Gebiet sind Sie nicht berechtigt." };
+  }
+
   const pollId = await ctx.db.transaction(async (tx: Db) => {
     const [row] = await tx
       .insert(polls)
@@ -752,6 +790,15 @@ export async function pollAktivieren(
   // (defensiv: die Seeds sind aktiv/geschlossen, der Status-Guard griffe schon).
   if (isDemoTenant(ctx.tenant.slug) && istMusterstadtSeedPollId(ctx.tenant.slug, idParsed.data)) {
     return { ok: false, error: "Diese Beispiel-Frage gehört zum Demo-Rundgang und bleibt unverändert." };
+  }
+
+  // GEBIETS-AUTORITÄT (Block H, symmetrisch zur Erstellung): ein gebietsgebundener
+  // Admin darf eine Poll AUSSERHALB seines Gebiets nicht aktivieren. Prüfung gegen
+  // poll.region_id VOR dem Status-UPDATE (super_admin bypass). Existiert die Poll im
+  // Tenant nicht, übernimmt der atomare Status-Guard unten die „nicht gefunden"-Meldung.
+  const scopes = await getUserRolesMitScope(ctx.db, ctx.tenant.id, ctx.userId);
+  if (!(await pollVerwaltungErlaubt(ctx.db, ctx.tenant.id, idParsed.data, scopes, istSuperAdminScope(scopes)))) {
+    return { ok: false, error: "Für dieses Gebiet sind Sie nicht berechtigt." };
   }
 
   const result = await ctx.db.transaction(async (tx: Db) => {
@@ -871,6 +918,14 @@ export async function pollSchliessen(
     return { ok: false, error: "Diese Beispiel-Frage gehört zum Demo-Rundgang und bleibt unverändert." };
   }
 
+  // GEBIETS-AUTORITÄT (Block H, symmetrisch): ein gebietsgebundener Admin darf eine
+  // Poll außerhalb seines Gebiets nicht schließen. Prüfung gegen poll.region_id VOR
+  // dem Status-UPDATE (super_admin bypass; fremder/fehlender Poll → Standard-Guard).
+  const scopes = await getUserRolesMitScope(ctx.db, ctx.tenant.id, ctx.userId);
+  if (!(await pollVerwaltungErlaubt(ctx.db, ctx.tenant.id, idParsed.data, scopes, istSuperAdminScope(scopes)))) {
+    return { ok: false, error: "Für dieses Gebiet sind Sie nicht berechtigt." };
+  }
+
   const result = await ctx.db.transaction(async (tx: Db) => {
     // ATOMARER Guard: nur aus 'aktiv' nach 'geschlossen', tenant-scoped.
     const updated = await tx
@@ -927,6 +982,14 @@ export async function pollEntwurfLoeschen(
   // (defensiv — sie sind aktiv/geschlossen, der Entwurf-Guard griffe schon).
   if (isDemoTenant(ctx.tenant.slug) && istMusterstadtSeedPollId(ctx.tenant.slug, idParsed.data)) {
     return { ok: false, error: "Diese Beispiel-Frage gehört zum Demo-Rundgang und bleibt unverändert." };
+  }
+
+  // GEBIETS-AUTORITÄT (Block H, symmetrisch): ein gebietsgebundener Admin darf einen
+  // Entwurf außerhalb seines Gebiets nicht löschen. Prüfung gegen poll.region_id VOR
+  // dem DELETE (super_admin bypass; fremder/fehlender Poll → Standard-Guard).
+  const scopes = await getUserRolesMitScope(ctx.db, ctx.tenant.id, ctx.userId);
+  if (!(await pollVerwaltungErlaubt(ctx.db, ctx.tenant.id, idParsed.data, scopes, istSuperAdminScope(scopes)))) {
+    return { ok: false, error: "Für dieses Gebiet sind Sie nicht berechtigt." };
   }
 
   const result = await ctx.db.transaction(async (tx: Db) => {

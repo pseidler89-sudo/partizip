@@ -1,12 +1,16 @@
 /**
- * PollComposerForm.tsx — Client-Formular zum Anlegen einer Abstimmung (M5).
+ * PollComposerForm.tsx — Client-Formular zum Anlegen einer Abstimmung (M5 / Block H).
  *
  * Ruft die Server-Action pollErstellen() auf (admin-gated, tenant-scoped) und
  * legt eine neue Umfrage als ENTWURF an. Erfolg/Fehler werden inline angezeigt,
  * router.refresh() holt die Übersicht frisch nach. Die Validierung hier ist nur
  * Komfort — die Action validiert/erzwingt alles serverseitig erneut.
  *
- * scopeCode (Ortsteil) wird NUR übergeben, wenn scopeLevel = 'ortsteil'.
+ * Block H: Die wählbaren Ziel-Gebiete kommen server-getrieben als `gebiete`-Feed
+ * (erlaubteZielGebiete) — die eigene Rollen-Scheibe abwärts (Gemeinde + berechtigte
+ * Ortsteile), NIE kreis/land. Der Ebenen-/Ortsteil-Picker rendert AUSSCHLIESSLICH
+ * aus diesem Feed; die Durchsetzung liegt zusätzlich serverseitig in pollErstellen
+ * (pollGebietErlaubt). scopeCode wird nur bei Ebene = Ortsteil übergeben.
  */
 
 "use client";
@@ -15,18 +19,26 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { pollErstellen } from "@/lib/polls/actions";
 
-interface OrtsteilOption {
-  code: string;
-  name: string;
+/** Serialisierte Form eines Ziel-Gebiets aus erlaubteZielGebiete (Server). */
+interface ZielGebietOption {
+  regionId: string;
+  typ: "gemeinde" | "ortsteil";
+  label: string;
+  scopeLevel: "stadt" | "ortsteil";
+  scopeCode: string | null;
 }
 
 interface Props {
-  ortsteile: OrtsteilOption[];
   /**
-   * Demo-Mandant: nur die Ebene „stadt" anbieten. Ein Demo-Konto hat keinen
-   * Ortsteil-Anker (Gemeinde-Fallback) → eine Ortsteil-Frage wäre in der
-   * Bürger-Sicht unsichtbar und der Verwaltungs-Track bräche in Schritt 2
-   * (Gate-B MINOR-4). „stadt" ist serverseitig ohnehin gültig.
+   * Vom Server berechnete erlaubte Ziel-Gebiete (Block H): Gemeinde-Knoten +
+   * berechtigte Ortsteile der eigenen Rollen-Scheibe. Der Picker rendert nur
+   * hieraus — enthält der Feed keinen Ortsteil, gibt es die Ebene „Ortsteil" nicht.
+   */
+  gebiete: ZielGebietOption[];
+  /**
+   * Demo-Mandant: der Ortsteil-Zweig ist bereits serverseitig aus dem Feed
+   * gefiltert (Demo-Konto ohne Ortsteil-Anker sähe die Frage nie). Das Flag
+   * doppelt-sichert die UI (kein Ortsteil-Angebot auf Demo).
    */
   demo?: boolean;
 }
@@ -37,14 +49,39 @@ type PollTyp = "ja_nein_enthaltung" | "dot_voting" | "widerstandsabfrage";
 const DOT_MIN = 2;
 const DOT_MAX = 12;
 
-export default function PollComposerForm({ ortsteile, demo = false }: Props) {
+// Ebenen-Labels — deckungsgleich mit REGION_TYP_LABEL (lib/region/ebenen.ts):
+// Eingabe „stadt" bildet den gemeinde-Knoten ab („Kommune"). Bewusst als lokale
+// Konstante (kein Import der Schema-tragenden ebenen.ts in die Client-Bundle).
+const EBENEN_LABEL: Record<ScopeLevel, string> = {
+  stadt: "Kommune (alle Bürger:innen)",
+  ortsteil: "Ortsteil",
+};
+
+export default function PollComposerForm({ gebiete, demo = false }: Props) {
   const router = useRouter();
+
+  // Feed in wählbare Ebenen + Ortsteil-Knoten aufteilen. Demo-Fence zusätzlich
+  // hart in der UI (der Feed ist serverseitig bereits gemeinde-only auf Demo).
+  const hatStadt = gebiete.some((g) => g.scopeLevel === "stadt");
+  const ortsteilGebiete = demo
+    ? []
+    : gebiete.filter((g) => g.scopeLevel === "ortsteil" && g.scopeCode);
+  const hatOrtsteil = ortsteilGebiete.length > 0;
+  const ebenen: ScopeLevel[] = [];
+  if (hatStadt) ebenen.push("stadt");
+  if (hatOrtsteil) ebenen.push("ortsteil");
+  const keineGebiete = ebenen.length === 0;
+
   const [frage, setFrage] = useState("");
   const [typ, setTyp] = useState<PollTyp>("ja_nein_enthaltung");
   const [optionen, setOptionen] = useState<string[]>(["", ""]);
   const [punkteBudget, setPunkteBudget] = useState<number>(5);
-  const [scopeLevel, setScopeLevel] = useState<ScopeLevel>("stadt");
-  const [scopeCode, setScopeCode] = useState<string>(ortsteile[0]?.code ?? "");
+  const [scopeLevel, setScopeLevel] = useState<ScopeLevel>(
+    hatStadt ? "stadt" : (ebenen[0] ?? "stadt"),
+  );
+  const [scopeCode, setScopeCode] = useState<string>(
+    ortsteilGebiete[0]?.scopeCode ?? "",
+  );
   const [verbindlich, setVerbindlich] = useState(false);
   const [closesAt, setClosesAt] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
@@ -56,6 +93,10 @@ export default function PollComposerForm({ ortsteile, demo = false }: Props) {
     setError(null);
     setSuccess(false);
 
+    if (keineGebiete) {
+      setError("Für Ihr Zuständigkeitsgebiet ist noch keine Ebene hinterlegt.");
+      return;
+    }
     if (frage.trim().length < 5) {
       setError("Bitte formulieren Sie eine etwas längere Frage (mind. 5 Zeichen).");
       return;
@@ -108,7 +149,7 @@ export default function PollComposerForm({ ortsteile, demo = false }: Props) {
       setFrage("");
       setVerbindlich(false);
       setClosesAt("");
-      setScopeLevel("stadt");
+      setScopeLevel(hatStadt ? "stadt" : (ebenen[0] ?? "stadt"));
       setTyp("ja_nein_enthaltung");
       setOptionen(["", ""]);
       setPunkteBudget(5);
@@ -124,6 +165,8 @@ export default function PollComposerForm({ ortsteile, demo = false }: Props) {
   const inputCls =
     "mt-1 w-full rounded-lg border px-3 py-2 text-sm shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-1";
 
+  const zeigeOrtsteilWarnung = verbindlich && scopeLevel === "ortsteil";
+
   return (
     <form onSubmit={handleSubmit} className="pz-card p-6">
       <h2 className="text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
@@ -133,6 +176,17 @@ export default function PollComposerForm({ ortsteile, demo = false }: Props) {
         Die Abstimmung entsteht zunächst als <strong>Entwurf</strong>. Erst nach dem
         Aktivieren können Bürger:innen mitstimmen.
       </p>
+
+      {keineGebiete && (
+        <div
+          className="mt-4 rounded-md border px-4 py-3 text-sm"
+          style={{ borderColor: "var(--pz-line)", color: "var(--pz-muted)" }}
+          role="status"
+        >
+          Für Ihr Zuständigkeitsgebiet ist noch keine Ebene hinterlegt. Bitte wenden
+          Sie sich an die Plattform-Betreuung.
+        </div>
+      )}
 
       <div className="mt-5 space-y-5">
         {/* Frage */}
@@ -251,7 +305,12 @@ export default function PollComposerForm({ ortsteile, demo = false }: Props) {
           </div>
         )}
 
-        {/* Ebene */}
+        {/* Ebene + (bei Ortsteil) Knoten — server-getriebener Picker (Block H).
+            Bei leerem Feed (Tenant-Baum nicht geseedet) ganz ausblenden: das
+            keineGebiete-Banner + der deaktivierte Absenden-Button kommunizieren
+            den Zustand; ein leeres <select> ohne <option> würde nur verwirren
+            (und eine React-Dev-Warnung erzeugen). */}
+        {!keineGebiete && (
         <div className="grid gap-5 sm:grid-cols-2">
           <div>
             <label htmlFor="scopeLevel" className={labelCls} style={{ color: "var(--pz-ink)" }}>
@@ -261,44 +320,53 @@ export default function PollComposerForm({ ortsteile, demo = false }: Props) {
               id="scopeLevel"
               value={scopeLevel}
               onChange={(e) => setScopeLevel(e.target.value as ScopeLevel)}
+              disabled={keineGebiete}
+              aria-describedby={zeigeOrtsteilWarnung ? "ortsteil-warnung" : undefined}
               className={inputCls}
               style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
             >
-              <option value="stadt">Kommune (alle Bürger:innen)</option>
-              {/* Demo: kein Ortsteil (Demo-Konto ohne Ortsteil-Anker sähe die
-                  Frage nicht) — nur „stadt", damit der Track sichtbar bleibt. */}
-              {!demo && <option value="ortsteil">Ortsteil</option>}
+              {ebenen.map((s) => (
+                <option key={s} value={s}>
+                  {EBENEN_LABEL[s]}
+                </option>
+              ))}
             </select>
+            {zeigeOrtsteilWarnung && (
+              <p
+                id="ortsteil-warnung"
+                className="mt-1 text-xs"
+                style={{ color: "var(--pz-warn-strong, #92400e)" }}
+              >
+                Hinweis: Eine <strong>verbindliche</strong> Ortsteil-Frage erreicht nur
+                wohnsitz-verifizierte Bürger:innen dieses Ortsteils — die Wählerschaft
+                kann dadurch klein oder (noch) leer sein.
+              </p>
+            )}
           </div>
 
-          {/* Ortsteil-Auswahl, nur bei Ebene = Ortsteil (auf Demo nie wählbar) */}
-          {!demo && scopeLevel === "ortsteil" && (
+          {/* Ortsteil-Auswahl, nur bei Ebene = Ortsteil (aus dem Feed) */}
+          {scopeLevel === "ortsteil" && hatOrtsteil && (
             <div>
               <label htmlFor="scopeCode" className={labelCls} style={{ color: "var(--pz-ink)" }}>
                 Ortsteil
               </label>
-              {ortsteile.length === 0 ? (
-                <p className="mt-1 text-sm" style={{ color: "var(--pz-muted)" }}>
-                  Für diese Kommune sind noch keine Ortsteile hinterlegt.
-                </p>
-              ) : (
-                <select
-                  id="scopeCode"
-                  value={scopeCode}
-                  onChange={(e) => setScopeCode(e.target.value)}
-                  className={inputCls}
-                  style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
-                >
-                  {ortsteile.map((o) => (
-                    <option key={o.code} value={o.code}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
-              )}
+              <select
+                id="scopeCode"
+                value={scopeCode}
+                onChange={(e) => setScopeCode(e.target.value)}
+                className={inputCls}
+                style={{ borderColor: "var(--pz-line)", color: "var(--pz-ink)" }}
+              >
+                {ortsteilGebiete.map((o) => (
+                  <option key={o.regionId} value={o.scopeCode ?? ""}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
         </div>
+        )}
 
         {/* Verbindlich */}
         <div className="rounded-lg border p-4" style={{ borderColor: "var(--pz-line)" }}>
@@ -357,7 +425,7 @@ export default function PollComposerForm({ ortsteile, demo = false }: Props) {
       <div className="mt-6">
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || keineGebiete}
           className="inline-flex items-center rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
           style={{ backgroundColor: "var(--tenant-primary)" }}
         >
