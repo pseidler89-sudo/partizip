@@ -13,8 +13,9 @@
  */
 
 import { and, eq, or, isNull, lte, gt, desc, inArray, count, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db/client";
-import { polls, votes, pollOptions, voteAllocations, voteResistances, regions, pollStatusEnum } from "@/db/schema";
+import { polls, votes, pollOptions, voteAllocations, voteResistances, regions, users, pollStatusEnum } from "@/db/schema";
 import {
   aggregateDotVotes,
   type DotOption,
@@ -338,6 +339,55 @@ export interface PollListItem {
   opensAt: Date | null;
   closesAt: Date | null;
   createdAt: Date;
+  /**
+   * Block J1: Ersteller-Identität für den Fragesteller-Badge. null, wenn
+   * erstellt_von NULL ist. Die Institution (Kommune) trägt der Aufrufer bei; hier
+   * steht nur die PERSON. istRollentraeger = der Ersteller trägt (noch) eine
+   * aktive Rolle ≠ `user` — nur dann darf der Klarname öffentlich erscheinen.
+   */
+  ersteller: PollErsteller | null;
+}
+
+/** Ersteller-Identität einer Umfrage (nur Person; Institution kommt vom Aufrufer). */
+export interface PollErsteller {
+  displayName: string | null;
+  funktion: string | null;
+  istRollentraeger: boolean;
+}
+
+/**
+ * SQL-Fragment: Ist der Ersteller einer Umfrage (noch) Rollenträger? Deckungs-
+ * gleich zu getUserRoleTypes — eine AKTIVE Rolle ≠ `user`. Als korreliertes
+ * EXISTS je Zeile (kein N+1-Roundtrip). Bei erstellt_von NULL → false.
+ */
+const erstellerIstRollentraegerSql = sql<boolean>`EXISTS (
+  SELECT 1 FROM roles r
+  JOIN users cu ON cu.id = r.user_id
+  WHERE r.user_id = ${polls.erstelltVon}
+    AND r.tenant_id = ${polls.tenantId}
+    AND r.role_type <> 'user'
+    AND cu.account_status = 'active'
+)`;
+
+/** Alias auf users für den LEFT JOIN auf den Ersteller (Klarname/Funktion). */
+const erstellerUser = alias(users, "ersteller_user");
+
+/** Flache Ersteller-Spalten, wie sie beide Listen-Queries selektieren. */
+type ErstellerRohSpalten = {
+  erstelltVon: string | null;
+  erstellerDisplayName: string | null;
+  erstellerFunktion: string | null;
+  erstellerIstRollentraeger: boolean;
+};
+
+/** Baut die Ersteller-VM aus den flach selektierten Ersteller-Spalten. */
+function baueErsteller(row: ErstellerRohSpalten): PollErsteller | null {
+  if (!row.erstelltVon) return null;
+  return {
+    displayName: row.erstellerDisplayName,
+    funktion: row.erstellerFunktion,
+    istRollentraeger: row.erstellerIstRollentraeger,
+  };
 }
 
 export interface PollMitErgebnis extends PollListItem {
@@ -453,7 +503,7 @@ export async function getAktivePolls(
       )`
     : sql`(${regions.path} @> ${viewerPath})`;
 
-  return db
+  const rows = await db
     .select({
       id: polls.id,
       frage: polls.frage,
@@ -467,9 +517,18 @@ export async function getAktivePolls(
       opensAt: polls.opensAt,
       closesAt: polls.closesAt,
       createdAt: polls.createdAt,
+      // Block J1: Ersteller-Identität (Person) für den Fragesteller-Badge.
+      erstelltVon: polls.erstelltVon,
+      erstellerDisplayName: erstellerUser.displayName,
+      erstellerFunktion: erstellerUser.funktion,
+      erstellerIstRollentraeger: erstellerIstRollentraegerSql,
     })
     .from(polls)
     .innerJoin(regions, eq(regions.id, polls.regionId))
+    .leftJoin(
+      erstellerUser,
+      and(eq(erstellerUser.id, polls.erstelltVon), eq(erstellerUser.tenantId, polls.tenantId)),
+    )
     .where(
       and(
         eq(polls.tenantId, tenantId),
@@ -482,6 +541,13 @@ export async function getAktivePolls(
       )
     )
     .orderBy(desc(polls.createdAt));
+
+  return rows.map(
+    (r: Omit<PollListItem, "ersteller"> & ErstellerRohSpalten) => ({
+      ...r,
+      ersteller: baueErsteller(r),
+    }),
+  );
 }
 
 /**
@@ -543,25 +609,39 @@ export async function getMeineTeilnahmen(
   );
   if (pollIds.length === 0) return [];
 
-  const pollRows = await db
-    .select({
-      id: polls.id,
-      frage: polls.frage,
-      typ: polls.typ,
-      status: polls.status,
-      verbindlich: polls.verbindlich,
-      regionId: polls.regionId,
-      regionTyp: regions.typ,
-      regionName: regions.name,
-      regionPath: sql<string>`${regions.path}::text`,
-      opensAt: polls.opensAt,
-      closesAt: polls.closesAt,
-      createdAt: polls.createdAt,
-    })
-    .from(polls)
-    .innerJoin(regions, eq(regions.id, polls.regionId))
-    .where(and(eq(polls.tenantId, tenantId), inArray(polls.id, pollIds)))
-    .orderBy(desc(polls.createdAt));
+  const pollRows: PollListItem[] = (
+    await db
+      .select({
+        id: polls.id,
+        frage: polls.frage,
+        typ: polls.typ,
+        status: polls.status,
+        verbindlich: polls.verbindlich,
+        regionId: polls.regionId,
+        regionTyp: regions.typ,
+        regionName: regions.name,
+        regionPath: sql<string>`${regions.path}::text`,
+        opensAt: polls.opensAt,
+        closesAt: polls.closesAt,
+        createdAt: polls.createdAt,
+        // Block J1: Ersteller-Identität für den Fragesteller-Badge.
+        erstelltVon: polls.erstelltVon,
+        erstellerDisplayName: erstellerUser.displayName,
+        erstellerFunktion: erstellerUser.funktion,
+        erstellerIstRollentraeger: erstellerIstRollentraegerSql,
+      })
+      .from(polls)
+      .innerJoin(regions, eq(regions.id, polls.regionId))
+      .leftJoin(
+        erstellerUser,
+        and(eq(erstellerUser.id, polls.erstelltVon), eq(erstellerUser.tenantId, polls.tenantId)),
+      )
+      .where(and(eq(polls.tenantId, tenantId), inArray(polls.id, pollIds)))
+      .orderBy(desc(polls.createdAt))
+  ).map((r: Omit<PollListItem, "ersteller"> & ErstellerRohSpalten) => ({
+    ...r,
+    ersteller: baueErsteller(r),
+  }));
 
   // Ergebnis je Poll (tenant-scoped Aggregation in einem Rutsch).
   const allVotes = await db

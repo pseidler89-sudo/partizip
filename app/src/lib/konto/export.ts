@@ -31,6 +31,10 @@ const EXPORT_HINWEIS =
 export type ExportKonto = {
   id: string;
   email: string;
+  // Block J1: öffentliche Identität für Rollenträger (PII → Art.-15-Auskunft).
+  // NULL für Bürger/ungesetzte Rollenträger.
+  displayName: string | null;
+  funktion: string | null;
   verificationStatus: string;
   verificationMethod: string | null;
   residencyVerifiedAt: string | null;
@@ -140,6 +144,9 @@ export function buildExportDocument(input: {
     konto: {
       id: input.user.id,
       email: input.user.email,
+      // Block J1: Klarname + Funktion (nur bei Rollenträgern gesetzt).
+      displayName: input.user.displayName ?? null,
+      funktion: input.user.funktion ?? null,
       verificationStatus: input.user.verificationStatus,
       verificationMethod: input.user.verificationMethod ?? null,
       residencyVerifiedAt: iso(input.user.residencyVerifiedAt),

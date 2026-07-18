@@ -45,6 +45,9 @@ import { resolveOrtsteilRegionId } from "@/lib/region/scope";
 import { RegionBanner } from "../RegionBanner";
 import { PollTypBadge } from "../PollTypBadge";
 import { KurzErgebnisTeilnahme } from "../KurzErgebnisTeilnahme";
+import { FragestellerBadge } from "../FragestellerBadge";
+import { fragestellerBadge } from "@/lib/identity/anzeige";
+import { regionDisplayName } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
@@ -100,11 +103,15 @@ function PollKarte({
   slug,
   poll,
   cta,
+  institution,
 }: {
   slug: string;
   poll: PollMitErgebnis;
   cta: string;
+  /** Kommunen-/Tenant-Anzeigename für den Fragesteller-Badge (immer sichtbar). */
+  institution: string;
 }) {
+  const badge = fragestellerBadge(institution, poll.ersteller);
   return (
     <Link
       href={`/${slug}/umfrage/${poll.id}`}
@@ -118,6 +125,7 @@ function PollKarte({
       <h3 className="mt-3 text-base font-semibold" style={{ color: "var(--pz-ink)" }}>
         {poll.frage}
       </h3>
+      <FragestellerBadge badge={badge} className="mt-1.5" />
       {poll.typ === "dot_voting" ? (
         // Options-Formate: Teilnahme-Zeile aus dem Format-Aggregat (M1-Nachzug
         // Block F); das Abstimm-Widget selbst lebt auf der Detailseite.
@@ -151,10 +159,12 @@ function GruppierteListe({
   slug,
   items,
   cta,
+  institution,
 }: {
   slug: string;
   items: PollMitErgebnis[];
   cta: string;
+  institution: string;
 }) {
   const gruppen = gruppiereNachEbene(items);
   return (
@@ -170,7 +180,7 @@ function GruppierteListe({
           <ul className="space-y-4">
             {g.polls.map((p) => (
               <li key={p.id}>
-                <PollKarte slug={slug} poll={p} cta={cta} />
+                <PollKarte slug={slug} poll={p} cta={cta} institution={institution} />
               </li>
             ))}
           </ul>
@@ -189,6 +199,9 @@ export default async function UmfragenListePage({ params }: PageProps) {
   if (!tenant || tenant.slug !== slugFromPath) notFound();
 
   const db = createDb(databaseUrl());
+  // Block J1: Institution (Kommune) für den Fragesteller-Badge — primäres
+  // Vertrauenssignal, steht auf jeder Karte, unabhängig vom Ersteller.
+  const institution = regionDisplayName(tenant.name);
   const cookieStore = await cookies();
   const region = parseRegionCookie(cookieStore.get(REGION_COOKIE_NAME)?.value);
 
@@ -299,7 +312,7 @@ export default async function UmfragenListePage({ params }: PageProps) {
         {aktiveMitErgebnis.length === 0 ? (
           <LeerHinweis text="Gerade läuft keine Abstimmung für Ihre Region." />
         ) : (
-          <GruppierteListe slug={slugFromPath} items={aktiveMitErgebnis} cta="Anmelden zum Mitstimmen" />
+          <GruppierteListe slug={slugFromPath} items={aktiveMitErgebnis} cta="Anmelden zum Mitstimmen" institution={institution} />
         )}
       </main>
     );
@@ -382,7 +395,7 @@ export default async function UmfragenListePage({ params }: PageProps) {
         {offen.length === 0 ? (
           <LeerHinweis text="Aktuell gibt es keine offene Abstimmung für Sie." />
         ) : (
-          <GruppierteListe slug={slugFromPath} items={offen} cta="Jetzt mitstimmen" />
+          <GruppierteListe slug={slugFromPath} items={offen} cta="Jetzt mitstimmen" institution={institution} />
         )}
       </section>
 
@@ -396,7 +409,7 @@ export default async function UmfragenListePage({ params }: PageProps) {
           <ul className="space-y-4">
             {teilnahmen.map((p) => (
               <li key={p.id}>
-                <PollKarte slug={slugFromPath} poll={p} cta="Ergebnis ansehen" />
+                <PollKarte slug={slugFromPath} poll={p} cta="Ergebnis ansehen" institution={institution} />
               </li>
             ))}
           </ul>

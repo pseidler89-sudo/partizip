@@ -13,6 +13,7 @@ import Link from "next/link";
 import { KontoLoeschenSection } from "./KontoLoeschenSection";
 import { BenachrichtigungSection } from "./BenachrichtigungSection";
 import { EinrichtungsCheckliste } from "./EinrichtungsCheckliste";
+import { ProfilSection } from "./ProfilSection";
 import { FEATURE_ANLIEGEN_EINREICHEN } from "@/lib/features";
 import type { EinrichtungsStatus } from "@/lib/konto/einrichtung";
 
@@ -28,6 +29,11 @@ type MeData = {
     stufe: number;
     // Admin-Sichtbarkeit (kommune_admin/super_admin) für die Verwaltung-Karte.
     isAdmin?: boolean;
+    // Block J1: Rollenträger-Identität. Nur Rollenträger sehen die Klarname-
+    // Sektion + den Nudge; Bürger bleiben pseudonym.
+    istRollentraeger?: boolean;
+    displayName?: string | null;
+    funktion?: string | null;
   };
   // Einrichtungs-Checkliste (Fläche A) — Booleans aus getEinrichtungsStatus.
   // null auf dem Demo-Mandanten (serverseitig übersprungen).
@@ -198,6 +204,26 @@ export default function KontoPage() {
         <p className="text-sm mt-1" style={{ color: "var(--pz-muted)" }}>{data.tenant.name}</p>
       </div>
 
+      {/* Block J1 Nudge: Rollenträger ohne hinterlegten Klarnamen bekommen eine
+          dezente Erinnerung (kein Blocker — weiche Durchsetzung, sonst sperrt sich
+          der einzige Admin selbst aus) mit Deep-Link zur Namens-Sektion. */}
+      {data.user.istRollentraeger && !data.user.displayName && (
+        <div
+          className="mb-6 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+          role="note"
+        >
+          <p className="font-medium">Bitte hinterlegen Sie Ihren Klarnamen für Ihre Rolle.</p>
+          <p className="mt-1 text-amber-800">
+            Sie tragen eine Rolle auf dieser Plattform. Ohne Klarnamen erscheint bei
+            Ihren Abstimmungen und Prüfungen nur der Name Ihrer Institution.{" "}
+            <a href="#oeffentlicher-name" className="font-medium underline underline-offset-2">
+              Jetzt eintragen
+            </a>
+            .
+          </p>
+        </div>
+      )}
+
       {/* Einrichtungs-Checkliste (Fläche A): nur solange Schritte offen sind —
           danach verschwindet sie vollständig. Nicht auf dem Demo-Mandanten
           (Demo-Konten erfüllen die Schritte nie — die Karte wäre eine Sackgasse). */}
@@ -227,6 +253,15 @@ export default function KontoPage() {
           <span className="font-medium text-pz-ink">{stufeLabel} ({data.user.stufe})</span>
         </div>
       </div>
+
+      {/* Block J1: Öffentlicher Name — nur für Rollenträger (Bürger bleiben
+          pseudonym; für sie wird die Sektion gar nicht gerendert). */}
+      {data.user.istRollentraeger && (
+        <ProfilSection
+          initialDisplayName={data.user.displayName ?? null}
+          initialFunktion={data.user.funktion ?? null}
+        />
+      )}
 
       {/* Verwaltung — nur für Admins (kommune_admin/super_admin). Discoverability;
           die Admin-Seiten erzwingen die Berechtigung weiterhin serverseitig. */}

@@ -18,6 +18,9 @@
 /** Felder, die beim Anonymisieren auf den User-Datensatz geschrieben werden. */
 export type AnonymizePayload = {
   email: string;
+  // Block J1: öffentliche Rollenträger-Identität ist PII → beim Löschen nullen.
+  displayName: null;
+  funktion: null;
   birthYear: null;
   birthMonth: null;
   ortsteilId: null;
@@ -58,6 +61,8 @@ export function buildAnonymizePayload(
 ): AnonymizePayload {
   return {
     email: buildTombstoneEmail(userId),
+    displayName: null,
+    funktion: null,
     birthYear: null,
     birthMonth: null,
     ortsteilId: null,

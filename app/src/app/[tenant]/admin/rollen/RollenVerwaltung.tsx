@@ -62,6 +62,8 @@ interface TenantUser {
   userId: string;
   email: string;
   accountStatus: string;
+  /** Block J1: Klarname des Rollenträgers (null = nicht hinterlegt). */
+  displayName: string | null;
   /** Anzahl aktiver (nicht revozierter, nicht abgelaufener) Sitzungen — informativ. */
   aktiveSitzungen: number;
   /** K4: ISO-String des letzten Logins (max sessions.created_at) oder null. */
@@ -312,6 +314,16 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
                     </p>
                     {!istGesperrt && u.accountStatus !== "active" && (
                       <span className="text-xs text-pz-muted">Status: {u.accountStatus}</span>
+                    )}
+                    {/* Block J1: Klarname des Rollenträgers (für das Team-Bild).
+                        Nur für Konten MIT Rolle anzeigen — reine Bürger bleiben
+                        pseudonym. Fallback, solange kein Name hinterlegt ist. */}
+                    {u.roles.length > 0 && (
+                      <span className="block text-xs text-pz-muted">
+                        {u.displayName
+                          ? `Klarname: ${u.displayName}`
+                          : "— (kein Name hinterlegt)"}
+                      </span>
                     )}
                     <span className="block text-xs text-pz-muted">
                       {u.aktiveSitzungen === 1

@@ -79,6 +79,8 @@ export default async function AdminRollenPage({ params }: PageProps) {
       userId: users.id,
       email: users.email,
       accountStatus: users.accountStatus,
+      // Block J1: Klarname des Rollenträgers (nullable) für die Team-Sicht.
+      displayName: users.displayName,
       roleId: roles.id,
       roleType: roles.roleType,
       // ADR-024: Gebietsart + Name des Rollen-Knotens (statt scope_level/scope_code).
@@ -133,6 +135,8 @@ export default async function AdminRollenPage({ params }: PageProps) {
       userId: string;
       email: string;
       accountStatus: string;
+      /** Block J1: Klarname des Rollenträgers (null = nicht hinterlegt). */
+      displayName: string | null;
       aktiveSitzungen: number;
       /** ISO-String des letzten Logins oder null (noch nie angemeldet). */
       letzterLogin: string | null;
@@ -146,6 +150,7 @@ export default async function AdminRollenPage({ params }: PageProps) {
         userId: row.userId,
         email: row.email,
         accountStatus: row.accountStatus,
+        displayName: row.displayName ?? null,
         aktiveSitzungen: sessionCountMap.get(row.userId) ?? 0,
         letzterLogin: letzterLoginMap.get(row.userId)?.toISOString() ?? null,
         roles: [],

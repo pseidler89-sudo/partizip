@@ -31,6 +31,9 @@ describe("buildAnonymizePayload", () => {
     expect(p.birthYear).toBeNull();
     expect(p.birthMonth).toBeNull();
     expect(p.ortsteilId).toBeNull();
+    // Block J1: öffentliche Rollenträger-Identität (PII) muss geleert werden.
+    expect(p.displayName).toBeNull();
+    expect(p.funktion).toBeNull();
     // ADR-024: Gebiets-Zuordnungen (Standort-PII) müssen ebenfalls geleert werden.
     expect(p.homeRegionId).toBeNull();
     expect(p.residencyRegionId).toBeNull();
