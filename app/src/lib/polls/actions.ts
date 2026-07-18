@@ -66,11 +66,18 @@ import {
   DOT_OPTION_LABEL_MAX,
 } from "@/lib/polls/dot";
 import { validateWiderstandsWerte } from "@/lib/polls/widerstand";
-import { notifyNewPoll } from "@/lib/polls/notify";
+import { notifyNewPoll, type NotifyPoll } from "@/lib/polls/notify";
 import {
   createDefaultTransport,
   type NotifyTransport,
 } from "@/lib/anliegen/notify";
+import {
+  kiPruefungAktiv,
+  pruefungAbschliessenCore,
+  type Verdict,
+} from "@/lib/polls/pruefung-core";
+import { isSelfApprovalAllowed } from "@/lib/digest/freigabe-core";
+import type { TenantRow } from "@/lib/tenant";
 
 // ---------------------------------------------------------------------------
 // abstimmen — die Kern-Action (NUR eingeloggt, Stufe ≥ 1; ADR-014)
@@ -801,13 +808,24 @@ export async function pollAktivieren(
     return { ok: false, error: "Für dieses Gebiet sind Sie nicht berechtigt." };
   }
 
+  // Block L (ADR-028): Ist der KI-Neutralitäts-Check für den Tenant AN, geht die
+  // Umfrage NICHT direkt live, sondern in den Zustand `in_pruefung` (Betreiber
+  // bewertet sie assisted anhand des öffentlichen Prompts, dann Freigabe/Anhalten
+  // via pollPruefungAbschliessen). Der CAS bleibt `WHERE status='entwurf'`; nur das
+  // Ziel + die Audit-Aktion unterscheiden sich, und opens_at wird ERST bei der
+  // echten Aktivierung gesetzt (in der Prüf-Freigabe), nicht schon hier.
+  const gehtInPruefung = kiPruefungAktiv(ctx.tenant);
+
   const result = await ctx.db.transaction(async (tx: Db) => {
-    // TOCTOU-Guard: nur aus 'entwurf' nach 'aktiv', tenant-scoped.
-    // Poll-Daten (frage/scope) werden für die spätere Benachrichtigung MITGEFÜHRT
-    // (kein Zweit-Read außerhalb der Transaktion nötig).
+    // TOCTOU-Guard: nur aus 'entwurf', tenant-scoped. Poll-Daten (frage/region)
+    // werden für die spätere Benachrichtigung MITGEFÜHRT (kein Zweit-Read nötig).
     const updated = await tx
       .update(polls)
-      .set({ status: "aktiv", opensAt: sql`COALESCE(${polls.opensAt}, now())` })
+      .set(
+        gehtInPruefung
+          ? { status: "in_pruefung" }
+          : { status: "aktiv", opensAt: sql`COALESCE(${polls.opensAt}, now())` }
+      )
       .where(
         and(
           eq(polls.id, idParsed.data),
@@ -829,7 +847,7 @@ export async function pollAktivieren(
       tenantId: ctx.tenant.id,
       actorType: "admin",
       actorRef: ctx.userId,
-      action: "poll.activated",
+      action: gehtInPruefung ? "poll.submitted_for_review" : "poll.activated",
       targetType: "poll",
       targetId: idParsed.data,
       metadata: { pollId: idParsed.data },
@@ -839,6 +857,11 @@ export async function pollAktivieren(
   });
 
   if (!result.ok) return { ok: false, error: result.error };
+
+  // Flag AN: die Umfrage wartet nun auf die Neutralitätsprüfung — sie ist noch NICHT
+  // öffentlich, daher wird KEINE Benachrichtigung gefeuert (die zieht auf die echte
+  // Aktivierung in pollPruefungAbschliessen um).
+  if (gehtInPruefung) return { ok: true };
 
   // SIDE-EFFECT-FENCE (Demo-Spielwiese, fail-closed): auf dem Demo-Mandanten
   // wird notifyNewPoll KOMPLETT übersprungen — kein Mail-Versand nach außen,
@@ -853,44 +876,54 @@ export async function pollAktivieren(
   // BEST-EFFORT-Benachrichtigung NACH erfolgreicher Aktivierung, AUSSERHALB der
   // Transaktion. Ein Mail-/Empfänger-Fehler darf pollAktivieren NIEMALS auf
   // {ok:false} kippen — die Aktivierung bleibt erfolgreich. Audit PII-frei.
+  await notifyPollBestEffort(ctx.db, ctx.tenant, result.poll, transport);
+
+  return { ok: true };
+}
+
+/**
+ * BEST-EFFORT-Benachrichtigung einer frisch aktivierten Umfrage, AUSSERHALB jeder
+ * Transaktion. Ein Mail-/Empfänger-Fehler darf die Aktivierung/Freigabe NIEMALS auf
+ * {ok:false} kippen (deshalb komplett gekapselt + PII-frei auditiert). Wird von
+ * pollAktivieren (Flag AUS) UND pollPruefungAbschliessen (Freigabe neutral) genutzt,
+ * damit der Aktivierungs-Nebeneffekt an genau EINER Stelle lebt.
+ */
+async function notifyPollBestEffort(
+  db: Db,
+  tenant: TenantRow,
+  poll: NotifyPoll,
+  transport: NotifyTransport
+): Promise<void> {
   try {
     const headerStore = await headers();
-    const host = headerStore.get("host") ?? `${ctx.tenant.slug}.localhost`;
-    const { sent, errors } = await notifyNewPoll({
-      db: ctx.db,
-      tenant: ctx.tenant,
-      poll: result.poll,
-      host,
-      transport,
-    });
-    await ctx.db.insert(auditEvents).values({
-      tenantId: ctx.tenant.id,
+    const host = headerStore.get("host") ?? `${tenant.slug}.localhost`;
+    const { sent, errors } = await notifyNewPoll({ db, tenant, poll, host, transport });
+    await db.insert(auditEvents).values({
+      tenantId: tenant.id,
       actorType: "system",
       actorRef: null,
       action: "poll.notifications",
       targetType: "poll",
-      targetId: idParsed.data,
-      metadata: { pollId: idParsed.data, sent, errors },
+      targetId: poll.id,
+      metadata: { pollId: poll.id, sent, errors },
     });
   } catch {
-    // Benachrichtigung gescheitert — Aktivierung bleibt trotzdem erfolgreich.
+    // Benachrichtigung gescheitert — der Übergang bleibt trotzdem erfolgreich.
     // PII-frei: nur pollId, keine Adressen.
     try {
-      await ctx.db.insert(auditEvents).values({
-        tenantId: ctx.tenant.id,
+      await db.insert(auditEvents).values({
+        tenantId: tenant.id,
         actorType: "system",
         actorRef: null,
         action: "poll.notify_error",
         targetType: "poll",
-        targetId: idParsed.data,
-        metadata: { pollId: idParsed.data },
+        targetId: poll.id,
+        metadata: { pollId: poll.id },
       });
     } catch {
-      // Selbst das Audit darf die erfolgreiche Aktivierung nicht kippen.
+      // Selbst das Audit darf den erfolgreichen Übergang nicht kippen.
     }
   }
-
-  return { ok: true };
 }
 
 /**
@@ -1048,4 +1081,93 @@ export async function pollEntwurfLoeschen(
   });
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Block L (ADR-028): KI-Neutralitäts-Check — Prüfung abschließen.
+// ---------------------------------------------------------------------------
+
+const pollPruefungSchema = z.object({
+  pollId: z.string().uuid("Ungültige Umfrage-ID."),
+  verdict: z.enum(["neutral", "angehalten"]),
+  begruendung: z
+    .string()
+    .trim()
+    .min(1, "Bitte geben Sie eine kurze Begründung an.")
+    .max(400, "Die Begründung ist zu lang (max. 400 Zeichen)."),
+  // Pflicht nur bei 'angehalten' (unten geprüft); ≤160 Zeichen.
+  verletzteRegel: z.string().trim().max(160, "Die verletzte Regel ist zu lang.").optional().nullable(),
+  istOverride: z.boolean().optional(),
+});
+
+/**
+ * pollPruefungAbschliessen — der Betreiber schließt die assisted Neutralitätsprüfung
+ * einer `in_pruefung`-Umfrage ab: `neutral` gibt frei (→ aktiv + Benachrichtigung),
+ * `angehalten` schickt sie mit Begründung zurück an den Ersteller (→ entwurf).
+ *
+ * Alle Gates serverseitig: Admin (requireAdminCtx) + Gebiets-Autorität (Block H) +
+ * zod-Validierung + Demo-Fence + SoD bei Freigabe (im Kern, atomar). Die
+ * best-effort-Benachrichtigung läuft — wie bei pollAktivieren — AUSSERHALB der
+ * Transaktion und kippt das Ergebnis nie.
+ */
+export async function pollPruefungAbschliessen(
+  raw: {
+    pollId: string;
+    verdict: Verdict;
+    begruendung: string;
+    verletzteRegel?: string | null;
+    istOverride?: boolean;
+  },
+  transport: NotifyTransport = createDefaultTransport()
+): Promise<{ ok: boolean; error?: string }> {
+  const auth = await requireAdminCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
+
+  const parsed = pollPruefungSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.errors[0]?.message ?? "Ungültige Eingabe." };
+  }
+  const { pollId, verdict, begruendung, istOverride } = parsed.data;
+  const verletzteRegel = parsed.data.verletzteRegel ?? null;
+
+  // Beim Anhalten ist die konkret verletzte Regel Pflicht (nachvollziehbares Log).
+  if (verdict === "angehalten" && verletzteRegel === null) {
+    return { ok: false, error: "Bitte benennen Sie die verletzte Regel." };
+  }
+
+  // Demo-Fence (fail-closed): auf dem Demo-Mandanten ist der Neutralitäts-Check nicht
+  // aktiv (Flag AUS) — eine Prüf-Aktion darf dort keine Außenwirkung entfalten.
+  if (isDemoTenant(ctx.tenant.slug)) {
+    return { ok: false, error: "In der Demo ist die Neutralitätsprüfung nicht aktiv." };
+  }
+
+  // GEBIETS-AUTORITÄT (Block H, symmetrisch): ein gebietsgebundener Admin darf eine
+  // Poll außerhalb seines Gebiets nicht freigeben/anhalten (super_admin bypass;
+  // fremder/fehlender Poll → Standard-Guard im Kern).
+  const scopes = await getUserRolesMitScope(ctx.db, ctx.tenant.id, ctx.userId);
+  if (!(await pollVerwaltungErlaubt(ctx.db, ctx.tenant.id, pollId, scopes, istSuperAdminScope(scopes)))) {
+    return { ok: false, error: "Für dieses Gebiet sind Sie nicht berechtigt." };
+  }
+
+  const result = await pruefungAbschliessenCore(ctx.db, ctx.tenant.id, {
+    pollId,
+    verdict,
+    begruendung,
+    verletzteRegel,
+    istOverride: istOverride ?? false,
+    callerUserId: ctx.userId,
+    // SoD-Überbrückung nur über die exakte Env (Pilot-Ein-Personen-Betrieb).
+    allowSelfApproval: isSelfApprovalAllowed(process.env),
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+
+  // Freigabe (neutral) → die Umfrage ist jetzt echt aktiv: Benachrichtigung
+  // best-effort außerhalb der Tx (der Aktivierungs-Nebeneffekt zieht hierher um).
+  if (result.notify) {
+    await notifyPollBestEffort(ctx.db, ctx.tenant, result.notify, transport);
+  }
+
+  return { ok: true };
 }
