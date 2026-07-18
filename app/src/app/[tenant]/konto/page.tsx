@@ -7,7 +7,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { KontoLoeschenSection } from "./KontoLoeschenSection";
@@ -15,8 +15,11 @@ import { BenachrichtigungSection } from "./BenachrichtigungSection";
 import { EinrichtungsCheckliste } from "./EinrichtungsCheckliste";
 import { ProfilSection } from "./ProfilSection";
 import { EmailAendernSection } from "./EmailAendernSection";
+import { WohnortSection } from "./WohnortSection";
+import { DatentransparenzPanel } from "./DatentransparenzPanel";
 import { FEATURE_ANLIEGEN_EINREICHEN } from "@/lib/features";
 import type { EinrichtungsStatus } from "@/lib/konto/einrichtung";
+import type { OrtsteilOption } from "@/lib/region/queries";
 
 type MeData = {
   user: {
@@ -27,6 +30,17 @@ type MeData = {
     residencyVerifiedUntil: string | null;
     // Benachrichtigungs-Motor: Opt-in-Status für E-Mails bei neuen Abstimmungen.
     notifyNewPolls: boolean;
+    // Block J2c: granulare Opt-outs.
+    notifyAnliegenUpdates: boolean;
+    notifyReverify: boolean;
+    // Block J2c: Wohnort. Roh-Ids + serverseitig aufgelöste, lesbare Pfade.
+    homeRegionId: string | null;
+    ortsteilId: string | null;
+    residencyRegionId: string | null;
+    homeRegionPfad: string | null;
+    residencyRegionPfad: string | null;
+    ortsteilOptionen: OrtsteilOption[];
+    homeOrtsteilCode: string | null;
     stufe: number;
     // Admin-Sichtbarkeit (kommune_admin/super_admin) für die Verwaltung-Karte.
     isAdmin?: boolean;
@@ -79,27 +93,35 @@ export default function KontoPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // /api/me laden. Wird beim Mount aufgerufen und — nach einer Wohnort-Änderung —
+  // erneut (die Client-Seite holt ihre Daten selbst; router.refresh() reicht nicht).
+  const ladeMe = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch("/api/me");
+      if (res.status === 401) {
+        router.replace("/");
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json() as { error?: { message?: string } };
+        setError(body?.error?.message ?? "Fehler beim Laden der Kontodaten.");
+        return;
+      }
+      const body = await res.json() as MeData;
+      setData(body);
+    } catch {
+      setError("Verbindungsfehler.");
+    } finally {
+      // Erstladung beenden; bei Re-Fetch (onChanged) bereits false → No-op.
+      setLoading(false);
+    }
+  }, [router]);
+
   useEffect(() => {
     // loading wird über /api/me beendet (läuft immer). Die "Meine Anliegen"-
     // Liste wird nur geladen, wenn das Anliegen-Modul aktiv ist (ADR-014).
-    fetch("/api/me")
-      .then(async (res) => {
-        if (res.status === 401) {
-          router.replace("/");
-          return;
-        }
-        if (!res.ok) {
-          const body = await res.json() as { error?: { message?: string } };
-          setError(body?.error?.message ?? "Fehler beim Laden der Kontodaten.");
-          return;
-        }
-        const body = await res.json() as MeData;
-        setData(body);
-      })
-      .catch(() => {
-        setError("Verbindungsfehler.");
-      })
-      .finally(() => setLoading(false));
+    // Async-Closure: setState in ladeMe passiert erst nach `await` (deferred).
+    void (async () => { await ladeMe(); })();
 
     if (FEATURE_ANLIEGEN_EINREICHEN) {
       fetch("/api/anliegen/followed")
@@ -110,7 +132,7 @@ export default function KontoPage() {
         })
         .catch(() => { /* ignorieren */ });
     }
-  }, [router]);
+  }, [ladeMe]);
 
   // Anker-Ziel (#benachrichtigungen, Checklisten-CTA) existiert erst NACH dem
   // /api/me-Fetch — der native Anker-Scroll des Browsers läuft daher ins Leere.
@@ -262,6 +284,18 @@ export default function KontoPage() {
         </div>
       </div>
 
+      {/* Block J2c: Wohnort anzeigen + ändern (Anzeige-Wohnort = home_region_id;
+          verbindlicher Wohnsitz = residency_region_id, schreibgeschützt). */}
+      <WohnortSection
+        tenantName={data.tenant.name}
+        homeRegionPfad={data.user.homeRegionPfad}
+        residencyRegionPfad={data.user.residencyRegionPfad}
+        residencyVerifiedUntil={data.user.residencyVerifiedUntil}
+        ortsteilOptionen={data.user.ortsteilOptionen}
+        homeOrtsteilCode={data.user.homeOrtsteilCode}
+        onChanged={ladeMe}
+      />
+
       {/* Block J1: Öffentlicher Name — für Rollenträger (setzen/ändern/leeren)
           UND für Bestandsfälle (Gate-B 1b): ein herabgestufter Ex-Rollenträger
           ohne Rolle, aber mit noch hinterlegtem Namen, muss ihn selbst entfernen
@@ -358,8 +392,12 @@ export default function KontoPage() {
       </section>
       )}
 
-      {/* Benachrichtigungs-Motor: E-Mail bei neuen Abstimmungen (Opt-out). */}
-      <BenachrichtigungSection initial={data.user.notifyNewPolls} />
+      {/* Benachrichtigungs-Motor: drei Opt-outs (Block J2c). */}
+      <BenachrichtigungSection
+        initialNewPolls={data.user.notifyNewPolls}
+        initialAnliegenUpdates={data.user.notifyAnliegenUpdates}
+        initialReverify={data.user.notifyReverify}
+      />
 
       {/* Datenschutz: Auskunft (Export) */}
       <section className="mb-6">
@@ -375,6 +413,9 @@ export default function KontoPage() {
           Lädt alle zu Ihrem Konto gespeicherten Daten als JSON-Datei herunter
           (Auskunftsrecht, Art. 15 DSGVO).
         </p>
+
+        {/* Block J2c: Transparenz-Panel „Was wir sehen — und was nicht". */}
+        <DatentransparenzPanel anliegenAktiv={FEATURE_ANLIEGEN_EINREICHEN} />
       </section>
 
       <button
