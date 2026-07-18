@@ -39,6 +39,8 @@ const user: UserRow = {
   minAgeConfirmedAt: T0,
   deletedAt: null,
   notifyNewPolls: true,
+  notifyAnliegenUpdates: true,
+  notifyReverify: true,
   updatedAt: T0,
 };
 

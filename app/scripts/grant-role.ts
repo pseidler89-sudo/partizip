@@ -34,6 +34,7 @@ import {
   auditEvents,
 } from "../src/db/schema.js";
 import { resolveRegionId } from "./seed-utils.js";
+import { normalizeEmail } from "../src/lib/auth/email.js";
 
 // ---------------------------------------------------------------------------
 // CLI-Argumente
@@ -102,7 +103,7 @@ async function main() {
   const userRows = await db
     .select({ id: users.id })
     .from(users)
-    .where(and(eq(users.tenantId, tenant.id), eq(users.email, email!)))
+    .where(and(eq(users.tenantId, tenant.id), eq(users.email, normalizeEmail(email!))))
     .limit(1);
 
   if (userRows.length === 0) {

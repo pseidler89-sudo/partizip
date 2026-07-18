@@ -46,8 +46,11 @@ export type ExportKonto = {
   homeRegionId: string | null;
   residencyRegionId: string | null;
   minAgeConfirmedAt: string | null;
-  // Benachrichtigungs-Motor: Opt-in für E-Mails bei neuen Abstimmungen.
+  // Benachrichtigungs-Motor: Opt-in-Flags für E-Mail-Benachrichtigungen.
   notifyNewPolls: boolean;
+  // Block J2a (Vorgriff J2c): granulare Opt-outs — gehören zur Art.-15-Auskunft.
+  notifyAnliegenUpdates: boolean;
+  notifyReverify: boolean;
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -160,6 +163,8 @@ export function buildExportDocument(input: {
       residencyRegionId: input.user.residencyRegionId ?? null,
       minAgeConfirmedAt: iso(input.user.minAgeConfirmedAt),
       notifyNewPolls: input.user.notifyNewPolls,
+      notifyAnliegenUpdates: input.user.notifyAnliegenUpdates,
+      notifyReverify: input.user.notifyReverify,
       createdAt: iso(input.user.createdAt),
       updatedAt: iso(input.user.updatedAt),
     },

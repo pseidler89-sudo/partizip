@@ -26,7 +26,7 @@
 
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql as drSql } from "drizzle-orm";
 import {
   tenants,
   users,
@@ -40,6 +40,7 @@ import {
   auditEvents,
 } from "../src/db/schema.js";
 import { generateReadableCode } from "../src/lib/readable-code.js";
+import { normalizeEmail } from "../src/lib/auth/email.js";
 import { SEED_NAMESPACE, uuidV5, resolveRegionId } from "./seed-utils.js";
 
 const databaseUrl =
@@ -104,10 +105,13 @@ async function main() {
     userIdByKey.set(p.key, id);
 
     const stufe2 = !!p.stufe2;
+    // J2a: users.email wird kanonisch (trim+lowercase) gespeichert — dieselbe
+    // Wahrheit wie an den App-Boundaries (lib/auth/email.normalizeEmail).
+    const email = normalizeEmail(p.email);
     const base = {
       id,
       tenantId,
-      email: p.email,
+      email,
       birthYear: 1985,
       birthMonth: 6,
       accountStatus: "active" as const,
@@ -144,10 +148,27 @@ async function main() {
           minAgeConfirmedAt: now,
         };
 
-    await db
-      .insert(users)
-      .values({ ...base, ...verifyFields })
-      .onConflictDoUpdate({ target: [users.tenantId, users.email], set: setOnConflict });
+    // J2a (Gate-B): Idempotenter Upsert auf den funktionalen Unique-Index
+    // (tenant_id, lower(btrim(email))). drizzle 0.44 kann in onConflict-`target`
+    // KEINE Ausdrucks-Ziele abbilden (es escaped jedes Element als Spaltennamen),
+    // und ein funktionaler Index verlangt exakt ON CONFLICT (tenant_id,
+    // lower(btrim(email))) — `(tenant_id, email)` löste 42P10 aus. Darum
+    // expliziter Select→Update/Insert (Seed, nicht perf-kritisch). Match über
+    // lower(email) auf die kanonisch (bereits getrimmt) gespeicherte Adresse,
+    // damit Alt-Bestand in gemischter Schreibweise weiterhin adoptiert wird.
+    const existing = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.tenantId, tenantId), drSql`lower(${users.email}) = ${email}`))
+      .limit(1);
+    if (existing[0]) {
+      await db
+        .update(users)
+        .set(setOnConflict)
+        .where(and(eq(users.tenantId, tenantId), eq(users.id, existing[0].id)));
+    } else {
+      await db.insert(users).values({ ...base, ...verifyFields });
+    }
 
     if (p.role) {
       await db

@@ -25,6 +25,7 @@ import {
   roleAppointments,
 } from "@/db/schema";
 import { ADMIN_ROLES } from "@/lib/auth/roles";
+import { normalizeEmail } from "@/lib/auth/email";
 import { buildAnonymizePayload, buildTombstoneEmail } from "@/lib/konto/anonymize";
 import { KONTO_LOESCHEN_BESTAETIGUNG } from "@/lib/konto/constants";
 
@@ -121,7 +122,10 @@ export async function deleteKontoCore(
     if (!userRow) {
       return { ok: false as const, error: "Benutzer nicht gefunden." };
     }
-    const alteEmail = userRow.email;
+    // J2a: users.email ist kanonisch gespeichert; normalizeEmail hier defensiv
+    // (idempotent) — die eine normalisierte Form deckt auth_tokens- UND
+    // invitations-Löschung ab (beide kanonisch gespeichert).
+    const alteEmail = normalizeEmail(userRow.email);
 
     const payload = buildAnonymizePayload(userId, now);
 
@@ -237,11 +241,9 @@ export async function deleteKontoCore(
     //     Anonymisierung (Audit M5) — sie ist über accepted_by=userId bzw.
     //     email=alteEmail trivial rückführbar. Tombstone setzen + accepted_by
     //     nullen; die PII-freie Historie (Rolle/Region/Status) bleibt erhalten.
-    //     invitations.email ist stets normalisiert (trim+lowercase) gespeichert,
-    //     users.email jedoch nicht → für den E-Mail-Zweig normalisiert
-    //     vergleichen, sonst entgeht eine Mixed-Case-pending-Einladung dem
-    //     Tombstone (Gate-B MAJOR).
-    const alteEmailNormalisiert = alteEmail.trim().toLowerCase();
+    //     invitations.email UND users.email sind seit J2a kanonisch (trim+
+    //     lowercase) gespeichert → alteEmail (oben normalisiert) trifft auch
+    //     eine ehemals Mixed-Case-pending-Einladung (Gate-B MAJOR bleibt gedeckt).
     await tx
       .update(invitations)
       .set({ email: buildTombstoneEmail(userId), acceptedBy: null })
@@ -249,7 +251,7 @@ export async function deleteKontoCore(
         and(
           eq(invitations.tenantId, tenantId),
           or(
-            eq(invitations.email, alteEmailNormalisiert),
+            eq(invitations.email, alteEmail),
             eq(invitations.acceptedBy, userId),
           ),
         ),
