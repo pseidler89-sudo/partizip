@@ -84,6 +84,9 @@ export function scopedDb(db: Db, tenantId: string) {
         tokenHash: string;
         expiresAt: Date;
         purpose?: string;
+        // Block J2b: nur beim purpose 'email_change' gesetzt (der anfordernde
+        // User). Login-/Hint-Tokens lassen es NULL.
+        userId?: string;
       }) => {
         const [row] = await db
           .insert(authTokens)
@@ -92,10 +95,50 @@ export function scopedDb(db: Db, tenantId: string) {
             email: normalizeEmail(opts.email),
             tokenHash: opts.tokenHash,
             purpose: opts.purpose ?? "login",
+            userId: opts.userId ?? null,
             expiresAt: opts.expiresAt,
           })
           .returning();
         return row;
+      },
+
+      /**
+       * Block J2b: alle offenen (unverbrauchten, nicht abgelaufenen ODER auch
+       * abgelaufenen — egal) email_change-Tokens EINES Users als consumed
+       * markieren. Genutzt (a) vor der Neu-Anlage einer Änderungs-Anforderung
+       * (nur EIN offenes Ziel je User) und (b) nach erfolgreicher Änderung (alle
+       * weiteren Ziel-Tokens des Users entwerten). Tenant- UND user-scoped.
+       */
+      invalidateEmailChangeTokensForUser: async (userId: string) => {
+        await db
+          .update(authTokens)
+          .set({ consumedAt: new Date() })
+          .where(
+            and(
+              eq(authTokens.tenantId, tenantId),
+              eq(authTokens.userId, userId),
+              eq(authTokens.purpose, "email_change"),
+              isNull(authTokens.consumedAt),
+            ),
+          );
+      },
+
+      /**
+       * Block J2b: alle offenen Tokens für (tenant, email) entwerten — nach einer
+       * erfolgreichen E-Mail-Änderung auf die ALTE Adresse angewandt, damit noch
+       * offene Login-Links an die alte Adresse nicht mehr wirken (Kontoübergabe).
+       */
+      invalidateAllOpenTokensForEmail: async (email: string) => {
+        await db
+          .update(authTokens)
+          .set({ consumedAt: new Date() })
+          .where(
+            and(
+              eq(authTokens.tenantId, tenantId),
+              eq(authTokens.email, normalizeEmail(email)),
+              isNull(authTokens.consumedAt),
+            ),
+          );
       },
 
       /**

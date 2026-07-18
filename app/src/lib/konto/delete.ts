@@ -196,9 +196,21 @@ export async function deleteKontoCore(
       );
 
     // 5. offene auth_tokens des Users löschen (per alter E-Mail, tenant-scoped).
+    //    Block J2b: auth_tokens trägt seit 0034 einen user_id-FK (ON DELETE
+    //    CASCADE) — er greift aber nur bei einem echten users-DELETE. Die
+    //    Produkt-Löschung ANONYMISIERT die users-Zeile (kein DELETE), daher
+    //    feuert die Kaskade hier NICHT; dieser E-Mail-basierte Delete bleibt der
+    //    maßgebliche Cleanup. Er deckt Login- UND email_change-Tokens der alten
+    //    Adresse ab; ein noch offenes email_change-Token mit ABWEICHENDER Ziel-
+    //    E-Mail wird zusätzlich über den user_id-Zweig unten aufgeräumt.
     await tx
       .delete(authTokens)
-      .where(and(eq(authTokens.tenantId, tenantId), eq(authTokens.email, alteEmail)));
+      .where(
+        and(
+          eq(authTokens.tenantId, tenantId),
+          or(eq(authTokens.email, alteEmail), eq(authTokens.userId, userId)),
+        ),
+      );
 
     // 5b. qr_redemptions des Users löschen (direkter user_id-FK → sonst nach der
     //     Anonymisierung re-identifizierbar; Art. 17). tenant+user-scoped. Der

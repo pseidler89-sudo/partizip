@@ -83,6 +83,59 @@ export async function sendInvitationEmail(
   // Kein Logging des Links (PII-Minimierung, der Link ist ein Credential).
 }
 
+/**
+ * Block J2b: Bestätigungs-Mail an die NEUE Adresse. Der Roh-Token steht
+ * ausschließlich in der übergebenen URL (Credential) — hier NIE geloggt.
+ * Ton „Sie". Nur wer diese Mail empfängt, kann die Änderung abschließen
+ * (Kontrolle über die neue Adresse).
+ */
+export async function sendEmailChangeConfirmationEmail(
+  neueEmail: string,
+  bestaetigungsUrl: string,
+): Promise<void> {
+  const transport = createTransport();
+
+  await transport.sendMail({
+    from: EMAIL_FROM,
+    to: neueEmail,
+    subject: "Bestätigen Sie Ihre neue E-Mail-Adresse für Partizip",
+    text: `Sie möchten die E-Mail-Adresse Ihres Partizip-Kontos auf diese Adresse ändern.\n\nUm die Änderung abzuschließen, öffnen Sie bitte diesen Link und bestätigen Sie:\n\n${bestaetigungsUrl}\n\nDer Link ist 15 Minuten gültig und kann nur einmal verwendet werden. Sie müssen dazu in Ihrem Konto angemeldet sein.\n\nFalls Sie diese Änderung nicht angefordert haben, können Sie diese E-Mail ignorieren — es wird nichts geändert.`,
+    html: `
+      <p>Sie möchten die E-Mail-Adresse Ihres Partizip-Kontos auf diese Adresse ändern.</p>
+      <p>Um die Änderung abzuschließen, öffnen Sie den Link und bestätigen Sie:</p>
+      <p><a href="${bestaetigungsUrl}" style="display:inline-block;padding:12px 24px;background:${BRAND_COLOR};color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Neue Adresse bestätigen</a></p>
+      <p style="color:#6b7280;font-size:14px;">Der Link ist 15 Minuten gültig und kann nur einmal verwendet werden. Sie müssen dazu in Ihrem Konto angemeldet sein.</p>
+      <p style="color:#6b7280;font-size:14px;">Falls Sie diese Änderung nicht angefordert haben, können Sie diese E-Mail ignorieren — es wird nichts geändert.</p>
+    `,
+  });
+
+  // Kein Logging der URL (der Roh-Token darin ist ein Credential).
+}
+
+/**
+ * Block J2b: Sicherheits-Info-Mail an die ALTE Adresse NACH erfolgtem Wechsel.
+ * Enthält KEINEN Revert-Link (v1). `kontaktEmail` ist die Betreiber-Adresse
+ * (lib/legal/anbieter.ts), an die sich „Das war ich nicht"-Fälle wenden.
+ */
+export async function sendEmailChangedInfoEmail(
+  alteEmail: string,
+  kontaktEmail: string,
+): Promise<void> {
+  const transport = createTransport();
+
+  await transport.sendMail({
+    from: EMAIL_FROM,
+    to: alteEmail,
+    replyTo: kontaktEmail,
+    subject: "Ihre E-Mail-Adresse bei Partizip wurde geändert",
+    text: `Die E-Mail-Adresse Ihres Partizip-Kontos wurde soeben geändert. Ab jetzt erfolgt die Anmeldung über die neue Adresse.\n\nWaren Sie das nicht, wenden Sie sich bitte umgehend an ${kontaktEmail} (oder antworten Sie auf diese E-Mail).`,
+    html: `
+      <p>Die E-Mail-Adresse Ihres Partizip-Kontos wurde soeben geändert. Ab jetzt erfolgt die Anmeldung über die neue Adresse.</p>
+      <p style="color:#6b7280;font-size:14px;">Waren Sie das nicht, wenden Sie sich bitte umgehend an <a href="mailto:${kontaktEmail}">${kontaktEmail}</a> (oder antworten Sie auf diese E-Mail).</p>
+    `,
+  });
+}
+
 export async function sendRegistrationHintEmail(email: string): Promise<void> {
   // Wird gesendet wenn User nicht existiert aber minAgeConfirmed NICHT mitgesandt wurde.
   // Neutral formuliert — kein User-Enumeration-Leak (gleiche Antwort nach außen).
