@@ -16,9 +16,19 @@ import { profilSpeichern } from "@/lib/konto/profil-actions";
 export function ProfilSection({
   initialDisplayName,
   initialFunktion,
+  nurLeeren = false,
+  onSaved,
 }: {
   initialDisplayName: string | null;
   initialFunktion: string | null;
+  /**
+   * Bestandsfall (Block J1, Gate-B 1b): der/die Nutzer:in ist kein Rollenträger
+   * mehr, trägt aber noch einen hinterlegten Namen. Dann dient die Sektion nur
+   * zum ENTFERNEN — der Server (profilSpeichern) lehnt ein Neu-Setzen ohnehin ab.
+   */
+  nurLeeren?: boolean;
+  /** Wird nach erfolgreichem Speichern mit den (getrimmten) Werten aufgerufen. */
+  onSaved?: (displayName: string | null, funktion: string | null) => void;
 }) {
   const [displayName, setDisplayName] = useState(initialDisplayName ?? "");
   const [funktion, setFunktion] = useState(initialFunktion ?? "");
@@ -41,6 +51,8 @@ export function ProfilSection({
       setDisplayName(result.displayName ?? "");
       setFunktion(result.funktion ?? "");
       setBestaetigt(true);
+      // Nudge/Anzeige der Elternseite sofort aktualisieren (Gate-B 2).
+      onSaved?.(result.displayName ?? null, result.funktion ?? null);
     } catch {
       setError("Verbindungsfehler.");
     } finally {
@@ -54,13 +66,21 @@ export function ProfilSection({
         Ihr öffentlicher Name
       </h2>
       <form onSubmit={handleSubmit} className="pz-card space-y-4 p-4">
-        <p className="text-xs" style={{ color: "var(--pz-muted)" }}>
-          Sie tragen eine Rolle auf dieser Plattform. Damit Bürgerinnen und Bürger
-          erkennen, wer hinter einer Abstimmung oder Prüfung steht, zeigen wir bei
-          Ihrer Rollenausübung Ihren Klarnamen und – falls angegeben – Ihre Funktion.
-          Ihre eigene Teilnahme als Bürgerin oder Bürger (Abstimmen, Anliegen) bleibt
-          davon unberührt und pseudonym.
-        </p>
+        {nurLeeren ? (
+          <p className="text-xs" style={{ color: "var(--pz-muted)" }}>
+            Ihre Rolle auf dieser Plattform wurde beendet. Ein hier zuvor
+            hinterlegter Name wird nicht mehr öffentlich angezeigt und in der Regel
+            automatisch entfernt. Sie können ihn hier jederzeit selbst löschen.
+          </p>
+        ) : (
+          <p className="text-xs" style={{ color: "var(--pz-muted)" }}>
+            Sie tragen eine Rolle auf dieser Plattform. Damit Bürgerinnen und Bürger
+            erkennen, wer hinter einer Abstimmung oder Prüfung steht, zeigen wir bei
+            Ihrer Rollenausübung Ihren Klarnamen und – falls angegeben – Ihre Funktion.
+            Ihre eigene Teilnahme als Bürgerin oder Bürger (Abstimmen, Anliegen) bleibt
+            davon unberührt und pseudonym.
+          </p>
+        )}
 
         <div>
           <label

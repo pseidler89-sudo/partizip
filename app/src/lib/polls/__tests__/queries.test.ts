@@ -47,7 +47,7 @@ import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
 import { resolveOrtsteilRegionId, resolveRegionIdForScope } from "@/lib/region/scope";
 import { and, eq } from "drizzle-orm";
 
-const { tenants, polls, votes, users, regions, pollOptions, voteAllocations, voteResistances } = schema;
+const { tenants, polls, votes, users, roles, regions, pollOptions, voteAllocations, voteResistances } = schema;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(__dirname, "../../../../../db/migrations");
@@ -626,5 +626,65 @@ describe("polls/queries (Integration)", () => {
     expect([dot.stimmenGesamt, dot.stimmenVerifiziert, dot.typ]).toEqual([2, 1, "dot_voting"]);
     const wid = items.find((p) => p.id === pW.id)!;
     expect([wid.stimmenGesamt, wid.stimmenVerifiziert, wid.typ]).toEqual([1, 1, "widerstandsabfrage"]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Block J1 (Gate-B 3): Fragesteller-Identität in getAktivePolls — Defense-in-
+  // Depth. Die VM trägt den Klarnamen NUR bei aktivem Rollenträger; Ex-
+  // Rollenträger (herabgestuft/gesperrt) → ersteller.displayName === null.
+  // -------------------------------------------------------------------------
+  it.skipIf(SKIP)("getAktivePolls: ersteller-Klarname nur bei aktivem Rollenträger (demoted/gesperrt → null)", async () => {
+    const [t] = await db.insert(tenants).values({ slug: `q-j1-${Date.now()}`, name: "J1-Ersteller" }).returning();
+    const stadtT = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+
+    // (1) Aktiver Rollenträger MIT Klarnamen.
+    const [rt] = await db
+      .insert(users)
+      .values({ tenantId: t.id, email: `rt-${Date.now()}@q.de`, displayName: "Rita Rolle", funktion: "Amt" })
+      .returning();
+    await db.insert(roles).values({ tenantId: t.id, userId: rt.id, roleType: "redakteur", regionId: stadtT });
+
+    // (2) Ex-Rollenträger: Klarname in der DB, aber KEINE Rolle mehr (Bestandsfall,
+    //     falls die Datenminimierung mal nicht lief).
+    const [demoted] = await db
+      .insert(users)
+      .values({ tenantId: t.id, email: `dem-${Date.now()}@q.de`, displayName: "Egon Ex", funktion: "Früher" })
+      .returning();
+
+    // (3) Gesperrter Rollenträger: hat eine Rolle, aber account_status='locked'
+    //     → getUserRoleTypes/EXISTS zählt ihn nicht als aktiven Rollenträger.
+    const [locked] = await db
+      .insert(users)
+      .values({ tenantId: t.id, email: `lck-${Date.now()}@q.de`, displayName: "Lea Locked", funktion: "Gesperrt", accountStatus: "locked" })
+      .returning();
+    await db.insert(roles).values({ tenantId: t.id, userId: locked.id, roleType: "redakteur", regionId: stadtT });
+
+    const [pRt] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "von-rt", typ: "ja_nein_enthaltung", status: "aktiv", erstelltVon: rt.id }).returning();
+    const [pDem] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "von-demoted", typ: "ja_nein_enthaltung", status: "aktiv", erstelltVon: demoted.id }).returning();
+    const [pLck] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "von-locked", typ: "ja_nein_enthaltung", status: "aktiv", erstelltVon: locked.id }).returning();
+    const [pNull] = await db.insert(polls).values({ tenantId: t.id, regionId: stadtT, frage: "ohne-ersteller", typ: "ja_nein_enthaltung", status: "aktiv" }).returning();
+
+    const list = await getAktivePolls(db as never, t.id);
+
+    const vonRt = list.find((p) => p.id === pRt.id)!;
+    expect(vonRt.ersteller?.istRollentraeger).toBe(true);
+    expect(vonRt.ersteller?.displayName).toBe("Rita Rolle");
+    expect(vonRt.ersteller?.funktion).toBe("Amt");
+
+    // Ex-Rollenträger: VM trägt KEINEN Namen mehr (Defense-in-Depth an der Quelle).
+    const vonDem = list.find((p) => p.id === pDem.id)!;
+    expect(vonDem.ersteller).not.toBeNull();
+    expect(vonDem.ersteller?.istRollentraeger).toBe(false);
+    expect(vonDem.ersteller?.displayName).toBeNull();
+    expect(vonDem.ersteller?.funktion).toBeNull();
+
+    // Gesperrter Rollenträger: ebenfalls unterdrückt.
+    const vonLck = list.find((p) => p.id === pLck.id)!;
+    expect(vonLck.ersteller?.istRollentraeger).toBe(false);
+    expect(vonLck.ersteller?.displayName).toBeNull();
+
+    // erstellt_von NULL → ersteller === null.
+    const vonNull = list.find((p) => p.id === pNull.id)!;
+    expect(vonNull.ersteller).toBeNull();
   });
 });

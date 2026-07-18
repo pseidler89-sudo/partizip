@@ -638,4 +638,40 @@ describe("Konto-Sicherheit (Block K2, Integration)", () => {
     expect(JSON.stringify(audit[0].metadata)).not.toContain("@");
     expect(audit[0].targetId).not.toContain("@");
   });
+
+  // -------------------------------------------------------------------------
+  // Block J1 (Gate-B 1a): Offboarding entfernt die öffentliche Identitäts-PII
+  // -------------------------------------------------------------------------
+  it.skipIf(SKIP)("J1: Offboarding nullt display_name/funktion + Audit profile.updated (PII-frei)", async () => {
+    const ziel = await createUser("off-j1");
+    await addRole(ziel.id, "verifier");
+    await db
+      .update(users)
+      .set({ displayName: "Vera Verifizierin", funktion: "Bürgerbüro" })
+      .where(eq(users.id, ziel.id));
+
+    const res = await offboardingCore(db, tenantId, KOMMUNE, callerAdminId, ziel.id);
+    expect(res.ok).toBe(true);
+
+    // Nach dem vollständigen Rollen-Entzug: keine Zweckbindung mehr → PII weg.
+    const [zielRow] = await db.select().from(users).where(eq(users.id, ziel.id));
+    expect(zielRow.displayName).toBeNull();
+    expect(zielRow.funktion).toBeNull();
+    // Konto bleibt aktiv (Bürger).
+    expect(zielRow.accountStatus).toBe("active");
+
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "profile.updated"), eq(auditEvents.targetId, ziel.id)));
+    expect(audit.length).toBe(1);
+    const meta = JSON.stringify(audit[0].metadata);
+    expect(meta).toContain("display_name");
+    expect(meta).toContain("offboarding");
+    // PII-frei: weder Klarname noch Funktion im Audit.
+    expect(meta).not.toContain("Vera");
+    expect(meta).not.toContain("Bürgerbüro");
+    expect(audit[0].actorRef).toBe(callerAdminId);
+    expect(audit[0].actorType).toBe("admin");
+  });
 });

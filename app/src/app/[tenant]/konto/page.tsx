@@ -254,12 +254,20 @@ export default function KontoPage() {
         </div>
       </div>
 
-      {/* Block J1: Öffentlicher Name — nur für Rollenträger (Bürger bleiben
-          pseudonym; für sie wird die Sektion gar nicht gerendert). */}
-      {data.user.istRollentraeger && (
+      {/* Block J1: Öffentlicher Name — für Rollenträger (setzen/ändern/leeren)
+          UND für Bestandsfälle (Gate-B 1b): ein herabgestufter Ex-Rollenträger
+          ohne Rolle, aber mit noch hinterlegtem Namen, muss ihn selbst entfernen
+          können (nurLeeren). Reine Bürger ohne PII sehen die Sektion nicht. */}
+      {(data.user.istRollentraeger || data.user.displayName || data.user.funktion) && (
         <ProfilSection
           initialDisplayName={data.user.displayName ?? null}
           initialFunktion={data.user.funktion ?? null}
+          nurLeeren={!data.user.istRollentraeger}
+          onSaved={(displayName, funktion) =>
+            setData((prev) =>
+              prev ? { ...prev, user: { ...prev.user, displayName, funktion } } : prev,
+            )
+          }
         />
       )}
 

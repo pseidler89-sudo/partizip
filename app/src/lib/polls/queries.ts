@@ -380,13 +380,22 @@ type ErstellerRohSpalten = {
   erstellerIstRollentraeger: boolean;
 };
 
-/** Baut die Ersteller-VM aus den flach selektierten Ersteller-Spalten. */
+/**
+ * Baut die Ersteller-VM aus den flach selektierten Ersteller-Spalten.
+ *
+ * Defense-in-Depth (Block J1, Gate-B 3): Klarname/Funktion werden NUR übernommen,
+ * wenn der Ersteller (noch) Rollenträger ist — sonst trägt die VM erst gar keinen
+ * Namen (null), unabhängig davon, welche Render-Schicht sie später konsumiert. Die
+ * Unterdrückung eines herabgestuften/gesperrten Erstellers hängt damit nicht mehr
+ * allein an der Präsentation (fragestellerBadge), sondern schon an der Datenquelle.
+ */
 function baueErsteller(row: ErstellerRohSpalten): PollErsteller | null {
   if (!row.erstelltVon) return null;
+  const istRT = row.erstellerIstRollentraeger;
   return {
-    displayName: row.erstellerDisplayName,
-    funktion: row.erstellerFunktion,
-    istRollentraeger: row.erstellerIstRollentraeger,
+    displayName: istRT ? row.erstellerDisplayName : null,
+    funktion: istRT ? row.erstellerFunktion : null,
+    istRollentraeger: istRT,
   };
 }
 

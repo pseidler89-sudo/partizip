@@ -46,6 +46,7 @@ import { and, count, eq, isNull, ne, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { users, roles, sessions, auditEvents, roleAppointments, invitations } from "@/db/schema";
 import { ADMIN_ROLES, canManageRole, isAdmin } from "@/lib/auth/roles";
+import { identitaetPiiEntfernenWennKeinRollentraeger } from "@/lib/identity/pii-cleanup";
 
 /** Einheitliches, serialisierbares Ergebnis aller Konto-Sicherheits-Aktionen. */
 export type KontoSicherheitResult = { ok: boolean; error?: string; message?: string };
@@ -417,6 +418,19 @@ export async function offboardingCore(
       .delete(roles)
       .where(and(eq(roles.tenantId, tenantId), eq(roles.userId, targetUserId)));
     const sessionsBeendet = await revokeAktiveSessions(tx, tenantId, targetUserId);
+
+    // Datenminimierung (Block J1, Gate-B 1a): nach dem vollständigen Rollen-Entzug
+    // hält das Ziel keine Rolle ≠ `user` mehr → die öffentliche Identitäts-PII
+    // (Klarname/Funktion) verliert ihre Zweckbindung und wird hier entfernt
+    // (+ Audit profile.updated, PII-frei). Der/die Ex-Rollenträger:in bleibt
+    // Bürger:in — pseudonym, ohne öffentlichen Namen.
+    await identitaetPiiEntfernenWennKeinRollentraeger(
+      tx,
+      tenantId,
+      targetUserId,
+      callerUserId,
+      "offboarding",
+    );
 
     // Gate-B K3 (MAJOR): Offboarding darf KEINE Rolle-in-Wartestellung
     // zurücklassen. Ohne diese Naht bliebe (a) ein pending role_appointment

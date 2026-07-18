@@ -33,6 +33,7 @@ import {
 } from "@/lib/auth/roles";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { verifierErnennungVorschlagenCore } from "@/lib/admin/appointment-core";
+import { identitaetPiiEntfernenWennKeinRollentraeger } from "@/lib/identity/pii-cleanup";
 
 type ScopeLevel = "ortsteil" | "stadt" | "kreis" | "land";
 
@@ -246,6 +247,17 @@ export async function revokeRoleCore(
     await tx
       .delete(roles)
       .where(and(eq(roles.tenantId, tenantId), eq(roles.id, role.id)));
+
+    // 4b. Datenminimierung (Block J1, Gate-B 1a): hält der User danach keine
+    //     Rolle ≠ `user` mehr, entfällt die Zweckbindung für Klarname/Funktion —
+    //     die Identitäts-PII wird in DERSELBEN Tx entfernt (+ Audit profile.updated).
+    await identitaetPiiEntfernenWennKeinRollentraeger(
+      tx,
+      tenantId,
+      role.userId,
+      callerUserId,
+      "role_revoked",
+    );
 
     // 5. Audit role.revoked — PII-frei (targetId = betroffene UserId).
     await tx.insert(auditEvents).values({

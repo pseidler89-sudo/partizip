@@ -381,4 +381,77 @@ describe("Rollen-Verwaltung (Integration)", () => {
     const gone = await db.select({ id: roles.id }).from(roles).where(eq(roles.id, roleA.id));
     expect(gone.length).toBe(0);
   });
+
+  // -------------------------------------------------------------------------
+  // Block J1 (Gate-B 1a): Datenminimierung der Identitäts-PII beim Rollen-Entzug
+  // -------------------------------------------------------------------------
+  it.skipIf(SKIP)("J1: Entzug der LETZTEN Rolle nullt display_name/funktion + Audit profile.updated", async () => {
+    const target = await createUser("j1-entzug");
+    await assignRoleCore(db, tenantId, KOMMUNE, callerAdminId, {
+      targetEmail: target.email,
+      roleType: "redakteur",
+    });
+    // Klarname + Funktion hinterlegen (wie es der Rollenträger im Konto täte).
+    await db
+      .update(users)
+      .set({ displayName: "Rita Redakteurin", funktion: "Pressestelle" })
+      .where(eq(users.id, target.id));
+
+    const [roleRow] = await db
+      .select({ id: roles.id })
+      .from(roles)
+      .where(and(eq(roles.tenantId, tenantId), eq(roles.userId, target.id), eq(roles.roleType, "redakteur")));
+
+    const res = await revokeRoleCore(db, tenantId, KOMMUNE, callerAdminId, { roleId: roleRow.id });
+    expect(res.ok).toBe(true);
+
+    // PII entfernt (Zweckbindung Rollenausübung entfallen).
+    const [u] = await db.select().from(users).where(eq(users.id, target.id));
+    expect(u.displayName).toBeNull();
+    expect(u.funktion).toBeNull();
+
+    // Audit profile.updated PII-frei: nur Feldnamen + Anlass, nie die Werte.
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "profile.updated"), eq(auditEvents.targetId, target.id)));
+    expect(audit.length).toBe(1);
+    const meta = JSON.stringify(audit[0].metadata);
+    expect(meta).toContain("display_name");
+    expect(meta).toContain("role_revoked");
+    expect(meta).not.toContain("Rita");
+    expect(meta).not.toContain("Pressestelle");
+    expect(audit[0].actorType).toBe("admin");
+    expect(audit[0].actorRef).toBe(callerAdminId);
+  });
+
+  it.skipIf(SKIP)("J1: bei einer VERBLEIBENDEN Rolle bleibt der Klarname erhalten (kein Audit)", async () => {
+    const target = await createUser("j1-behalten");
+    // Zwei Rollen ≠ user: redakteur + beobachter.
+    await assignRoleCore(db, tenantId, KOMMUNE, callerAdminId, { targetEmail: target.email, roleType: "redakteur" });
+    await assignRoleCore(db, tenantId, KOMMUNE, callerAdminId, { targetEmail: target.email, roleType: "beobachter" });
+    await db
+      .update(users)
+      .set({ displayName: "Bea Beobachterin", funktion: "Beirat" })
+      .where(eq(users.id, target.id));
+
+    const [redRole] = await db
+      .select({ id: roles.id })
+      .from(roles)
+      .where(and(eq(roles.tenantId, tenantId), eq(roles.userId, target.id), eq(roles.roleType, "redakteur")));
+
+    const res = await revokeRoleCore(db, tenantId, KOMMUNE, callerAdminId, { roleId: redRole.id });
+    expect(res.ok).toBe(true);
+
+    // Noch beobachter → Zweckbindung besteht → Name bleibt.
+    const [u] = await db.select().from(users).where(eq(users.id, target.id));
+    expect(u.displayName).toBe("Bea Beobachterin");
+    expect(u.funktion).toBe("Beirat");
+
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "profile.updated"), eq(auditEvents.targetId, target.id)));
+    expect(audit.length).toBe(0);
+  });
 });
