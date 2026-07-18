@@ -22,6 +22,7 @@ import {
   verificationBookings,
   verificationSlots,
   invitations,
+  roleAppointments,
 } from "@/db/schema";
 import { ADMIN_ROLES } from "@/lib/auth/roles";
 import { buildAnonymizePayload, buildTombstoneEmail } from "@/lib/konto/anonymize";
@@ -134,6 +135,44 @@ export async function deleteKontoCore(
     await tx
       .delete(roles)
       .where(and(eq(roles.tenantId, tenantId), eq(roles.userId, userId)));
+
+    // 2b. pending role_appointments des Users canceln (Gate-B K3): Die
+    //     Produkt-Löschung ist eine ANONYMISIERUNG (users-Zeile bleibt) — der
+    //     CASCADE-FK auf target_user_id feuert hier also NIE. Ohne dieses
+    //     Cancel bliebe ein offener Ernennungs-Vorschlag als Datenleiche mit
+    //     Tombstone-E-Mail in der Admin-Liste hängen. Auditiert je Vorschlag
+    //     (PII-frei, via=account_deletion).
+    const stornierteVorschlaege = await tx
+      .update(roleAppointments)
+      .set({ status: "cancelled", decidedBy: userId, decidedAt: now })
+      .where(
+        and(
+          eq(roleAppointments.tenantId, tenantId),
+          eq(roleAppointments.targetUserId, userId),
+          eq(roleAppointments.status, "pending"),
+        ),
+      )
+      .returning({
+        id: roleAppointments.id,
+        roleType: roleAppointments.roleType,
+        regionId: roleAppointments.regionId,
+      });
+    for (const appt of stornierteVorschlaege) {
+      await tx.insert(auditEvents).values({
+        tenantId,
+        actorType: "user",
+        actorRef: userId,
+        action: "role.appointment_cancelled",
+        targetType: "user",
+        targetId: userId,
+        metadata: {
+          appointmentId: appt.id,
+          roleType: appt.roleType,
+          regionId: appt.regionId,
+          via: "account_deletion",
+        },
+      });
+    }
 
     // 3. anliegen_followers des Users löschen. anliegen_followers hat KEINE
     //    tenantId-Spalte; userId ist global eindeutig und gehört genau einem

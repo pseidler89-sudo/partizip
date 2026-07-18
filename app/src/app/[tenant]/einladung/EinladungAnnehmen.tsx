@@ -17,6 +17,8 @@ import { einladungAnnehmen } from "@/lib/admin/invitation-actions";
 type State =
   | { status: "idle" }
   | { status: "success" }
+  /** K3: Verifier-Einladung angenommen — Rolle bedarf noch der Bestätigung. */
+  | { status: "pendingApproval" }
   | { status: "error"; message: string };
 
 export default function EinladungAnnehmen({
@@ -31,11 +33,18 @@ export default function EinladungAnnehmen({
   const [state, setState] = useState<State>({ status: "idle" });
 
   function handleAccept() {
-    if (state.status === "success") return;
+    if (state.status === "success" || state.status === "pendingApproval") return;
     setState({ status: "idle" });
     startTransition(async () => {
       const result = await einladungAnnehmen(token);
       if (result.ok) {
+        // K3: Verifier-Einladung → Ernennungs-Vorschlag statt sofortiger Rolle.
+        // KEIN Auto-Redirect — die Person soll die Erklärung lesen können.
+        if (result.pendingApproval) {
+          setState({ status: "pendingApproval" });
+          router.refresh();
+          return;
+        }
         setState({ status: "success" });
         router.refresh();
         router.push(`/${tenantSlug}/konto`);
@@ -46,6 +55,30 @@ export default function EinladungAnnehmen({
         });
       }
     });
+  }
+
+  if (state.status === "pendingApproval") {
+    return (
+      <div aria-live="polite" className="mt-4">
+        <p className="text-sm font-semibold" style={{ color: "var(--pz-ink)" }}>
+          Einladung angenommen
+        </p>
+        <p className="mt-1 text-sm" style={{ color: "var(--pz-body)" }}>
+          Die Rolle Verifizierer:in wird zweistufig vergeben (Vier-Augen-Prinzip):
+          Ihre Ernennung ist als Vorschlag hinterlegt und bedarf noch der
+          Bestätigung durch eine zweite Person in der Verwaltung. Sie werden
+          freigeschaltet, sobald die Bestätigung erfolgt ist — Sie müssen nichts
+          weiter tun.
+        </p>
+        <Link
+          href={`/${tenantSlug}/konto`}
+          className="mt-3 inline-block text-sm font-medium underline-offset-2 hover:underline"
+          style={{ color: "var(--pz-brand-strong)" }}
+        >
+          Zu Ihrem Konto
+        </Link>
+      </div>
+    );
   }
 
   if (state.status === "error") {

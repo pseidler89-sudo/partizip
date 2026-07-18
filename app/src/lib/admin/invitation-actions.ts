@@ -206,6 +206,12 @@ export interface AnnehmenActionResult {
   /** true ⇒ nicht eingeloggt: die Seite zeigt einen Anmelde-CTA. */
   needLogin?: boolean;
   roleType?: string;
+  /**
+   * Block K3 (Vier-Augen): true ⇒ statt der Rolle wurde ein Ernennungs-
+   * Vorschlag angelegt — die Rolle bedarf noch der Bestätigung durch eine
+   * zweite Person (die UI erklärt das der annehmenden Person).
+   */
+  pendingApproval?: boolean;
   error?: string;
 }
 
@@ -236,5 +242,10 @@ export async function einladungAnnehmen(rawToken: string): Promise<AnnehmenActio
     email: ctx.user.email,
   });
 
-  return { ok: result.ok, roleType: result.roleType, error: result.error };
+  return {
+    ok: result.ok,
+    roleType: result.roleType,
+    pendingApproval: result.pendingApproval,
+    error: result.error,
+  };
 }

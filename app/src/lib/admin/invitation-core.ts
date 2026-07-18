@@ -35,7 +35,7 @@
 
 import { and, eq, desc, gt, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { invitations, roles, users, auditEvents, regions } from "@/db/schema";
+import { invitations, roleAppointments, roles, users, auditEvents, regions } from "@/db/schema";
 import {
   canManageRole,
   isAdmin,
@@ -144,6 +144,7 @@ export async function einladenCore(
         id: invitations.id,
         resendCount: invitations.resendCount,
         roleType: invitations.roleType,
+        regionId: invitations.regionId,
       })
       .from(invitations)
       .where(
@@ -164,6 +165,20 @@ export async function einladenCore(
       if (!canManageRole(callerRoleTypes, existing.roleType as RoleType)) {
         return { ok: false as const, error: "Keine Berechtigung für diese Einladung." };
       }
+
+      // UMWIDMUNG = NEUE VERANTWORTUNG (Gate-B K3 MAJOR, SoD-Umgehung): Ändert
+      // sich roleType ODER regionId gegenüber der bestehenden Einladung, wird
+      // invited_by auf den UMWIDMENDEN Caller umgeschrieben. Sonst könnte Admin A
+      // eine von Admin B veranlasste redakteur-Einladung still auf `verifier`
+      // umwidmen — der K3-Accept-Pfad setzte dann proposedBy = invited_by = B,
+      // und A könnte den „fremden" Vorschlag anschließend SELBST bestätigen
+      // (proposedBy ≠ A ⇒ SoD-Guard griffe nicht): A hätte allein Rolle+Gebiet
+      // gewählt UND bestätigt, mit Audit-Fehlattribution auf B. Wer den Inhalt
+      // (Rolle/Gebiet) bestimmt, trägt die Vorschlags-Verantwortung. Reines
+      // Erneut-Senden ohne inhaltliche Änderung bleibt wie gehabt nur resent_by.
+      const umgewidmet =
+        existing.roleType !== (roleType as RoleType) || existing.regionId !== regionId;
+
       await tx
         .update(invitations)
         .set({
@@ -173,6 +188,7 @@ export async function einladenCore(
           expiresAt,
           resentBy: callerUserId,
           resendCount: existing.resendCount + 1,
+          ...(umgewidmet ? { invitedBy: callerUserId } : {}),
         })
         .where(and(eq(invitations.tenantId, tenantId), eq(invitations.id, existing.id)));
 
@@ -444,6 +460,12 @@ export type AnnehmenReason =
 export interface AnnehmenResult {
   ok: boolean;
   roleType?: string;
+  /**
+   * Block K3: true ⇒ statt einer Rolle wurde ein Ernennungs-VORSCHLAG angelegt
+   * (Vier-Augen bei `verifier`) — die Rolle wird erst mit der Bestätigung durch
+   * eine:n zweite:n Admin wirksam. Die UI erklärt das der annehmenden Person.
+   */
+  pendingApproval?: boolean;
   reason?: AnnehmenReason;
   error?: string;
 }
@@ -550,6 +572,93 @@ export async function einladungAnnehmenCore(
       const inviterRoles = await getUserRoleTypes(tx, tenantId, inv.invitedBy);
       if (!isAdmin(inviterRoles) || !canManageRole(inviterRoles, inv.roleType)) {
         throw new AcceptRollback("invalid");
+      }
+
+      // 4a. Block K3 (Vier-Augen): eine `verifier`-Einladung legt KEINE Rolle
+      // an, sondern einen Ernennungs-VORSCHLAG (pending) — proposed_by ist
+      // der/die URSPRÜNGLICH Einladende (invited_by; ein erneutes Senden setzt
+      // nur resent_by, invited_by bleibt unverändert). Die Einladung gilt
+      // trotzdem als accepted (Endzustand wie bisher). Existiert bereits ein
+      // offener Vorschlag (partieller UNIQUE-Index), ist das still ok:
+      // onConflictDoNothing — kein Fehler an den Bürger, kein Duplikat.
+      if (inv.roleType === "verifier") {
+        // Rolle-existiert-Kurzschluss (Gate-B MINOR, Symmetrie zu
+        // verifierErnennungVorschlagenCore): Hält die annehmende Person die
+        // verifier-Rolle am Gebietsknoten bereits (z. B. Formular-Vorschlag
+        // wurde approved, während die Einladung in-flight war), gibt es nichts
+        // zu bestätigen — KEIN Geister-Vorschlag in der Admin-Liste und keine
+        // unwahre „bedarf noch der Bestätigung"-Meldung. Die Einladung gilt
+        // normal als accepted (Flanke oben), Audit invitation.accepted unten.
+        const bestehendeRolle = await tx
+          .select({ id: roles.id })
+          .from(roles)
+          .where(
+            and(
+              eq(roles.tenantId, tenantId),
+              eq(roles.userId, accepter.id),
+              eq(roles.roleType, "verifier"),
+              eq(roles.regionId, inv.regionId),
+            ),
+          )
+          .limit(1);
+        if (bestehendeRolle.length > 0) {
+          await tx.insert(auditEvents).values({
+            tenantId,
+            actorType: "user",
+            actorRef: accepter.id,
+            action: "invitation.accepted",
+            targetType: "invitation",
+            targetId: inv.id,
+            metadata: { roleType: inv.roleType },
+          });
+          return { ok: true as const, roleType: inv.roleType };
+        }
+
+        const appointmentInserted = await tx
+          .insert(roleAppointments)
+          .values({
+            tenantId,
+            targetUserId: accepter.id,
+            roleType: inv.roleType as RoleType,
+            regionId: inv.regionId,
+            proposedBy: inv.invitedBy,
+          })
+          .onConflictDoNothing()
+          .returning({ id: roleAppointments.id });
+
+        if (appointmentInserted.length > 0) {
+          // Vorschlags-Audit mit dem Einladenden als actorRef (Lineage), PII-frei.
+          await tx.insert(auditEvents).values({
+            tenantId,
+            actorType: "admin",
+            actorRef: inv.invitedBy,
+            action: "role.appointment_proposed",
+            targetType: "user",
+            targetId: accepter.id,
+            metadata: {
+              appointmentId: appointmentInserted[0].id,
+              roleType: inv.roleType,
+              regionId: inv.regionId,
+              via: "invitation",
+            },
+          });
+        }
+
+        await tx.insert(auditEvents).values({
+          tenantId,
+          actorType: "user",
+          actorRef: accepter.id,
+          action: "invitation.accepted",
+          targetType: "invitation",
+          targetId: inv.id,
+          metadata: { roleType: inv.roleType },
+        });
+
+        return {
+          ok: true as const,
+          roleType: inv.roleType,
+          pendingApproval: true,
+        };
       }
 
       // 4. Rolle an das authentifizierte Konto vergeben (idempotent) + Audit.

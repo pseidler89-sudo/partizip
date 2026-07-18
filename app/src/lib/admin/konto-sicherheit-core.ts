@@ -44,7 +44,7 @@
 
 import { and, count, eq, isNull, ne, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { users, roles, sessions, auditEvents } from "@/db/schema";
+import { users, roles, sessions, auditEvents, roleAppointments, invitations } from "@/db/schema";
 import { ADMIN_ROLES, canManageRole, isAdmin } from "@/lib/auth/roles";
 
 /** Einheitliches, serialisierbares Ergebnis aller Konto-Sicherheits-Aktionen. */
@@ -417,6 +417,83 @@ export async function offboardingCore(
       .delete(roles)
       .where(and(eq(roles.tenantId, tenantId), eq(roles.userId, targetUserId)));
     const sessionsBeendet = await revokeAktiveSessions(tx, tenantId, targetUserId);
+
+    // Gate-B K3 (MAJOR): Offboarding darf KEINE Rolle-in-Wartestellung
+    // zurücklassen. Ohne diese Naht bliebe (a) ein pending role_appointment
+    // voll bestätigbar (das Konto bleibt 'active' — die Approve-Flanke liefe
+    // durch, ein zweiter Admin ernennte die soeben offgeboardete Person wieder
+    // zum Verifier, ohne den Offboarding-Kontext zu sehen) und (b) eine noch
+    // OFFENE Einladung würde bei Annahme NACH dem Offboarding einen frischen
+    // pending-Vorschlag anlegen (der Accept prüft nur das eigene accountStatus).
+    // Beides wird HIER, in derselben Transaktion, geschlossen. Der Widerruf
+    // nimmt ausschließlich Rechte-in-Anbahnung weg (fail-safe) — bewusst ALLE
+    // offenen Einladungen/Vorschläge des Ziels, unabhängig von deren Rolle.
+    // (a) pending-Ernennungs-Vorschläge → cancelled (auditiert, je Vorschlag).
+    const stornierteVorschlaege = await tx
+      .update(roleAppointments)
+      .set({ status: "cancelled", decidedBy: callerUserId, decidedAt: sql`now()` })
+      .where(
+        and(
+          eq(roleAppointments.tenantId, tenantId),
+          eq(roleAppointments.targetUserId, targetUserId),
+          eq(roleAppointments.status, "pending"),
+        ),
+      )
+      .returning({
+        id: roleAppointments.id,
+        roleType: roleAppointments.roleType,
+        regionId: roleAppointments.regionId,
+      });
+    for (const appt of stornierteVorschlaege) {
+      await tx.insert(auditEvents).values({
+        tenantId,
+        actorType: "admin",
+        actorRef: callerUserId,
+        action: "role.appointment_cancelled",
+        targetType: "user",
+        targetId: targetUserId,
+        metadata: {
+          appointmentId: appt.id,
+          roleType: appt.roleType,
+          regionId: appt.regionId,
+          via: "offboarding",
+        },
+      });
+    }
+
+    // (b) offene Einladungen an die E-Mail des Ziels widerrufen.
+    // invitations.email ist normalisiert (trim+lowercase) gespeichert,
+    // users.email nicht → beidseitig normalisiert vergleichen (Muster delete.ts).
+    const zielEmailRows = await tx
+      .select({ email: users.email })
+      .from(users)
+      .where(and(eq(users.tenantId, tenantId), eq(users.id, targetUserId)))
+      .limit(1);
+    const zielEmailNormalisiert = (zielEmailRows[0]?.email ?? "").trim().toLowerCase();
+    const widerrufeneEinladungen = zielEmailNormalisiert
+      ? await tx
+          .update(invitations)
+          .set({ status: "revoked", revokedBy: callerUserId })
+          .where(
+            and(
+              eq(invitations.tenantId, tenantId),
+              eq(invitations.email, zielEmailNormalisiert),
+              eq(invitations.status, "pending"),
+            ),
+          )
+          .returning({ id: invitations.id, roleType: invitations.roleType })
+      : [];
+    for (const inv of widerrufeneEinladungen) {
+      await tx.insert(auditEvents).values({
+        tenantId,
+        actorType: "admin",
+        actorRef: callerUserId,
+        action: "invitation.revoked",
+        targetType: "invitation",
+        targetId: inv.id,
+        metadata: { roleType: inv.roleType, via: "offboarding" },
+      });
+    }
 
     const roleTypes = zielRollen.map((r) => r.roleType);
     await tx.insert(auditEvents).values({

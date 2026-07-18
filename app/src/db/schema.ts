@@ -804,6 +804,81 @@ export const invitations = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// role_appointments — Vier-Augen-Verifier-Ernennung (Block K3)
+//
+// Produktentscheid: Das Vier-Augen-Prinzip greift an der Verifier-ERNENNUNG
+// (nicht je Verifizierung): Die Rolle `verifier` wird zweistufig vergeben —
+// ein Admin schlägt vor (pending), ein ZWEITER Admin bestätigt (approved) oder
+// lehnt ab (rejected); der/die Vorschlagende kann zurückziehen (cancelled).
+// Mechanik analog Digest-Freigabe: isSelfApprovalAllowed() (ALLOW_SELF_APPROVAL,
+// Ein-Personen-Pilot) erlaubt Selbst-Bestätigung — der Bestätigungs-KLICK bleibt
+// auch dann eine explizite, auditierte Handlung (kein Auto-Approve).
+//
+// Lebenszyklus: pending → approved | rejected | cancelled (alles Endzustände;
+// die Historie bleibt als Spur erhalten).
+//   - role_type generisch (roleTypeEnum) für spätere Rollen; vorerst schreibt
+//     der Code ausschließlich 'verifier'.
+//   - proposed_by/decided_by: SET NULL (invitations-Muster invited_by/…_by),
+//     damit Kontolöschungen die Ernennungs-Historie nicht blockieren.
+//   - target_user_id: CASCADE — greift NUR bei hartem Row-Delete der users-
+//     Zeile (demo-reset/Test-Cleanup). Die PRODUKT-Löschung (DSGVO) ist eine
+//     ANONYMISIERUNG (Zeile bleibt) — offene Vorschläge werden dort explizit
+//     gecancelt (deleteKontoCore), ebenso beim Offboarding (offboardingCore).
+//   - Partieller UNIQUE-Index: höchstens EINE offene (pending) Ernennung je
+//     (tenant, target, role_type, region) — Doppel-Vorschläge race-fest
+//     abgefangen (Muster invitations_tenant_email_pending_unique).
+// ---------------------------------------------------------------------------
+
+export const roleAppointmentStatusEnum = pgEnum("role_appointment_status", [
+  "pending",
+  "approved",
+  "rejected",
+  "cancelled",
+]);
+
+export const roleAppointments = pgTable(
+  "role_appointments",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    // Ziel der Ernennung. CASCADE feuert nur bei HARTEM Row-Delete (demo-reset);
+    // die DSGVO-Produkt-Löschung anonymisiert nur → Cancel in deleteKontoCore.
+    targetUserId: uuid("target_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    roleType: roleTypeEnum("role_type").notNull(),
+    // Gebietsknoten der künftigen Rolle (wie roles.region_id). RESTRICT.
+    regionId: uuid("region_id")
+      .notNull()
+      .references(() => regions.id, { onDelete: "restrict" }),
+    status: roleAppointmentStatusEnum("status").notNull().default("pending"),
+    // Vorschlagende:r / Entscheider:in — SET NULL (invitations-Muster), damit
+    // Kontolöschungen die Historie nicht blockieren; die Audit-Events tragen
+    // die Lineage zusätzlich PII-frei.
+    proposedBy: uuid("proposed_by").references(() => users.id, { onDelete: "set null" }),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    proposedAt: timestamp("proposed_at", { withTimezone: true }).notNull().default(sql`now()`),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`)
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    // Höchstens EIN offener Vorschlag je (tenant, target, role_type, region) —
+    // race-fest über den partiellen UNIQUE-Index (kein TOCTOU im Insert-Pfad).
+    uniqueIndex("role_appointments_pending_unique")
+      .on(t.tenantId, t.targetUserId, t.roleType, t.regionId)
+      .where(sql`${t.status} = 'pending'`),
+    index("idx_role_appointments_tenant_status").on(t.tenantId, t.status),
+    index("idx_role_appointments_target_user").on(t.targetUserId),
+  ]
+);
+
+// ---------------------------------------------------------------------------
 // M7 Digest-Pipeline
 // ---------------------------------------------------------------------------
 

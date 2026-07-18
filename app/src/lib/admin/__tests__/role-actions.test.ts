@@ -174,18 +174,20 @@ describe("Rollen-Verwaltung (Integration)", () => {
   // -------------------------------------------------------------------------
   // 2. Idempotenz
   // -------------------------------------------------------------------------
+  // K3: `verifier` läuft jetzt über den Ernennungs-Vorschlag (appointment.test.ts)
+  // — die Idempotenz der DIREKTEN Vergabe wird hier mit `beobachter` geprüft.
   it.skipIf(SKIP)("2. assignRole ist idempotent (zweite Vergabe ok, kein Doppel-Audit)", async () => {
     const target = await createUser("ziel2");
 
     const r1 = await assignRoleCore(db, tenantId, KOMMUNE, callerAdminId, {
       targetEmail: target.email,
-      roleType: "verifier",
+      roleType: "beobachter",
     });
     expect(r1.ok).toBe(true);
 
     const r2 = await assignRoleCore(db, tenantId, KOMMUNE, callerAdminId, {
       targetEmail: target.email,
-      roleType: "verifier",
+      roleType: "beobachter",
     });
     expect(r2.ok).toBe(true);
     expect(r2.message).toMatch(/bereits/i);

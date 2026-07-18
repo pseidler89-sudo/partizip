@@ -27,9 +27,12 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin, manageableRoleTypes, getUserRoleTypes } from "@/lib/auth/roles";
 import { isDemoTenant } from "@/lib/demo/config";
 import { einladungenListeCore } from "@/lib/admin/invitation-core";
+import { offeneErnennungenListeCore } from "@/lib/admin/appointment-core";
+import { isSelfApprovalAllowed } from "@/lib/digest/freigabe-core";
 import Link from "next/link";
 import { RollenVerwaltung } from "./RollenVerwaltung";
 import { EinladungenVerwaltung } from "./EinladungenVerwaltung";
+import { ErnennungenVerwaltung } from "./ErnennungenVerwaltung";
 
 interface PageProps {
   params: Promise<{ tenant: string }>;
@@ -144,6 +147,24 @@ export default async function AdminRollenPage({ params }: PageProps) {
   // Nur die für den Caller erlaubten roleTypes anbieten (Server erzwingt zusätzlich).
   const erlaubteRollen = manageableRoleTypes(callerRoleTypes);
 
+  // Block K3: offene Verifier-Ernennungen (Vier-Augen) — tenant-scoped, mit
+  // Ziel-/Vorschlagenden-E-Mail (Join im Core) und Gebiets-Label wie die
+  // Rollen-Anzeige. selfApprovalAllowed steuert nur die UI-SICHTBARKEIT des
+  // Bestätigen-Buttons für Vorschlagende — der Server erzwingt die SoD-Sperre
+  // zusätzlich atomar in der Action/dem Core.
+  const ernennungen = (await offeneErnennungenListeCore(db, tenant.id)).map((e) => ({
+    id: e.id,
+    targetUserId: e.targetUserId,
+    targetEmail: e.targetEmail,
+    roleType: e.roleType,
+    regionTyp: e.regionTyp,
+    regionName: e.regionName,
+    proposedBy: e.proposedBy,
+    proposedByEmail: e.proposedByEmail,
+    proposedAt: e.proposedAt.toISOString(),
+  }));
+  const selfApprovalAllowed = isSelfApprovalAllowed();
+
   // Einladungen (neueste zuerst) — für den Einladungs-Bereich. Kein token_hash.
   const einladungen = (await einladungenListeCore(db, tenant.id)).map((e) => ({
     id: e.id,
@@ -173,11 +194,23 @@ export default async function AdminRollenPage({ params }: PageProps) {
         </p>
       </div>
 
+      {/* K3: Ausstehende Verifier-Ernennungen — nur wenn vorhanden. */}
+      {ernennungen.length > 0 && (
+        <div className="mb-10">
+          <ErnennungenVerwaltung
+            ernennungen={ernennungen}
+            callerUserId={session.userId}
+            selfApprovalAllowed={selfApprovalAllowed}
+          />
+        </div>
+      )}
+
       <RollenVerwaltung
         tenantSlug={slugFromPath}
         users={tenantUsers}
         erlaubteRollen={erlaubteRollen}
         callerUserId={session.userId}
+        selfApprovalAllowed={selfApprovalAllowed}
       />
 
       <div className="mt-12 border-t border-pz-line pt-10">

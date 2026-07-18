@@ -32,6 +32,7 @@ import {
   type RoleType,
 } from "@/lib/auth/roles";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
+import { verifierErnennungVorschlagenCore } from "@/lib/admin/appointment-core";
 
 type ScopeLevel = "ortsteil" | "stadt" | "kreis" | "land";
 
@@ -68,6 +69,17 @@ export async function assignRoleCore(
   // 1. Caller muss überhaupt Admin sein.
   if (!isAdmin(callerRoleTypes)) {
     return { ok: false, error: "Keine Berechtigung (Admin erforderlich)." };
+  }
+
+  // Block K3 (Vier-Augen): `verifier` wird NICHT mehr direkt vergeben, sondern
+  // als zweistufiger Ernennungs-Vorschlag angelegt (Vorschlag → Bestätigung
+  // durch eine:n zweite:n Admin). Alle anderen Rollen unverändert direkt.
+  if (input.roleType === "verifier") {
+    return verifierErnennungVorschlagenCore(db, tenantId, callerRoleTypes, callerUserId, {
+      targetEmail: input.targetEmail,
+      scopeLevel: input.scopeLevel,
+      scopeCode: input.scopeCode,
+    });
   }
 
   const roleType = input.roleType;

@@ -147,14 +147,16 @@ describe("region/scope Dual-Write (Integration)", () => {
       tenantId,
       ["kommune_admin"],
       caller.id,
-      { targetEmail: target.email, roleType: "verifier", scopeLevel: "ortsteil", scopeCode: "wehen" }
+      // K3: `verifier` läuft über den Ernennungs-Vorschlag — der region_id-
+      // Contract der Direktvergabe wird hier mit `redakteur` geprüft.
+      { targetEmail: target.email, roleType: "redakteur", scopeLevel: "ortsteil", scopeCode: "wehen" }
     );
     expect(r.ok).toBe(true);
 
     const [role] = await db
       .select()
       .from(roles)
-      .where(sql`${roles.tenantId} = ${tenantId} AND ${roles.userId} = ${target.id} AND ${roles.roleType} = 'verifier'`)
+      .where(sql`${roles.tenantId} = ${tenantId} AND ${roles.userId} = ${target.id} AND ${roles.roleType} = 'redakteur'`)
       .limit(1);
     expect(await pathOf(db, role.regionId!)).toBe("de.hessen.rtk.taunusstein.wehen");
   });
