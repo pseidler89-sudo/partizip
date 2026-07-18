@@ -398,15 +398,21 @@ export interface Auffaelligkeit {
  * 7-Tage-Fenster) und Einlöse-Aktivität durch Ersteller ohne aktive
  * verifizierende Rolle. Leere Liste ⇒ positives Signal (die UI zeigt dann
  * „Keine Auffälligkeiten"). Beschreibungen enthalten NIE Bürger-PII.
+ *
+ * Gate-B K4 (MINOR): nimmt die BEREITS GELADENEN Aggregate aus
+ * getEinloesungenJeVerifier/getQrAusschoepfung als Parameter, statt sie selbst
+ * erneut zu laden — die Seite ruft jede Query genau einmal. Nur die
+ * Tages-Spitzen-Query läuft hier intern (sie wird sonst nirgends gebraucht).
  */
 export async function getAuffaelligkeiten(
   db: Db,
   tenantId: string,
+  vorgeladen: {
+    verifier: VerifierAktivitaet[];
+    ausschoepfung: QrAusschoepfung[];
+  },
 ): Promise<Auffaelligkeit[]> {
-  const [verifier, ausschoepfung] = await Promise.all([
-    getEinloesungenJeVerifier(db, tenantId),
-    getQrAusschoepfung(db, tenantId),
-  ]);
+  const { verifier, ausschoepfung } = vorgeladen;
 
   const auff: Auffaelligkeit[] = [];
 

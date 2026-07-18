@@ -74,7 +74,7 @@ describe("verification/aktivitaet (Integration)", () => {
   let vSpike: string; // aktiver Verifier mit Einlöse-Spitze (21 an einem Tag)
   let vGrenz: string; // aktiver Verifier mit exakt 20 an einem Tag (KEINE Spitze)
   let vEntzogen: string; // hat QRs erstellt, aber KEINE Verifier-Rolle mehr
-  let buergerEmails: string[] = []; // E-Mails der einlösenden Bürger (dürfen NIE erscheinen)
+  const buergerEmails: string[] = []; // E-Mails der einlösenden Bürger (dürfen NIE erscheinen)
 
   let counter = 0;
   function nextEmail(prefix: string) {
@@ -356,7 +356,12 @@ describe("verification/aktivitaet (Integration)", () => {
   });
 
   it.skipIf(SKIP)("getAuffaelligkeiten: Ausschöpfung 80 %, Spitze (21), Rollen-Entzug; Spitze 20 NICHT; PII-frei", async () => {
-    const auff = await getAuffaelligkeiten(db as never, t1);
+    // Gate-B-Signatur: die Ableitung erhält die vorgeladenen Aggregate als
+    // Parameter (wie die Seite) — jede Query läuft genau einmal.
+    const auff = await getAuffaelligkeiten(db as never, t1, {
+      verifier: await getEinloesungenJeVerifier(db as never, t1),
+      ausschoepfung: await getQrAusschoepfung(db as never, t1),
+    });
     const typen = auff.map((a) => a.typ);
 
     // Genau eine Ausschöpfungs-Auffälligkeit (Quote80; Quote79 nicht).
@@ -378,7 +383,10 @@ describe("verification/aktivitaet (Integration)", () => {
     }
 
     // t2 hat keine Auffälligkeiten → leere Liste (positives Signal).
-    const auff2 = await getAuffaelligkeiten(db as never, t2);
+    const auff2 = await getAuffaelligkeiten(db as never, t2, {
+      verifier: await getEinloesungenJeVerifier(db as never, t2),
+      ausschoepfung: await getQrAusschoepfung(db as never, t2),
+    });
     expect(auff2).toEqual([]);
   });
 });

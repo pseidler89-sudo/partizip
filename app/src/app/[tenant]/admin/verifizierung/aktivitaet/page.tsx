@@ -113,12 +113,18 @@ export default async function AdminAktivitaetPage({ params }: PageProps) {
     );
   }
 
-  const [verifier, ausschoepfung, standorte, auffaelligkeiten] = await Promise.all([
+  // Jede Aggregat-Query läuft GENAU EINMAL (Gate-B MINOR): die Auffälligkeits-
+  // Ableitung erhält die bereits geladenen Listen als Parameter und führt nur
+  // ihre eigene Tages-Spitzen-Query zusätzlich aus.
+  const [verifier, ausschoepfung, standorte] = await Promise.all([
     getEinloesungenJeVerifier(db, tenant.id),
     getQrAusschoepfung(db, tenant.id),
     getTermineJeStandort(db, tenant.id),
-    getAuffaelligkeiten(db, tenant.id),
   ]);
+  const auffaelligkeiten = await getAuffaelligkeiten(db, tenant.id, {
+    verifier,
+    ausschoepfung,
+  });
 
   return (
     <main className="min-h-screen px-6 py-10 max-w-4xl mx-auto">
