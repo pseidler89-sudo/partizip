@@ -18,7 +18,7 @@
 
 import { notFound, redirect } from "next/navigation";
 import { headers, cookies } from "next/headers";
-import { and, eq, asc, count, gt, isNull } from "drizzle-orm";
+import { and, eq, asc, count, gt, isNull, max } from "drizzle-orm";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
 import { users, roles, sessions, regions } from "@/db/schema";
@@ -109,6 +109,22 @@ export default async function AdminRollenPage({ params }: PageProps) {
     sessionCountRows.map((r: { userId: string; n: number }) => [r.userId, r.n]),
   );
 
+  // Block K4 (Teil A): letzter Login je User = max(sessions.created_at),
+  // tenant-scoped, EINE Aggregat-Query über ALLE gelisteten User (kein N+1;
+  // ergänzt die K2-Sitzungszählung). Zählt auch beendete/abgelaufene Sitzungen
+  // (jede Sitzung entstand durch eine Anmeldung) — „zuletzt aktiv" meint den
+  // letzten Login, nicht die letzte noch offene Sitzung.
+  const letzterLoginRows = await db
+    .select({ userId: sessions.userId, zuletzt: max(sessions.createdAt) })
+    .from(sessions)
+    .where(eq(sessions.tenantId, tenant.id))
+    .groupBy(sessions.userId);
+  const letzterLoginMap = new Map<string, Date>(
+    letzterLoginRows
+      .filter((r: { userId: string; zuletzt: Date | null }) => r.zuletzt !== null)
+      .map((r: { userId: string; zuletzt: Date | null }) => [r.userId, r.zuletzt as Date]),
+  );
+
   // Nach User gruppieren.
   type RoleEntry = { roleId: string; roleType: string; regionTyp: string; regionName: string };
   const userMap = new Map<
@@ -118,6 +134,8 @@ export default async function AdminRollenPage({ params }: PageProps) {
       email: string;
       accountStatus: string;
       aktiveSitzungen: number;
+      /** ISO-String des letzten Logins oder null (noch nie angemeldet). */
+      letzterLogin: string | null;
       roles: RoleEntry[];
     }
   >();
@@ -129,6 +147,7 @@ export default async function AdminRollenPage({ params }: PageProps) {
         email: row.email,
         accountStatus: row.accountStatus,
         aktiveSitzungen: sessionCountMap.get(row.userId) ?? 0,
+        letzterLogin: letzterLoginMap.get(row.userId)?.toISOString() ?? null,
         roles: [],
       };
       userMap.set(row.userId, entry);

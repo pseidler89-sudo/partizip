@@ -60,7 +60,23 @@ interface TenantUser {
   accountStatus: string;
   /** Anzahl aktiver (nicht revozierter, nicht abgelaufener) Sitzungen — informativ. */
   aktiveSitzungen: number;
+  /** K4: ISO-String des letzten Logins (max sessions.created_at) oder null. */
+  letzterLogin: string | null;
   roles: RoleEntry[];
+}
+
+/**
+ * K4 (Teil A): relative „Zuletzt aktiv"-Angabe aus dem ISO-Login-Zeitstempel.
+ * Deutsche Formatierung via Intl.RelativeTimeFormat; heute ⇒ „heute".
+ */
+function zuletztAktivLabel(iso: string | null): string {
+  if (!iso) return "Noch nie angemeldet";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "Noch nie angemeldet";
+  const tageDiff = Math.floor((then - Date.now()) / (24 * 60 * 60 * 1000));
+  const rtf = new Intl.RelativeTimeFormat("de", { numeric: "auto" });
+  if (tageDiff === 0) return "Zuletzt aktiv: heute";
+  return `Zuletzt aktiv: ${rtf.format(tageDiff, "day")}`;
 }
 
 interface Props {
@@ -311,6 +327,8 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
                       {u.aktiveSitzungen === 1
                         ? "1 aktive Sitzung"
                         : `${u.aktiveSitzungen} aktive Sitzungen`}
+                      {" · "}
+                      {zuletztAktivLabel(u.letzterLogin)}
                     </span>
                   </div>
                 </div>
