@@ -14,6 +14,7 @@ import { KontoLoeschenSection } from "./KontoLoeschenSection";
 import { BenachrichtigungSection } from "./BenachrichtigungSection";
 import { EinrichtungsCheckliste } from "./EinrichtungsCheckliste";
 import { ProfilSection } from "./ProfilSection";
+import { EmailAendernSection } from "./EmailAendernSection";
 import { FEATURE_ANLIEGEN_EINREICHEN } from "@/lib/features";
 import type { EinrichtungsStatus } from "@/lib/konto/einrichtung";
 
@@ -233,10 +234,17 @@ export default function KontoPage() {
 
       {/* Kontodaten */}
       <div className="pz-card p-4 space-y-3 text-sm mb-6">
-        <div className="flex justify-between">
+        <div className="flex justify-between gap-3">
           <span style={{ color: "var(--pz-muted)" }}>E-Mail</span>
-          <span className="font-medium text-pz-ink">{data.user.email}</span>
+          <span className="font-medium text-pz-ink break-all text-right">{data.user.email}</span>
         </div>
+        {/* Block J2b: E-Mail-Adresse ändern (Magic-Link an die NEUE Adresse).
+            Nicht auf dem Demo-Mandanten (Wechsel dort serverseitig gefenced). */}
+        {!data.tenant.istDemo && (
+          <div className="border-t border-pz-line pt-3">
+            <EmailAendernSection />
+          </div>
+        )}
         <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-start">
           <span className="shrink-0" style={{ color: "var(--pz-muted)" }}>Status</span>
           <div className="text-right">

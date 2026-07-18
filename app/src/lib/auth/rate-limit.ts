@@ -136,3 +136,126 @@ async function writeRateLimitAudit(
     metadata: { dimension },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Block J2b — E-Mail-Änderung: eigener Rate-Limit-Scope
+//
+// Bewusst GETRENNTE Scopes vom Login (`email`/`ip`), damit das Login-Budget
+// nicht mit E-Mail-Änderungen kollidiert (und umgekehrt). Drei Dimensionen,
+// Werte analog Login (3/15 min je fachlichem Scope, 10/15 min je IP):
+//   1. pro User          → HMAC(tenantId + ':ecu:' + userId)
+//   2. pro Ziel-Adresse  → HMAC(tenantId + ':ect:' + normalizeEmail(neu))
+//   3. pro IP            → HMAC(ip)  (eigener Scope-String)
+// Beide fachlichen Events werden IMMER vor der Prüfung geschrieben (Timing).
+// ---------------------------------------------------------------------------
+
+const EMAIL_CHANGE_USER_MAX = 3;
+const EMAIL_CHANGE_TARGET_MAX = 3;
+const EMAIL_CHANGE_IP_MAX = 10;
+
+export type EmailChangeRateLimitResult =
+  | { allowed: true }
+  | { allowed: false; reason: "user" | "target" | "ip" };
+
+/** Schreibt die Rate-Limit-Events für die E-Mail-Änderung (vor der Prüfung). */
+export async function writeEmailChangeRateLimitEvents(
+  db: Db,
+  opts: {
+    tenantId: string;
+    userId: string;
+    neueEmail: string;
+    ipAddress: string | null;
+  }
+): Promise<void> {
+  const userKeyHash = hmacRateLimit(`${opts.tenantId}:ecu:${opts.userId}`);
+  const targetKeyHash = hmacRateLimit(
+    `${opts.tenantId}:ect:${normalizeEmail(opts.neueEmail)}`
+  );
+  const toInsert: Array<{ scope: string; keyHash: string }> = [
+    { scope: "email_change_user", keyHash: userKeyHash },
+    { scope: "email_change_target", keyHash: targetKeyHash },
+  ];
+  if (opts.ipAddress) {
+    toInsert.push({
+      scope: "email_change_ip",
+      keyHash: hmacRateLimit(opts.ipAddress),
+    });
+  }
+  await db.insert(rateLimitEvents).values(toInsert);
+}
+
+/**
+ * Prüft die drei E-Mail-Änderungs-Limits. Schreibt bei Überschreitung ein
+ * PII-freies Audit-Event. Muss NACH writeEmailChangeRateLimitEvents laufen.
+ */
+export async function checkEmailChangeRateLimit(
+  db: Db,
+  opts: {
+    tenantId: string;
+    userId: string;
+    neueEmail: string;
+    ipAddress: string | null;
+  }
+): Promise<EmailChangeRateLimitResult> {
+  const since = new Date(Date.now() - EMAIL_WINDOW_MIN * 60 * 1000);
+
+  const countFor = async (scope: string, keyHash: string): Promise<number> => {
+    const rows = await db
+      .select({ n: count() })
+      .from(rateLimitEvents)
+      .where(
+        and(
+          eq(rateLimitEvents.scope, scope),
+          eq(rateLimitEvents.keyHash, keyHash),
+          gt(rateLimitEvents.createdAt, since)
+        )
+      );
+    return rows[0]?.n ?? 0;
+  };
+
+  const userCount = await countFor(
+    "email_change_user",
+    hmacRateLimit(`${opts.tenantId}:ecu:${opts.userId}`)
+  );
+  if (userCount > EMAIL_CHANGE_USER_MAX) {
+    await writeEmailChangeRateLimitAudit(db, opts.tenantId, opts.userId, "user");
+    return { allowed: false, reason: "user" };
+  }
+
+  const targetCount = await countFor(
+    "email_change_target",
+    hmacRateLimit(`${opts.tenantId}:ect:${normalizeEmail(opts.neueEmail)}`)
+  );
+  if (targetCount > EMAIL_CHANGE_TARGET_MAX) {
+    await writeEmailChangeRateLimitAudit(db, opts.tenantId, opts.userId, "target");
+    return { allowed: false, reason: "target" };
+  }
+
+  if (opts.ipAddress) {
+    const ipCount = await countFor(
+      "email_change_ip",
+      hmacRateLimit(opts.ipAddress)
+    );
+    if (ipCount > EMAIL_CHANGE_IP_MAX) {
+      await writeEmailChangeRateLimitAudit(db, opts.tenantId, opts.userId, "ip");
+      return { allowed: false, reason: "ip" };
+    }
+  }
+
+  return { allowed: true };
+}
+
+async function writeEmailChangeRateLimitAudit(
+  db: Db,
+  tenantId: string,
+  actorRef: string | null,
+  dimension: "user" | "target" | "ip"
+): Promise<void> {
+  await db.insert(auditEvents).values({
+    tenantId,
+    actorType: "user",
+    actorRef,
+    action: "konto.email_change_rate_limited",
+    metadata: { dimension },
+  });
+}
