@@ -527,6 +527,112 @@ describe("Magic-Link Auth Integration", () => {
     }
   });
 
+  // -------------------------------------------------------------------------
+  // Test 12: Block K2 (Gate-B MAJOR) — die Konto-Sperre wirkt am Login
+  // -------------------------------------------------------------------------
+  it("K2: gesperrtes Konto — kein neuer Magic-Link, Verify ohne Session; Entsperren stellt Login wieder her", async () => {
+    if (SKIP) return console.log(`SKIP: ${skipMsg}`);
+
+    const email = "locked-login@test.com";
+    const [user] = await db!
+      .insert(schema.users)
+      .values({
+        tenantId: tenantAId,
+        email,
+        minAgeConfirmedAt: new Date(),
+        accountStatus: "locked",
+      })
+      .returning();
+
+    // (a) /api/auth/request (Defense-in-Depth): neutrale 200, aber KEIN Token —
+    // ein gesperrtes Konto bekommt keinen frischen Magic-Link per Mail.
+    const zaehleTokens = async () => {
+      const rows = await db!
+        .select({ n: count() })
+        .from(schema.authTokens)
+        .where(
+          and(
+            eq(schema.authTokens.tenantId, tenantAId),
+            eq(schema.authTokens.email, email)
+          )
+        );
+      return rows[0]?.n ?? 0;
+    };
+    const tokensVorher = await zaehleTokens();
+    const resReq = await requestHandler(
+      makeRequest("http://test-a.localhost/api/auth/request", {
+        body: { email, minAgeConfirmed: true },
+        host: "test-a.localhost",
+      })
+    );
+    expect(resReq.status).toBe(200); // neutral — kein Status-/Enumeration-Leak
+    expect(await zaehleTokens()).toBe(tokensVorher);
+
+    // (b) /api/auth/verify (harte Durchsetzung): selbst mit einem noch
+    // GÜLTIGEN Token (z. B. vor der Sperre angefordert) entsteht KEINE Session.
+    const rawToken = generateRawToken();
+    await db!.insert(schema.authTokens).values({
+      tenantId: tenantAId,
+      email,
+      tokenHash: sha256Hex(rawToken),
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
+    const resVerify = await verifyHandler(
+      makeRequest("http://test-a.localhost/api/auth/verify", {
+        body: { token: rawToken },
+        host: "test-a.localhost",
+      })
+    );
+    const bodyVerify = (await resVerify.json()) as { error?: { code?: string } };
+    expect(resVerify.status).toBe(400);
+    // Generische Meldung im Token-Fehler-Vokabular (kein Status-Oracle).
+    expect(bodyVerify.error?.code).toBe("TOKEN_INVALID");
+
+    const zaehleSessions = async () => {
+      const rows = await db!
+        .select({ n: count() })
+        .from(schema.sessions)
+        .where(eq(schema.sessions.userId, user.id));
+      return rows[0]?.n ?? 0;
+    };
+    expect(await zaehleSessions()).toBe(0);
+
+    // PII-freies Audit für das IR-Lagebild.
+    const audit = await db!
+      .select()
+      .from(schema.auditEvents)
+      .where(
+        and(
+          eq(schema.auditEvents.action, "auth.login_rejected"),
+          eq(schema.auditEvents.actorRef, user.id)
+        )
+      );
+    expect(audit.length).toBe(1);
+    expect((audit[0].metadata as Record<string, unknown>).reason).toBe("account_status");
+    expect(JSON.stringify(audit[0].metadata)).not.toContain("@");
+
+    // (c) Regression: nach dem Entsperren funktioniert der Login wieder normal.
+    await db!
+      .update(schema.users)
+      .set({ accountStatus: "active" })
+      .where(eq(schema.users.id, user.id));
+    const rawToken2 = generateRawToken();
+    await db!.insert(schema.authTokens).values({
+      tenantId: tenantAId,
+      email,
+      tokenHash: sha256Hex(rawToken2),
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
+    const resVerify2 = await verifyHandler(
+      makeRequest("http://test-a.localhost/api/auth/verify", {
+        body: { token: rawToken2 },
+        host: "test-a.localhost",
+      })
+    );
+    expect(resVerify2.status).toBe(200);
+    expect(await zaehleSessions()).toBe(1);
+  });
+
   it("überspringt alle Tests wenn DATABASE_URL_TEST nicht gesetzt", () => {
     if (!TEST_DB_URL) {
       console.log(`SKIP: ${skipMsg}`);

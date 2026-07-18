@@ -76,7 +76,7 @@ type KontoDialog =
   | { art: "sessions"; userId: string; email: string }
   | { art: "sperren"; userId: string; email: string }
   | { art: "entsperren"; userId: string; email: string }
-  | { art: "offboarding"; userId: string; email: string }
+  | { art: "offboarding"; userId: string; email: string; gesperrt: boolean }
   | { art: "sperrenPerEmail"; email: string }
   | null;
 
@@ -396,7 +396,12 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId }: Props)
                         <button
                           type="button"
                           onClick={() =>
-                            setKontoDialog({ art: "offboarding", userId: u.userId, email: u.email })
+                            setKontoDialog({
+                              art: "offboarding",
+                              userId: u.userId,
+                              email: u.email,
+                              gesperrt: istGesperrt,
+                            })
                           }
                           disabled={isPending}
                           className="pz-btn pz-btn-sm pz-btn-danger"
@@ -531,8 +536,12 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId }: Props)
         beschreibung={
           <>
             Alle Rollen von <strong>{kontoDialog?.email}</strong> werden entfernt und
-            alle aktiven Sitzungen beendet. Das Konto bleibt als Bürgerkonto aktiv —
-            die Person kann weiterhin teilnehmen, hat aber keine Sonderrechte mehr.
+            alle aktiven Sitzungen beendet.{" "}
+            {/* Gate-B K2 (MINOR): UI-Wahrheit — bei gesperrtem Ziel hebt das
+                Offboarding die Sperre NICHT auf. */}
+            {kontoDialog?.art === "offboarding" && kontoDialog.gesperrt
+              ? "Das Konto bleibt gesperrt; die Sperre ist separat per Entsperren aufhebbar."
+              : "Das Konto bleibt als Bürgerkonto aktiv — die Person kann weiterhin teilnehmen, hat aber keine Sonderrechte mehr."}
           </>
         }
         bestaetigenLabel="Offboarding durchführen"

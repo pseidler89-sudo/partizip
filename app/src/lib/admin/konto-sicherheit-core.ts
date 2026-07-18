@@ -118,6 +118,12 @@ async function ladeZielMitGuards(
  * Revoziert alle AKTIVEN Sitzungen des Ziels (tenant-scoped) und liefert die
  * Anzahl. revoked_at per DB-now() (kein JS-Date in Roh-SQL); bereits revozierte
  * Zeilen bleiben unangetastet (revoked_at IS NULL im WHERE — idempotent).
+ *
+ * Gate-B K2 (MINOR): „aktiv" = nicht revoziert UND nicht abgelaufen (DB-now) —
+ * identisch zur UI-Zählung in admin/rollen. Abgelaufene Sitzungen sind ohnehin
+ * unbenutzbar (der Session-Check prüft expiresAt); sie mitzuzählen würde
+ * Message und Audit-metadata im IR-Postmortem überzeichnen („wie viele
+ * Live-Sessions hatte der Täter beim Sperren?").
  */
 async function revokeAktiveSessions(
   tx: Db,
@@ -132,6 +138,7 @@ async function revokeAktiveSessions(
         eq(sessions.tenantId, tenantId),
         eq(sessions.userId, targetUserId),
         isNull(sessions.revokedAt),
+        sql`${sessions.expiresAt} > now()`,
       ),
     )
     .returning({ id: sessions.id });
@@ -422,11 +429,18 @@ export async function offboardingCore(
       metadata: { roleTypes, sessionsBeendet },
     });
 
+    // Gate-B K2 (MINOR): UI-Wahrheit — Offboarding eines GESPERRTEN Kontos hebt
+    // die Sperre NICHT auf. Die Erfolgsmeldung verzweigt nach dem beim Guard
+    // gelesenen accountStatus, statt pauschal „bleibt aktiv" zu behaupten.
+    const statusSatz =
+      guard.ctx.ziel.accountStatus === "locked"
+        ? "Das Konto bleibt gesperrt."
+        : "Das Konto bleibt als Bürgerkonto aktiv.";
     return {
       ok: true as const,
       message:
         `Offboarding abgeschlossen: ${roleTypes.length} Rolle${roleTypes.length === 1 ? "" : "n"} ` +
-        `entfernt, ${sitzungenText(sessionsBeendet)}. Das Konto bleibt als Bürgerkonto aktiv.`,
+        `entfernt, ${sitzungenText(sessionsBeendet)}. ${statusSatz}`,
     };
   });
 }
@@ -436,7 +450,7 @@ export async function offboardingCore(
 // ---------------------------------------------------------------------------
 
 /**
- * Löst eine E-Mail tenant-scoped zu einer UserId auf und delegiert an
+ * Löst eine E-Mail tenant-scoped auf und sperrt ALLE Treffer via
  * kontoSperrenCore (IR-Fall: Bürger:in ohne Rolle, die nicht in der
  * Rollen-Liste steht).
  *
@@ -444,6 +458,16 @@ export async function offboardingCore(
  * `lower(trim(...))` beidseitig (Muster invitation-core). Nicht gefunden ⇒
  * bewusst GENERISCH „Konto nicht gefunden." (keine Bestätigung, ob eine
  * Adresse ein Konto hat — gleiches Verhalten wie fremder Tenant).
+ *
+ * Gate-B K2 (MAJOR): weil users.email case-SENSITIV unique ist und der
+ * Signup-Pfad nicht normalisiert, können Case-Zwillinge („Max@…" und „max@…")
+ * als ZWEI Konten im selben Tenant existieren. Ein `limit(1)` ohne ORDER BY
+ * sperrte davon ein planner-abhängiges, willkürliches Konto — der IR-Notfall
+ * träfe ggf. das falsche und meldete Erfolg. Deshalb werden ALLE nicht-
+ * gelöschten Treffer deterministisch NACHEINANDER gesperrt (IR-Zweck: die
+ * Adresse ist komplett still); Teilergebnisse werden präzise gemeldet. Audit
+ * passiert je Konto in kontoSperrenCore. Die Wurzel (E-Mail-Normalisierung
+ * beim Signup + Unique auf lower(email)) ist bewusst Backlog, nicht K2.
  */
 export async function kontoSperrenPerEmailCore(
   db: Db,
@@ -461,15 +485,47 @@ export async function kontoSperrenPerEmailCore(
     return { ok: false, error: "Bitte eine E-Mail-Adresse angeben." };
   }
 
+  // ALLE Treffer laden (kein limit!), deterministische Reihenfolge über id.
   const rows = await db
-    .select({ id: users.id })
+    .select({ id: users.id, accountStatus: users.accountStatus })
     .from(users)
     .where(and(eq(users.tenantId, tenantId), sql`lower(${users.email}) = ${email}`))
-    .limit(1);
-  const target = rows[0];
-  if (!target) {
+    .orderBy(users.id);
+  // Gelöschte (anonymisierte) Konten sind unantastbar und zählen nicht als
+  // Treffer — nur gelöschte Treffer ⇒ dieselbe generische Meldung wie „keine".
+  const treffer = rows.filter(
+    (r: { id: string; accountStatus: string }) => r.accountStatus !== "deleted",
+  );
+  if (treffer.length === 0) {
     return { ok: false, error: "Konto nicht gefunden." };
   }
 
-  return kontoSperrenCore(db, tenantId, callerRoleTypes, callerUserId, target.id);
+  // Sequenziell sperren (jeder Aufruf = eigene advisory-gelockte Tx + Audit).
+  let gesperrt = 0;
+  const fehler: string[] = [];
+  for (const t of treffer) {
+    const res = await kontoSperrenCore(db, tenantId, callerRoleTypes, callerUserId, t.id);
+    if (res.ok) {
+      gesperrt++;
+    } else {
+      fehler.push(res.error ?? "Unbekannter Fehler.");
+    }
+  }
+
+  const kontenText = (n: number) => (n === 1 ? "1 Konto gesperrt" : `${n} Konten gesperrt`);
+  if (fehler.length === 0) {
+    return { ok: true, message: `${kontenText(gesperrt)}.` };
+  }
+  if (gesperrt === 0) {
+    return {
+      ok: false,
+      error:
+        fehler.length === 1 ? fehler[0] : `Kein Konto gesperrt: ${fehler.join(" / ")}`,
+    };
+  }
+  // Teilergebnis präzise melden (z. B. Zwilling scheiterte am Letzter-Admin-Guard).
+  return {
+    ok: true,
+    message: `${kontenText(gesperrt)}, ${fehler.length} nicht: ${fehler.join(" / ")}`,
+  };
 }

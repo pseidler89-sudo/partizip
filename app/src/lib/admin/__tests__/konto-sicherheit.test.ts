@@ -145,14 +145,21 @@ describe("Konto-Sicherheit (Block K2, Integration)", () => {
   }
 
   /** Legt eine Session an (Default: Tenant 1, aktiv, 1 h gültig). */
-  async function createSession(userId: string, tId: string = tenantId, revoked = false) {
+  async function createSession(
+    userId: string,
+    tId: string = tenantId,
+    revoked = false,
+    abgelaufen = false,
+  ) {
     const [s] = await db
       .insert(sessions)
       .values({
         userId,
         tenantId: tId,
         tokenHash: `hash-${Date.now()}-${++counter}-${Math.random().toString(36).slice(2)}`,
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        expiresAt: abgelaufen
+          ? new Date(Date.now() - 60 * 60 * 1000)
+          : new Date(Date.now() + 60 * 60 * 1000),
         ...(revoked ? { revokedAt: new Date(Date.now() - 1000) } : {}),
       })
       .returning();
@@ -365,18 +372,24 @@ describe("Konto-Sicherheit (Block K2, Integration)", () => {
   // -------------------------------------------------------------------------
   // 7. sessionsBeenden — nur aktive Zeilen, korrekte Zählung
   // -------------------------------------------------------------------------
-  it.skipIf(SKIP)("7. sessionsBeenden revoziert nur aktive Sessions; bereits revozierte bleiben", async () => {
+  it.skipIf(SKIP)("7. sessionsBeenden revoziert nur aktive Sessions; revozierte und abgelaufene bleiben", async () => {
     const ziel = await createUser("sess-ziel");
     await createSession(ziel.id);
     await createSession(ziel.id);
     const schonRevoziert = await createSession(ziel.id, tenantId, true);
     const altesRevokedAt = schonRevoziert.revokedAt;
+    // Gate-B K2 (MINOR): abgelaufene Session zählt NICHT als aktiv — sie darf
+    // weder in der Anzahl auftauchen noch angefasst werden (Live-Risiko = 2).
+    const abgelaufen = await createSession(ziel.id, tenantId, false, true);
 
     const res = await sessionsBeendenCore(db, tenantId, SUPER, callerAdminId, ziel.id);
     expect(res.ok).toBe(true);
     expect(res.message).toMatch(/2 aktive Sitzungen beendet/);
 
-    expect((await aktiveSessions(ziel.id)).length).toBe(0);
+    // Unrevoziert bleibt NUR die abgelaufene Session (unbenutzbar, unangetastet).
+    const unrevoziert = await aktiveSessions(ziel.id);
+    expect(unrevoziert.length).toBe(1);
+    expect(unrevoziert[0].id).toBe(abgelaufen.id);
     // Die bereits revozierte Session behält ihren alten Zeitstempel.
     const [alt] = await db
       .select({ revokedAt: sessions.revokedAt })
@@ -384,7 +397,7 @@ describe("Konto-Sicherheit (Block K2, Integration)", () => {
       .where(eq(sessions.id, schonRevoziert.id));
     expect(alt.revokedAt?.getTime()).toBe(altesRevokedAt?.getTime());
 
-    // Audit mit korrekter Anzahl.
+    // Audit mit korrekter Anzahl (nur Live-Sessions, wie die UI-Zählung).
     const audit = await db
       .select()
       .from(auditEvents)
@@ -407,13 +420,16 @@ describe("Konto-Sicherheit (Block K2, Integration)", () => {
     const ziel = await createUser("sperr-sess");
     await createSession(ziel.id);
     await createSession(ziel.id);
+    // Abgelaufene Session zählt nicht ins IR-Audit (sessionsBeendet = Live-Sessions).
+    await createSession(ziel.id, tenantId, false, true);
 
     const res = await kontoSperrenCore(db, tenantId, SUPER, callerAdminId, ziel.id);
     expect(res.ok).toBe(true);
 
     const [zielRow] = await db.select().from(users).where(eq(users.id, ziel.id));
     expect(zielRow.accountStatus).toBe("locked");
-    expect((await aktiveSessions(ziel.id)).length).toBe(0);
+    // Unrevoziert bleibt nur die abgelaufene (unbenutzbare) Session.
+    expect((await aktiveSessions(ziel.id)).length).toBe(1);
 
     const audit = await db
       .select()
@@ -510,6 +526,27 @@ describe("Konto-Sicherheit (Block K2, Integration)", () => {
     expect(rollen.length).toBe(1);
   });
 
+  it.skipIf(SKIP)("9e. Offboarding-Message ist statusabhängig: gesperrtes Ziel ⇒ bleibt gesperrt", async () => {
+    // Gate-B K2 (MINOR): IR-Kette „erst sperren, dann Rollen entziehen" — die
+    // Erfolgsmeldung darf nicht behaupten, das Konto sei aktiv.
+    const gesperrtesZiel = await createUser("off-locked", tenantId, "locked");
+    await addRole(gesperrtesZiel.id, "verifier");
+    const resLocked = await offboardingCore(db, tenantId, SUPER, callerAdminId, gesperrtesZiel.id);
+    expect(resLocked.ok).toBe(true);
+    expect(resLocked.message).toContain("Das Konto bleibt gesperrt.");
+    expect(resLocked.message).not.toContain("bleibt als Bürgerkonto aktiv");
+    // Status unverändert: Offboarding hebt die Sperre NICHT auf.
+    const [row] = await db.select().from(users).where(eq(users.id, gesperrtesZiel.id));
+    expect(row.accountStatus).toBe("locked");
+
+    // Aktives Ziel ⇒ die Aktiv-Variante der Message.
+    const aktivesZiel = await createUser("off-aktiv");
+    await addRole(aktivesZiel.id, "verifier");
+    const resAktiv = await offboardingCore(db, tenantId, SUPER, callerAdminId, aktivesZiel.id);
+    expect(resAktiv.ok).toBe(true);
+    expect(resAktiv.message).toContain("Das Konto bleibt als Bürgerkonto aktiv.");
+  });
+
   // -------------------------------------------------------------------------
   // 10. kontoSperrenPerEmail
   // -------------------------------------------------------------------------
@@ -539,6 +576,48 @@ describe("Konto-Sicherheit (Block K2, Integration)", () => {
     );
     expect(unbekannt.ok).toBe(false);
     expect(unbekannt.error).toBe("Konto nicht gefunden.");
+  });
+
+  it.skipIf(SKIP)("10b. kontoSperrenPerEmail sperrt Case-Zwillinge deterministisch BEIDE (Gate-B MAJOR)", async () => {
+    // users_tenant_email_unique ist case-SENSITIV und der Signup normalisiert
+    // nicht — „Max@…" und „max@…" können als ZWEI Konten existieren. Die
+    // IR-Sperre muss die Adresse KOMPLETT stilllegen, nicht ein planner-
+    // abhängiges Einzelkonto.
+    const basis = `zwilling-${Date.now()}-${++counter}@konto-test.de`;
+    const emailGross = `Max.${basis}`;
+    const emailKlein = `max.${basis}`;
+    const [zwillingA] = await db.insert(users).values({ tenantId, email: emailGross }).returning();
+    const [zwillingB] = await db.insert(users).values({ tenantId, email: emailKlein }).returning();
+    await createSession(zwillingA.id);
+    await createSession(zwillingB.id);
+
+    const res = await kontoSperrenPerEmailCore(
+      db, tenantId, SUPER, callerAdminId, emailKlein,
+    );
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("2 Konten gesperrt");
+
+    // BEIDE Konten gesperrt, BEIDE Sessions beendet — kein Re-Login über die
+    // andere Schreibweise möglich.
+    for (const z of [zwillingA, zwillingB]) {
+      const [row] = await db.select().from(users).where(eq(users.id, z.id));
+      expect(row.accountStatus).toBe("locked");
+      expect((await aktiveSessions(z.id)).length).toBe(0);
+      // Audit je Konto (aus kontoSperrenCore).
+      const audit = await db
+        .select()
+        .from(auditEvents)
+        .where(and(eq(auditEvents.action, "account.locked"), eq(auditEvents.targetId, z.id)));
+      expect(audit.length).toBe(1);
+    }
+
+    // Teilergebnis: erneuter Aufruf — beide bereits gesperrt ⇒ ok:false mit
+    // präziser Begründung, kein stiller „Erfolg".
+    const nochmal = await kontoSperrenPerEmailCore(
+      db, tenantId, SUPER, callerAdminId, emailGross,
+    );
+    expect(nochmal.ok).toBe(false);
+    expect(nochmal.error).toContain("nicht aktiv");
   });
 
   // -------------------------------------------------------------------------
