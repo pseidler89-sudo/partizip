@@ -26,6 +26,7 @@ import {
   getKinder,
   getNachfahren,
   getVertikaleScheibe,
+  regionPfad,
 } from "@/lib/region/tree";
 import { seedRegions } from "../../../../scripts/seed-regions.js";
 
@@ -186,6 +187,14 @@ describe("region/tree + seed-regions (Integration)", () => {
     const wehen = await byLabel("wehen");
     const vorfahren = await getVorfahren(db as never, wehen.id);
     expect(vorfahren.map((r) => r.pathLabel)).toEqual(["de", "hessen", "rtk", "taunusstein"]);
+  });
+
+  it.skipIf(SKIP)("regionPfad: lesbare Kette Bund→…→Ortsteil (Namen mit ›)", async () => {
+    const wehen = await byLabel("wehen");
+    const pfad = await regionPfad(db as never, wehen.id);
+    expect(pfad).toBe("Deutschland › Hessen › Rheingau-Taunus-Kreis › Taunusstein › Wehen");
+    // Unbekannter Knoten → null.
+    expect(await regionPfad(db as never, "00000000-0000-0000-0000-000000000000")).toBeNull();
   });
 
   it.skipIf(SKIP)("direkte Kinder: Taunusstein hat genau die 10 Ortsteile", async () => {

@@ -13,7 +13,7 @@ import { cookies, headers } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { createDb, type Db } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
-import { sessions, users } from "@/db/schema";
+import { sessions, users, auditEvents } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import {
@@ -200,5 +200,67 @@ export async function ortsteilSetzen(code: string | null): Promise<RegionResult>
 export async function regionZuruecksetzen(): Promise<RegionResult> {
   const c = await cookies();
   c.delete(REGION_COOKIE_NAME);
+  return { ok: true };
+}
+
+/**
+ * User-Id der aktuellen, gültigen Session im gegebenen Tenant (oder null). Wie
+ * die Prüfung in setHomeRegionIfLoggedIn, aber gibt die Id für ein self-scoptes
+ * UPDATE + Audit zurück.
+ */
+async function sessionUserId(db: Db, tenantId: string): Promise<string | null> {
+  const c = await cookies();
+  const rawToken = c.get(SESSION_COOKIE_NAME)?.value;
+  if (!rawToken) return null;
+  const rows = await db
+    .select({ userId: sessions.userId, revokedAt: sessions.revokedAt, expiresAt: sessions.expiresAt })
+    .from(sessions)
+    .where(and(eq(sessions.tokenHash, sha256Hex(rawToken)), eq(sessions.tenantId, tenantId)))
+    .limit(1);
+  const s = rows[0];
+  if (!s || s.revokedAt || s.expiresAt < new Date()) return null;
+  return s.userId;
+}
+
+/**
+ * Block J2c: Anzeige-Wohnort im Konto zurücksetzen. Nullt AUSSCHLIESSLICH
+ * `users.home_region_id` (doppelt gescoptes UPDATE: eigener User + Tenant) UND
+ * löscht das `pz_region`-Cookie — anders als `regionZuruecksetzen`, das nur das
+ * Cookie löscht (im Konto wäre das ein Bug: „zurückgesetzt", aber Standard-Sicht
+ * bliebe). BINDENDE INVARIANTE (ADR-024, gebiet.ts): `residency_region_id` (der
+ * verbindliche Stimm-Anker, nur per QR/grantResidency) UND `ortsteil_id` werden
+ * NIEMALS angefasst. Audit PII-frei.
+ */
+export async function wohnortAnzeigeZuruecksetzen(): Promise<RegionResult> {
+  const tenantId = await currentTenantId();
+  if (!tenantId) return { ok: false, error: "Diese Seite ist nicht erreichbar." };
+
+  const db = createDb(databaseUrl());
+  const userId = await sessionUserId(db, tenantId);
+  if (!userId) return { ok: false, error: "Nicht authentifiziert." };
+
+  // Doppelt gescoptes UPDATE — NUR home_region_id. residency_region_id/ortsteil_id
+  // bleiben unangetastet. RETURNING als Treffer-Bestätigung.
+  const updated = await db
+    .update(users)
+    .set({ homeRegionId: null })
+    .where(and(eq(users.tenantId, tenantId), eq(users.id, userId)))
+    .returning({ id: users.id });
+  if (updated.length === 0) return { ok: false, error: "Benutzer nicht gefunden." };
+
+  // Cookie ebenfalls löschen (sonst zeigt die Standard-Sicht weiter die alte Region).
+  const c = await cookies();
+  c.delete(REGION_COOKIE_NAME);
+
+  // Audit PII-frei (nur die Aktion, keine E-Mail/kein Ort).
+  await db.insert(auditEvents).values({
+    tenantId,
+    actorType: "user",
+    actorRef: userId,
+    action: "konto.wohnort_zurueckgesetzt",
+    targetType: "user",
+    targetId: userId,
+  });
+
   return { ok: true };
 }
