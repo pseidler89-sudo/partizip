@@ -321,6 +321,17 @@ describe("composer-autoritaet (Integration, echte Actions)", () => {
     expect((await pollErstellen({ frage: "Super Ortsteil-Frage?", scopeLevel: "ortsteil", scopeCode: "OT-B" })).ok).toBe(true);
   });
 
+  it.skipIf(SKIP)("pollErstellen: auch super_admin darf per Action KEINE kreis/land-Poll anlegen (Ebenen-Grenze hart)", async () => {
+    // H bleibt bewusst abwärts: der super_admin-Bypass gilt der Gebiets-Bindung,
+    // NICHT der Ebenen-Grenze. kreis/land = Separate-Tenant-Modell (PR #49).
+    loginAls("sup");
+    const before = (await db.select().from(polls).where(eq(polls.tenantId, tenantId))).length;
+    const res = await pollErstellen({ frage: "Super kreisweite Frage?", scopeLevel: "kreis" });
+    expect(res.ok).toBe(false);
+    const after = (await db.select().from(polls).where(eq(polls.tenantId, tenantId))).length;
+    expect(after).toBe(before);
+  });
+
   // --- Symmetrie: aktivieren/schließen/löschen außerhalb des Gebiets --------
 
   it.skipIf(SKIP)("Symmetrie: Gemeinde-Admin kann kreis-Poll NICHT aktivieren/schließen/löschen", async () => {

@@ -699,7 +699,13 @@ export async function pollErstellen(
   const istSuperAdmin = istSuperAdminScope(scopes);
   const zielRegion = await getRegion(ctx.db, regionId);
   const zielPath = zielRegion?.path ?? null;
-  if (!zielPath || !pollGebietErlaubt(scopes, istSuperAdmin, zielPath)) {
+  // H bleibt bewusst ABWÄRTS: Poll-Erstellung nur auf Gemeinde-/Ortsteil-Ebene.
+  // kreis/land/bund gehören dem Separate-Tenant-Modell (PR #49) und werden hier
+  // hart abgelehnt — auch für super_admin (der Bypass gilt der Gebiets-Bindung
+  // pfadDecktAb, NICHT der Ebenen-Grenze). Sonst könnte ein Direkt-Action-Aufruf
+  // mit scopeLevel:"kreis" die Feed-Begrenzung umgehen.
+  const zielTypErlaubt = zielRegion?.typ === "gemeinde" || zielRegion?.typ === "ortsteil";
+  if (!zielPath || !zielTypErlaubt || !pollGebietErlaubt(scopes, istSuperAdmin, zielPath)) {
     // Verstoß PII-frei protokollieren (nur Scope-Ebene, kein Poll-Inhalt); noch
     // keine Poll → targetId null.
     await ctx.db.insert(auditEvents).values({

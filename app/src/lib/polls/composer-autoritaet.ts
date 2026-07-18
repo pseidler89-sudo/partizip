@@ -140,7 +140,16 @@ export async function erlaubteZielGebiete(
       });
     } else {
       const code = await resolveOrtsteilCodeForRegionId(db, tenantId, r.id);
-      if (!code) continue; // ohne Code nicht via (scopeLevel,scopeCode) adressierbar.
+      if (!code) {
+        // Ohne Code nicht via (scopeLevel,scopeCode) adressierbar → fail-closed
+        // überspringen. In Prod folgenlos (Ortsteil-Knoten stammen aus ortsteile.json,
+        // Round-Trip garantiert), aber beobachtbar machen, falls Baum und
+        // ortsteile-Tabelle je divergieren (Normalisierung/manueller Knoten).
+        console.warn(
+          `[composer-autoritaet] Ortsteil-Knoten ohne ortsteile-Code übersprungen: regionId=${r.id} path=${r.path}`,
+        );
+        continue;
+      }
       ergebnis.push({
         regionId: r.id,
         typ: "ortsteil",
@@ -184,7 +193,11 @@ export async function pollVerwaltungErlaubt(
     .innerJoin(regions, eq(regions.id, polls.regionId))
     .where(and(eq(polls.id, pollId), eq(polls.tenantId, tenantId)))
     .limit(1);
-  const zielPath = rows[0]?.path;
-  if (zielPath === undefined) return true; // Poll im Tenant nicht vorhanden → Standard-Guard.
+  if (rows.length === 0) return true; // Poll im Tenant nicht vorhanden → Standard-Guard.
+  const zielPath = rows[0].path;
+  // regions.path ist im Schema nullable (Trigger setzt es real immer); ein
+  // NULL-Pfad wäre eine Datenanomalie → fail-closed ablehnen statt pfadDecktAb(…,null)
+  // (TypeError). null-sicher wie der Erstellungs-Pfad (`!zielPath`).
+  if (!zielPath) return false;
   return pollGebietErlaubt(scopes, istSuperAdmin, zielPath);
 }

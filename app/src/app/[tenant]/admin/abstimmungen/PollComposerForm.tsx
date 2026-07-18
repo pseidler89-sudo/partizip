@@ -305,7 +305,12 @@ export default function PollComposerForm({ gebiete, demo = false }: Props) {
           </div>
         )}
 
-        {/* Ebene + (bei Ortsteil) Knoten — server-getriebener Picker (Block H) */}
+        {/* Ebene + (bei Ortsteil) Knoten — server-getriebener Picker (Block H).
+            Bei leerem Feed (Tenant-Baum nicht geseedet) ganz ausblenden: das
+            keineGebiete-Banner + der deaktivierte Absenden-Button kommunizieren
+            den Zustand; ein leeres <select> ohne <option> würde nur verwirren
+            (und eine React-Dev-Warnung erzeugen). */}
+        {!keineGebiete && (
         <div className="grid gap-5 sm:grid-cols-2">
           <div>
             <label htmlFor="scopeLevel" className={labelCls} style={{ color: "var(--pz-ink)" }}>
@@ -361,6 +366,7 @@ export default function PollComposerForm({ gebiete, demo = false }: Props) {
             </div>
           )}
         </div>
+        )}
 
         {/* Verbindlich */}
         <div className="rounded-lg border p-4" style={{ borderColor: "var(--pz-line)" }}>
