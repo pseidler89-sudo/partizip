@@ -9,7 +9,9 @@
  */
 
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { ANBIETER, ANGABEN_VOLLSTAENDIG } from "@/lib/legal/anbieter";
+import { getTenantFromHost } from "@/lib/tenant";
 
 export const metadata: Metadata = {
   title: "Datenschutzerklärung — Partizip",
@@ -31,8 +33,14 @@ function Abschnitt({
   );
 }
 
-export default function DatenschutzPage() {
+export default async function DatenschutzPage() {
   const llmAktivierbar = Boolean(process.env.ANTHROPIC_API_KEY);
+  // Block L (ADR-028): Neutralitäts-Check-Absatz nur zeigen, wenn der Check für
+  // diese Kommune aktiv ist (analog llmAktivierbar-Muster; Flag je Tenant).
+  const headerStore = await headers();
+  const host = headerStore.get("host") ?? "localhost";
+  const tenant = await getTenantFromHost(host);
+  const kiCheckAktiv = tenant?.kiNeutralitaetsPflicht === true;
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-10 text-sm leading-relaxed">
@@ -267,6 +275,18 @@ export default function DatenschutzPage() {
           Profiling im Sinne des Art. 22 DSGVO statt. Veröffentlichungen und
           Beteiligungsrechte werden ausschließlich von Menschen entschieden.
         </p>
+        {kiCheckAktiv && (
+          <p>
+            Für diese Kommune ist ein KI-gestützter Neutralitäts-Check aktiv:
+            Eingereichte Umfragen werden vor der Veröffentlichung auf sachliche
+            Neutralität geprüft. Bewertet wird dabei ausschließlich der öffentliche
+            Umfrage-Text — keine personenbezogenen Daten, keine Weitergabe an Dritte,
+            kein zusätzlicher Cookie. Das Prüfergebnis (neutral oder angehalten) ist
+            ein Hinweis; über Freigabe oder Anpassung entscheidet ausschließlich ein
+            Mensch. Der vollständige Prüf-Maßstab ist öffentlich einsehbar (siehe
+            &bdquo;Transparenz&ldquo;).
+          </p>
+        )}
       </Abschnitt>
 
       <Abschnitt titel="15. Änderungen">
