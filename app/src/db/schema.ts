@@ -690,6 +690,14 @@ export const authTokens = pgTable(
     // SHA-256-Hex des Roh-Tokens — Roh-Token verlässt nie Server-Gedächtnis
     tokenHash: text("token_hash").notNull().unique(),
     purpose: text("purpose").notNull().default("login"),
+    // Block J2b: der anfordernde User bei purpose='email_change' (Kontrolle über
+    // die NEUE Adresse beweisen). NULL für Login-/Hint-Tokens. FK ON DELETE
+    // CASCADE — ein echtes users-DELETE (z. B. Tenant-Teardown) reißt offene
+    // Änderungs-Tokens mit (DSGVO-sauber). Die Produkt-Löschung (delete.ts)
+    // ANONYMISIERT die users-Zeile (kein DELETE) → die Kaskade feuert dort nicht;
+    // delete.ts räumt die Tokens weiterhin per (tenant,email) ab. Kein Doppel-
+    // lösch-Problem, da beide Pfade dieselbe Zeilenmenge abdecken.
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     // NULL = unverbraucht; gesetzt = eingelöst (atomarer CAS in verify)
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
