@@ -87,6 +87,10 @@ export async function pruefungAbschliessenCore(
       id: polls.id,
       status: polls.status,
       erstelltVon: polls.erstelltVon,
+      // Wortlaut für den unveränderlichen Snapshot ins Log (kein späterer Poll-Join).
+      frage: polls.frage,
+      // Für den Freigabe-Guard (Enddatum darf nicht bereits vergangen sein).
+      closesAt: polls.closesAt,
     })
     .from(polls)
     .where(and(eq(polls.id, pollId), eq(polls.tenantId, tenantId)))
@@ -96,6 +100,20 @@ export async function pruefungAbschliessenCore(
   if (!poll) return { ok: false, error: "Umfrage nicht gefunden." };
   if (poll.status !== "in_pruefung") {
     return { ok: false, error: "Diese Umfrage ist nicht (mehr) in Prüfung." };
+  }
+
+  // MINOR1: Bei der FREIGABE (neutral → aktiv) darf das Enddatum nicht bereits
+  // vergangen sein. Sitzt die Umfrage lange in Prüfung, ginge sie sonst „aktiv, aber
+  // tot" live und würde fälschlich alle im Gebiet benachrichtigen. Vorprüfung VOR dem
+  // CAS: kein Statuswechsel, kein Notify, keine Log-Zeile bei Ablehnung. (JS-Uhr wie
+  // die übrigen opens/closes-Vorprüfungen in actions.ts — kein JS-Date in Roh-SQL.)
+  if (verdict === "neutral" && poll.closesAt !== null && poll.closesAt <= new Date()) {
+    return {
+      ok: false,
+      error:
+        "Das Enddatum liegt in der Vergangenheit. Bitte halten Sie die Umfrage an, " +
+        "passen Sie das Enddatum an und reichen Sie erneut ein.",
+    };
   }
 
   // SoD nur bei der FREIGABE: der Prüfer darf nicht der Ersteller sein — außer die
@@ -137,6 +155,7 @@ export async function pruefungAbschliessenCore(
       await tx.insert(kiPruefungen).values({
         tenantId,
         pollId,
+        frageSnapshot: poll.frage,
         verdict: "neutral",
         begruendung,
         verletzteRegel: null,
@@ -188,6 +207,7 @@ export async function pruefungAbschliessenCore(
     await tx.insert(kiPruefungen).values({
       tenantId,
       pollId,
+      frageSnapshot: poll.frage,
       verdict: "angehalten",
       begruendung,
       verletzteRegel,

@@ -240,7 +240,9 @@ export default function PollAdminActions({
                 style={{ borderColor: "var(--pz-line)", backgroundColor: "var(--pz-bg)", color: "var(--pz-ink)" }}
               />
               <p id={`begr-hint-${pollId}`} className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
-                Erscheint öffentlich im Transparenz-Log (ohne Ihren Namen).
+                Die Begründung erscheint öffentlich im Transparenz-Log (ohne Ihren
+                Namen). Bitte zitieren Sie darin <strong>keine Klarnamen oder
+                personenbezogenen Daten</strong> — der Text wird veröffentlicht.
               </p>
             </div>
 
@@ -302,8 +304,8 @@ export default function PollAdminActions({
           }
           beschreibung={
             pruefConfirm === "neutral"
-              ? "Die Umfrage wird als neutral bewertet, geht live und benachrichtigt die Nutzer:innen im Gebiet. Der Eintrag erscheint im öffentlichen Transparenz-Log."
-              : "Die Umfrage geht mit Ihrer Begründung zurück an die erstellende Person und kann angepasst erneut eingereicht werden. Der Eintrag erscheint im öffentlichen Transparenz-Log."
+              ? "Die Umfrage wird als neutral bewertet, geht live und benachrichtigt die Nutzer:innen im Gebiet. Da sie damit ohnehin öffentlich ist, erscheint im Transparenz-Log der Frage-Wortlaut samt Begründung."
+              : "Die Umfrage geht mit Ihrer Begründung zurück an die erstellende Person und kann angepasst erneut eingereicht werden. Im öffentlichen Transparenz-Log erscheint die Frage selbst NICHT — nur Ergebnis, verletzte Regel und Ihre Begründung."
           }
           bestaetigenLabel={pruefConfirm === "neutral" ? "Ja, freigeben" : "Ja, anhalten"}
           variante={pruefConfirm === "neutral" ? "normal" : "gefahr"}

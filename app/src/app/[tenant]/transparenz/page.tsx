@@ -191,8 +191,17 @@ export default async function TransparenzPage({ params }: PageProps) {
               {kiPruefungen.map((k) => (
                 <li key={k.id} className="pz-card p-4">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm font-medium" style={{ color: "var(--pz-ink)" }}>
-                      {decodeHtmlEntities(k.frage)}
+                    {/*
+                      Bei 'angehalten' liegt KEIN Frage-Text vor (bewusst redigiert):
+                      die Frage blieb Entwurf/nie öffentlich; wir zeigen nur, DASS eine
+                      Frage angehalten wurde — plus Regel + Begründung. Bei 'neutral'
+                      ging die Umfrage ohnehin live → Wortlaut wird gezeigt.
+                    */}
+                    <p
+                      className="text-sm font-medium"
+                      style={{ color: k.frage ? "var(--pz-ink)" : "var(--pz-muted)" }}
+                    >
+                      {k.frage ? decodeHtmlEntities(k.frage) : "Eine eingereichte Frage wurde angehalten."}
                     </p>
                     {k.verdict === "neutral" ? (
                       <span className="shrink-0 inline-flex items-center rounded-full pz-badge-success px-2.5 py-0.5 text-xs font-medium">

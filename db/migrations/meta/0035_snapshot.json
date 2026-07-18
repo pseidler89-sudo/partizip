@@ -1363,6 +1363,12 @@
           "name": "poll_id",
           "type": "uuid",
           "primaryKey": false,
+          "notNull": false
+        },
+        "frage_snapshot": {
+          "name": "frage_snapshot",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true
         },
         "verdict": {
@@ -1484,7 +1490,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "ki_pruefungen_geprueft_von_users_id_fk": {

@@ -375,12 +375,14 @@ describe("polls/pruefung (Block L, Integration echte Actions)", () => {
     await loginAls(admin2UserId);
     await pollPruefungAbschliessen({ pollId: p.id, verdict: "angehalten", begruendung: "Einseitige Rahmung.", verletzteRegel: "Regel 2" });
 
-    const [pRow] = await db.select().from(polls).where(eq(polls.id, p.id));
+    // Log-Zeile über ihre id finden (angehalten liefert frage=null → nicht über frage).
+    const [logRow] = await db.select().from(kiPruefungen).where(eq(kiPruefungen.pollId, p.id));
     const list = await getKiPruefungenPublic(db as never, tenantId, 50);
-    const eintrag = list.find((k) => k.frage === pRow.frage);
+    const eintrag = list.find((k) => k.id === logRow.id);
     expect(eintrag).toBeDefined();
     expect(eintrag!.verdict).toBe("angehalten");
     expect(eintrag!.verletzteRegel).toBe("Regel 2");
+    expect(eintrag!.begruendung).toBe("Einseitige Rahmung.");
     expect(eintrag!.promptVersion).toBe(PROMPT_VERSION);
     // Öffentliche Sicht darf keine Person offenlegen.
     expect(Object.keys(eintrag!)).not.toContain("geprueftVon");
@@ -391,6 +393,90 @@ describe("polls/pruefung (Block L, Integration echte Actions)", () => {
     const [tB] = await db.insert(tenants).values({ slug: nextSlug("prb"), name: "PR-B" }).returning();
     const fremd = await getKiPruefungenPublic(db as never, tB.id, 50);
     expect(fremd.length).toBe(0);
+  });
+
+  // --- Redaktion angehaltener Fragen + Manipulationssicherheit ----------------
+
+  it.skipIf(SKIP)("angehalten redigiert die Frage (frage=null), neutral zeigt den Wortlaut", async () => {
+    // Angehaltene Frage: Wortlaut darf NICHT öffentlich werden.
+    const pHold = await createPoll({ status: "in_pruefung", erstelltVon: adminUserId });
+    const [pHoldRow] = await db.select().from(polls).where(eq(polls.id, pHold.id));
+    await loginAls(admin2UserId);
+    await pollPruefungAbschliessen({
+      pollId: pHold.id, verdict: "angehalten",
+      begruendung: "Suggestiv.", verletzteRegel: "Regel 1",
+    });
+
+    // Freigegebene Frage: Wortlaut wird gezeigt (ging ohnehin live).
+    const pOk = await createPoll({ status: "in_pruefung", erstelltVon: adminUserId });
+    const [pOkRow] = await db.select().from(polls).where(eq(polls.id, pOk.id));
+    await loginAls(admin2UserId);
+    await pollPruefungAbschliessen({ pollId: pOk.id, verdict: "neutral", begruendung: "Ausgewogen." });
+
+    const [holdLog] = await db.select().from(kiPruefungen).where(eq(kiPruefungen.pollId, pHold.id));
+    const [okLog] = await db.select().from(kiPruefungen).where(eq(kiPruefungen.pollId, pOk.id));
+    const list = await getKiPruefungenPublic(db as never, tenantId, 50);
+
+    const holdEintrag = list.find((k) => k.id === holdLog.id)!;
+    const okEintrag = list.find((k) => k.id === okLog.id)!;
+
+    // angehalten: KEINE Frage öffentlich; Verdict/Regel/Begründung bleiben.
+    expect(holdEintrag.frage).toBeNull();
+    expect(holdEintrag.verletzteRegel).toBe("Regel 1");
+    expect(holdEintrag.begruendung).toBe("Suggestiv.");
+    // Der angehaltene Wortlaut taucht NIRGENDS im öffentlichen Payload auf.
+    expect(JSON.stringify(list)).not.toContain(pHoldRow.frage);
+
+    // neutral: Frage-Wortlaut (Snapshot) sichtbar.
+    expect(okEintrag.frage).toBe(pOkRow.frage);
+  });
+
+  it.skipIf(SKIP)("Log-Zeile überlebt Poll-Löschung (poll_id SET NULL, frage_snapshot bleibt)", async () => {
+    const p = await createPoll({ status: "in_pruefung", erstelltVon: adminUserId });
+    const [pRow] = await db.select().from(polls).where(eq(polls.id, p.id));
+    await loginAls(admin2UserId);
+    await pollPruefungAbschliessen({
+      pollId: p.id, verdict: "angehalten",
+      begruendung: "Manipulationssicher.", verletzteRegel: "Regel 3",
+    });
+
+    const [before] = await db.select().from(kiPruefungen).where(eq(kiPruefungen.pollId, p.id));
+    expect(before.frageSnapshot).toBe(pRow.frage);
+
+    // Poll löschen — die Prüf-Zeile darf NICHT mitgelöscht werden (kein CASCADE).
+    await db.delete(polls).where(eq(polls.id, p.id));
+
+    const [after] = await db.select().from(kiPruefungen).where(eq(kiPruefungen.id, before.id));
+    expect(after).toBeDefined();
+    expect(after.pollId).toBeNull(); // FK auf SET NULL
+    expect(after.frageSnapshot).toBe(pRow.frage); // Snapshot bleibt = Nachweis erhalten
+    expect(after.verdict).toBe("angehalten");
+  });
+
+  // --- MINOR1: Freigabe mit vergangenem Enddatum -----------------------------
+
+  it.skipIf(SKIP)("Freigabe mit vergangenem closesAt wird abgelehnt (kein Statuswechsel, kein Notify, kein Log)", async () => {
+    const p = await createPoll({ status: "in_pruefung", erstelltVon: adminUserId });
+    // Enddatum in die Vergangenheit setzen (lange in Prüfung gelegen).
+    await db.update(polls).set({ closesAt: new Date(Date.now() - 3_600_000) }).where(eq(polls.id, p.id));
+    await db.insert(users).values({
+      tenantId, email: `on-past-${Date.now()}@pr.de`, accountStatus: "active", notifyNewPolls: true,
+    });
+
+    await loginAls(admin2UserId); // Prüfer ≠ Ersteller (SoD ok, nur closesAt soll greifen)
+    const { calls, transport } = spyTransport();
+    const res = await pollPruefungAbschliessen(
+      { pollId: p.id, verdict: "neutral", begruendung: "Inhaltlich neutral." },
+      transport,
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/Enddatum liegt in der Vergangenheit/i);
+    expect(calls.length).toBe(0); // KEIN Notify
+
+    const [row] = await db.select().from(polls).where(eq(polls.id, p.id));
+    expect(row.status).toBe("in_pruefung"); // unverändert
+    const logs = await db.select().from(kiPruefungen).where(eq(kiPruefungen.pollId, p.id));
+    expect(logs.length).toBe(0); // keine Log-Zeile bei Ablehnung
   });
 
   // --- Gebiets-Autorität -----------------------------------------------------

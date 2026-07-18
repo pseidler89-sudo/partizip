@@ -1391,12 +1391,18 @@ export const voteResistances = pgTable(
 // Die KI lehnt NIE final ab — sie hält an; der Mensch bleibt letzte Instanz.
 //
 // ÖFFENTLICH vs. INTERN (Datensparsamkeit, Transparenz-Wahrheit):
-//   - ÖFFENTLICH (Transparenz-Log): Umfrage-Frage (ohnehin öffentlich), Verdict,
-//     Begründung, verletzte Regel, prompt_version, modell, Zeitpunkt.
+//   - ÖFFENTLICH (Transparenz-Log): Verdict, Begründung, verletzte Regel,
+//     prompt_version, modell, Zeitpunkt. Der frage_snapshot wird NUR bei
+//     verdict='neutral' gezeigt (die Umfrage wurde ohnehin öffentlich); bei
+//     'angehalten' NICHT (die Frage blieb entwurf/nie öffentlich — das Log darf
+//     einen evtl. problematischen Wortlaut nicht doch publik machen).
 //   - INTERN, NIE öffentlich: geprueft_von (welcher Betreiber). Die öffentliche
 //     Sicht selektiert diese Spalte NICHT (Institutionsebene, keine Person).
-// PII-frei: die Frage enthält keinen Personenbezug von Nutzern; geprueft_von ist
-// eine User-UUID (kein Klarname/E-Mail) und bleibt der internen Sicht vorbehalten.
+// PII-frei: der frage_snapshot ist Betreiber-/Institutions-Inhalt (kein
+// Personenbezug von Nutzern); geprueft_von ist eine User-UUID (kein Klarname/
+// E-Mail) und bleibt der internen Sicht vorbehalten.
+// MANIPULATIONSSICHER: poll_id ist ON DELETE SET NULL — Löschen des Entwurfs tilgt
+// den öffentlichen „angehalten"-Nachweis NICHT (frage_snapshot bleibt erhalten).
 // ---------------------------------------------------------------------------
 
 export const kiPruefungen = pgTable(
@@ -1408,10 +1414,18 @@ export const kiPruefungen = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
-    // Prüfung gehört zur Umfrage — Umfrage-Löschung löscht ihre Prüf-Historie.
-    pollId: uuid("poll_id")
-      .notNull()
-      .references(() => polls.id, { onDelete: "cascade" }),
+    // Prüfung gehört zur Umfrage. SET NULL statt CASCADE (nullable): löscht der
+    // Betreiber den zurückgestellten Entwurf, BLEIBT die Prüf-Zeile bestehen —
+    // Manipulationssicherheit, der öffentliche „angehalten"-Nachweis lässt sich
+    // nicht durch Löschen des Entwurfs tilgen. Der Frage-Wortlaut steckt ohnehin im
+    // frage_snapshot (kein Poll-Join mehr nötig).
+    pollId: uuid("poll_id").references(() => polls.id, { onDelete: "set null" }),
+    // Frage-Wortlaut ZUM PRÜFZEITPUNKT (Betreiber-/Institutions-Inhalt, kein
+    // Wähler-PII → DSGVO-unkritisch). Macht das Log vom Poll unabhängig (überlebt
+    // dessen Löschung) und ist der einzige Anzeige-Text. WICHTIG: Bei 'angehalten'
+    // wird dieser Wortlaut BEWUSST NICHT öffentlich gerendert (eine angehaltene
+    // Frage wurde nie öffentlich; das Log darf sie nicht doch publik machen).
+    frageSnapshot: text("frage_snapshot").notNull(),
     // 'neutral' | 'angehalten' — CHECK als letztes Sicherheitsnetz (serverseitig
     // ohnehin per zod validiert).
     verdict: text("verdict").notNull(),

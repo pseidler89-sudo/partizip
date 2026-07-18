@@ -9,12 +9,17 @@
 
 import { eq, desc } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { kiPruefungen, polls } from "@/db/schema";
+import { kiPruefungen } from "@/db/schema";
 
 export interface KiPruefungPublicItem {
   id: string;
-  /** Die (öffentliche) Umfrage-Frage — join auf polls. */
-  frage: string;
+  /**
+   * Der Frage-Wortlaut zum Prüfzeitpunkt (frage_snapshot) — NUR bei verdict='neutral'
+   * gesetzt (die Umfrage wurde ohnehin öffentlich). Bei 'angehalten' bewusst `null`:
+   * die Frage blieb entwurf/nie öffentlich; das Transparenz-Log darf einen evtl.
+   * problematischen (diffamierenden/Dritte nennenden) Wortlaut nicht doch publik machen.
+   */
+  frage: string | null;
   verdict: "neutral" | "angehalten";
   begruendung: string;
   /** Nur bei 'angehalten' gesetzt. */
@@ -27,6 +32,11 @@ export interface KiPruefungPublicItem {
 /**
  * Die letzten `limit` Neutralitätsprüfungen dieses Tenants, neu→alt. Tenant-scoped
  * (kein Cross-Tenant-Leak). PII-FREI: KEIN geprueft_von/erstellt_von im SELECT.
+ *
+ * KEIN polls-Join (mehr): der Wortlaut steckt im frage_snapshot der Prüf-Zeile —
+ * das Log überlebt eine Poll-Löschung (Manipulationssicherheit) und der Tenant-Filter
+ * greift direkt (Defense-in-Depth, kein zweites eq(polls.tenantId) nötig). Bei
+ * verdict='angehalten' wird die Frage NICHT ausgegeben (Redaktion, siehe interface).
  */
 export async function getKiPruefungenPublic(
   db: Db,
@@ -36,7 +46,7 @@ export async function getKiPruefungenPublic(
   const rows = await db
     .select({
       id: kiPruefungen.id,
-      frage: polls.frage,
+      frageSnapshot: kiPruefungen.frageSnapshot,
       verdict: kiPruefungen.verdict,
       begruendung: kiPruefungen.begruendung,
       verletzteRegel: kiPruefungen.verletzteRegel,
@@ -45,15 +55,20 @@ export async function getKiPruefungenPublic(
       createdAt: kiPruefungen.createdAt,
     })
     .from(kiPruefungen)
-    .innerJoin(polls, eq(polls.id, kiPruefungen.pollId))
     .where(eq(kiPruefungen.tenantId, tenantId))
     .orderBy(desc(kiPruefungen.createdAt))
     .limit(limit);
 
-  return rows.map((r: (typeof rows)[number]) => ({
-    ...r,
-    verdict: r.verdict as "neutral" | "angehalten",
-  }));
+  return rows.map((r: (typeof rows)[number]) => {
+    const { frageSnapshot, ...rest } = r;
+    const verdict = rest.verdict as "neutral" | "angehalten";
+    return {
+      ...rest,
+      verdict,
+      // Redaktion: angehaltene Frage NIE öffentlich (nur neutral zeigt den Wortlaut).
+      frage: verdict === "neutral" ? frageSnapshot : null,
+    };
+  });
 }
 
 export interface LetztePruefung {

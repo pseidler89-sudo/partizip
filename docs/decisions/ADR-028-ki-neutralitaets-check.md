@@ -45,8 +45,17 @@ Key / lokales LLM) folgt später.
    Muster `isSelfApprovalAllowed`); der Override bleibt eine auditierte Handlung
    (`ist_override`). „Anhalten" darf jeder Admin (konservativ, kein SoD).
 7. **Öffentliches Transparenz-Log** (`ki_pruefungen`, gerendert auf `/transparenz`):
-   Frage, Verdict, Begründung, verletzte Regel, Promptversion + Modell, Zeitpunkt —
+   Verdict, Begründung, verletzte Regel, Promptversion + Modell, Zeitpunkt —
    **PII-frei**: kein `geprueft_von`/`erstellt_von`, keine Person (Institutionsebene).
+   Der **Frage-Wortlaut wird bei `angehalten` bewusst NICHT publiziert**: eine
+   angehaltene Frage bleibt `entwurf` und war nie öffentlich sichtbar; das Log darf
+   ihren (evtl. diffamierenden oder Dritte nennenden) Wortlaut nicht der einzige
+   Publikationsort werden lassen — angezeigt werden nur Verdict/Regel/Begründung.
+   Bei `neutral` wird der Wortlaut gezeigt (die Umfrage ging ohnehin live).
+   **Manipulationssicher:** das Log speichert einen `frage_snapshot` (Wortlaut zum
+   Prüfzeitpunkt, Betreiber-/Institutions-Inhalt, kein Wähler-PII) statt eines
+   Poll-Joins, und `poll_id` ist `ON DELETE SET NULL` — löscht der Betreiber den
+   zurückgestellten Entwurf, bleibt der öffentliche „angehalten"-Nachweis erhalten.
 8. **Kein Datenexport an Dritte** (L1 assisted): nur der öffentliche Umfrage-Text wird
    bewertet, keine Nutzerdaten; kein neuer Cookie. Datenschutz-Absatz nur bei aktivem Flag.
 9. **L2 später** (ADR-027): Automatisierung erst mit eigenem Key / lokalem LLM und erst
@@ -62,4 +71,5 @@ Key / lokales LLM) folgt später.
 - EU-KI-VO-/DSGVO-Abgrenzung bleibt sauber: keine automatisierte Entscheidung, der
   Mensch gibt frei/hält an; die KI ist assistierender Maßstab, kein Richter.
 - Migration 0035 (additiv): Enum-Wert `in_pruefung`, `tenants.ki_neutralitaets_pflicht`,
-  Tabelle `ki_pruefungen`. Kein App-Stopp nötig (neuer Enum-Wert wird von Alt-Code nie gelesen).
+  Tabelle `ki_pruefungen` (mit `frage_snapshot`, `poll_id` nullable / `ON DELETE SET NULL`).
+  Kein App-Stopp nötig (neuer Enum-Wert wird von Alt-Code nie gelesen).
