@@ -16,7 +16,8 @@
  *  (c) sonst keine Distanz → einfache Liste (Reihenfolge vom Server).
  *
  * A11y: Liste als <ul>/<li>, Badges mit Text, Termin-CTA als echter Link,
- * Geolocation-Opt-in als Button mit aria-busy und role="status"-Rückmeldung.
+ * Geolocation-Opt-in als Button mit aria-busy; Sortier-/Fehlerzustand wird über
+ * eine role="status"- bzw. role="alert"-Live-Region an Screenreader gemeldet.
  */
 
 import { useMemo, useState } from "react";
@@ -130,6 +131,13 @@ export default function StellenListe({
             Ihr Standort wird nur in Ihrem Browser verwendet und nicht gespeichert
             oder übertragen.
           </p>
+          <p role="status" className="sr-only">
+            {geoBusy
+              ? "Standort wird ermittelt."
+              : geo
+                ? "Liste nach Ihrem Standort sortiert."
+                : ""}
+          </p>
           {geoFehler && (
             <p className="mt-1.5 text-xs" role="alert" style={{ color: "#b42318" }}>
               {geoFehler}
@@ -178,7 +186,9 @@ export default function StellenListe({
                 </p>
               ) : (
                 <p className="mt-2 text-sm font-medium" style={{ color: "var(--pz-success-ink)" }}>
-                  Ohne Termin während der Öffnungszeiten.
+                  {s.oeffnungszeitenText
+                    ? "Ohne Termin während der Öffnungszeiten."
+                    : "Ohne Termin möglich (Öffnungszeiten vor Ort beachten)."}
                 </p>
               )}
 

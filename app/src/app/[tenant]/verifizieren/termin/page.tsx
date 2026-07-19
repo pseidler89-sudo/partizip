@@ -143,8 +143,9 @@ export default async function TerminPage({ params }: PageProps) {
         <div className="pz-card p-6">
           <p className="text-sm" style={{ color: "var(--pz-body)" }}>
             Derzeit sind keine freien Termine verfügbar. Bitte versuchen Sie es
-            später erneut — oder lösen Sie einen QR-Code Ihrer Kommune ein, falls
-            Sie einen erhalten haben.
+            später erneut — oder besuchen Sie eine Verifizierungsstelle in Ihrer
+            Nähe während der Öffnungszeiten; viele Stellen verifizieren Sie auch
+            ohne Termin.
           </p>
         </div>
       ) : (
