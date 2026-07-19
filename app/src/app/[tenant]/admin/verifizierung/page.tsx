@@ -33,6 +33,7 @@ import { getOffeneTermineFuerVerifier } from "@/lib/verification/booking-queries
 import { formatSlotLabel } from "@/lib/verification/slot-format";
 import { QrVerwaltung } from "./QrVerwaltung";
 import TermineVerwaltung from "./TermineVerwaltung";
+import { FEATURE_VERIFIER_EINMAL_CODE } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -111,9 +112,9 @@ export default async function AdminVerifizierungPage({ params }: PageProps) {
           Wohnsitz-Verifizierung
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--pz-muted)" }}>
-          Zwei Wege zur Stufe 2: gebuchte Termine vor Ort bestätigen oder einen
-          QR-Code erzeugen (Schnellweg). Beide setzen die Person auf
-          wohnsitz-verifiziert.
+          {FEATURE_VERIFIER_EINMAL_CODE
+            ? "Zwei Wege zur Stufe 2: gebuchte Termine vor Ort bestätigen oder einen QR-Code erzeugen (Schnellweg). Beide setzen die Person auf wohnsitz-verifiziert."
+            : "Bestätigen Sie gebuchte Termine vor Ort — das setzt die Person auf wohnsitz-verifiziert (Stufe 2). Bürger:innen weisen sich mit ihrem persönlichen Konto-QR aus, den Sie scannen."}
         </p>
       </div>
 
@@ -162,12 +163,18 @@ export default async function AdminVerifizierungPage({ params }: PageProps) {
         <TermineVerwaltung termine={termine} />
       </section>
 
-      <section>
-        <h2 className="mb-3 text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
-          QR-Code (Schnellweg)
-        </h2>
-        <QrVerwaltung liste={serializeListe(liste)} erlaubteEbenen={erlaubteEbenen} />
-      </section>
+      {/* Einmal-Code „Schnellweg" (ADR-014 Block 2) — hinter Feature-Flag. Standard
+          ist der umgekehrte Konto-QR (V3); der Verifizierer-erzeugte Einmal-Code ist
+          nur ein Sonderfall („Verifizierer ohne Kamera"). Core/Actions/Einlösung
+          bleiben dormant erhalten. */}
+      {FEATURE_VERIFIER_EINMAL_CODE && (
+        <section>
+          <h2 className="mb-3 text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
+            QR-Code (Schnellweg)
+          </h2>
+          <QrVerwaltung liste={serializeListe(liste)} erlaubteEbenen={erlaubteEbenen} />
+        </section>
+      )}
     </main>
   );
 }

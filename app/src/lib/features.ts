@@ -14,3 +14,16 @@
  *   Wieder aktivieren: hier auf `true` setzen (siehe Roadmap/ADR-014).
  */
 export const FEATURE_ANLIEGEN_EINREICHEN = false;
+
+/**
+ * FEATURE_VERIFIER_EINMAL_CODE:
+ *   Der vom Verifizierer erzeugte Einmal-QR/-Code („Schnellweg", ADR-014 Block 2)
+ *   ist der ALTE Weg. Standard ist inzwischen der umgekehrte Konto-QR (V3): der
+ *   Bürger zeigt seinen Beleg, die verifizierende Person scannt ihn. Der
+ *   Einmal-Code bleibt nur als Sonderfall gedacht („Verifizierer ohne Kamera").
+ *   Bei false wird lediglich die Erstell-UI im Verifizierer-Admin ausgeblendet;
+ *   Server-Actions/Core (qr-actions.ts/qr-core.ts) und der Einlöse-Pfad bleiben
+ *   unverändert bestehen (dormant), damit ausgehändigte Codes weiter einlösbar
+ *   sind und die Funktion jederzeit reaktivierbar ist. Wieder aktivieren: `true`.
+ */
+export const FEATURE_VERIFIER_EINMAL_CODE = false;
