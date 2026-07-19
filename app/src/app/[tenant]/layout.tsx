@@ -28,12 +28,14 @@ import { DemoGuide } from "./DemoGuide";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getUserRoleTypes, isAdmin } from "@/lib/auth/roles";
+import { hatAufgaben } from "@/lib/aufgaben/kacheln";
 import { FEATURE_ANLIEGEN_EINREICHEN } from "@/lib/features";
 import { PLATFORM_NAME, regionDisplayName } from "@/lib/brand";
 import { BrandMark } from "@/components/BrandMark";
 import { StandortChip } from "./StandortChip";
 import { NavLink } from "./NavLink";
 import { LoginEntry } from "./LoginEntry";
+import { PerspektivUmschalter } from "./PerspektivUmschalter";
 
 interface TenantLayoutProps {
   children: React.ReactNode;
@@ -64,6 +66,10 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
   // Seiten erzwingen die Berechtigung selbst serverseitig). Tenant-scoped.
   let eingeloggt = false;
   let admin = false;
+  // Rollenträger (irgendeine Aufgaben-Fähigkeit): steuert den Perspektiv-
+  // Umschalter. Ein reiner `verifier`/`redakteur` ist kein Admin, hat aber eine
+  // Aufgabe — für ihn ist der Umschalter der EINZIGE discoverable Einstieg.
+  let rollentraeger = false;
   const db = createDb(databaseUrl());
   const cookieStore = await cookies();
   const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
@@ -85,7 +91,9 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
       const u = userRows[0];
       if (u) {
         eingeloggt = true;
-        admin = isAdmin(await getUserRoleTypes(db, tenant.id, u.id));
+        const roleTypes = await getUserRoleTypes(db, tenant.id, u.id);
+        admin = isAdmin(roleTypes);
+        rollentraeger = hatAufgaben(roleTypes);
       }
     }
   }
@@ -112,6 +120,7 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
       slugFromPath={slugFromPath}
       eingeloggt={eingeloggt}
       admin={admin}
+      rollentraeger={rollentraeger}
       demo={demo}
       demoBelegeHref={demoBelegeHref}
     >
@@ -125,6 +134,7 @@ function TenantLayoutInner({
   slugFromPath,
   eingeloggt,
   admin,
+  rollentraeger,
   demo,
   demoBelegeHref,
   children,
@@ -133,6 +143,7 @@ function TenantLayoutInner({
   slugFromPath: string;
   eingeloggt: boolean;
   admin: boolean;
+  rollentraeger: boolean;
   demo: boolean;
   demoBelegeHref: string;
   children: React.ReactNode;
@@ -228,6 +239,14 @@ function TenantLayoutInner({
       {/* Demo-Mandant: nicht schließbares Spielwiesen-Banner + geführter Rundgang */}
       {demo && <DemoBanner />}
       {demo && <DemoGuide slug={slugFromPath} belegeHref={demoBelegeHref} />}
+
+      {/* Perspektiv-Umschalter für ECHTE Rollenträger (Bürger-Ansicht ⇄ Aufgaben).
+          Bewusst NICHT auf dem Demo-Mandanten: dort führt der DemoGuide seinen
+          eigenen Umschalter (Wegwerf-Admin) — zwei Umschalter würden kollidieren.
+          Der „Verwaltung"-Nav-Link oben bleibt Admin-only (er zeigt auf das volle
+          Dashboard); Nicht-Admin-Rollenträger (verifier/redakteur/beobachter)
+          erreichen ihre Funktion allein über diesen Umschalter → /aufgaben. */}
+      {!demo && rollentraeger && <PerspektivUmschalter slug={slugFromPath} />}
 
       {/* Seiteninhalt (Skip-Link-Ziel) */}
       <div id="main-content" tabIndex={-1} className="flex-1 focus:outline-none">

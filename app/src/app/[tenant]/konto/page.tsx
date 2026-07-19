@@ -44,6 +44,10 @@ type MeData = {
     stufe: number;
     // Admin-Sichtbarkeit (kommune_admin/super_admin) für die Verwaltung-Karte.
     isAdmin?: boolean;
+    // Feine Fähigkeiten für den „Ihre Aufgaben"-Einstieg (Discoverability).
+    canVerify?: boolean;
+    canRedaktion?: boolean;
+    canBeobachten?: boolean;
     // Block J1: Rollenträger-Identität. Nur Rollenträger sehen die Klarname-
     // Sektion + den Nudge; Bürger bleiben pseudonym.
     istRollentraeger?: boolean;
@@ -311,6 +315,36 @@ export default function KontoPage() {
             )
           }
         />
+      )}
+
+      {/* Ihre Aufgaben — für JEDEN Rollenträger mit einer Fähigkeit (verifier/
+          redakteur/beobachter/Admin). Discoverability: der Einstieg spiegelt exakt
+          den /aufgaben-Guard (hatAufgaben) — die Zielseiten gaten weiterhin selbst.
+          Bewusst über die Fähigkeits-Flags, NICHT istRollentraeger: ein reiner
+          Reserve-Rollenträger ohne Aufgabe würde sonst ins Leere geführt. */}
+      {(data.user.canVerify ||
+        data.user.canRedaktion ||
+        data.user.canBeobachten ||
+        data.user.isAdmin) && (
+        <Link
+          href={`/${data.tenant.slug}/aufgaben`}
+          className="pz-card pz-card-hover mb-6 flex items-center justify-between gap-3 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
+        >
+          <div>
+            <p className="text-sm font-semibold" style={{ color: "var(--pz-ink)" }}>
+              <span aria-hidden>✅</span> Ihre Aufgaben
+            </p>
+            <p className="mt-0.5 text-xs" style={{ color: "var(--pz-muted)" }}>
+              Ihre Funktion auf einen Blick — z. B. Personen verifizieren.
+            </p>
+          </div>
+          <span
+            className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium"
+            style={{ backgroundColor: "var(--pz-brand-soft)", color: "var(--pz-brand-strong)" }}
+          >
+            Öffnen →
+          </span>
+        </Link>
       )}
 
       {/* Verwaltung — nur für Admins (kommune_admin/super_admin). Discoverability;

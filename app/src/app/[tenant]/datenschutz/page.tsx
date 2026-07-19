@@ -205,7 +205,7 @@ export default async function DatenschutzPage() {
 
       <Abschnitt titel="12. Cookies: nur funktional, kein Tracking">
         <p>
-          Wir setzen ausschließlich vier funktionale, technisch notwendige Cookies
+          Wir setzen ausschließlich fünf funktionale, technisch notwendige Cookies
           ein — <strong>keine</strong> Analyse-Dienste, externen Schriftarten/CDNs
           oder Social-Media-Plugins:
         </p>
@@ -240,6 +240,15 @@ export default async function DatenschutzPage() {
             Demo-Rundgangs wird sitzungsgebunden im sessionStorage Ihres Browsers
             gehalten und endet mit dem Schließen des Tabs. Rechtsgrundlage:
             § 25 Abs. 2 Nr. 2 TDDDG (von Ihnen ausdrücklich angefordert).
+          </li>
+          <li>
+            <strong>Ansichts-Cookie <code>pz_perspektive</code></strong>: wird nur
+            gesetzt, wenn Sie als Rollenträger:in zwischen „Bürger-Ansicht“ und
+            „Aufgaben“ wechseln; Laufzeit 30 Tage, fester Inhalt „aufgaben“ ohne
+            jeden Personenbezug — merkt sich ausschließlich diese Anzeige-Auswahl
+            und schaltet keinerlei Rechte frei (Ihre Funktionen ergeben sich allein
+            aus Ihren Rollen). Rechtsgrundlage: § 25 Abs. 2 Nr. 2 TDDDG (von Ihnen
+            ausdrücklich angefordert).
           </li>
         </ul>
       </Abschnitt>

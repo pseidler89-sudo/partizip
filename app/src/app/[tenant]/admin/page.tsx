@@ -16,6 +16,7 @@ import { digests, polls, qrCodes, sessions, verificationLocations } from "@/db/s
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin as isAdminCheck, beobachterDarfTenantweitSehen, canRedaktion, getUserRolesMitScope } from "@/lib/auth/roles";
+import { hatAufgaben } from "@/lib/aufgaben/kacheln";
 import { getAdminKennzahlen, maskTeilnahme } from "@/lib/admin/kennzahlen";
 import { isDemoTenant } from "@/lib/demo/config";
 import { FEATURE_ANLIEGEN_EINREICHEN, FEATURE_VERIFIER_EINMAL_CODE } from "@/lib/features";
@@ -88,7 +89,17 @@ export default async function AdminDashboardPage({ params }: PageProps) {
   const isSuper = roleTypes.includes("super_admin");
   const hatBeobachterRolle = roleTypes.includes("beobachter");
 
-  if (!isAdmin && !hatBeobachterRolle) redirect(`/${slugFromPath}/anmelden`);
+  // Eingeloggt, aber ohne Dashboard-Recht (reiner verifier/redakteur): NICHT
+  // auf /anmelden werfen — das wirkt wie „nicht eingeloggt". Ist der Nutzer
+  // Rollenträger mit einer anderen Aufgabe, zur Aufgaben-Ansicht leiten; sonst
+  // in die Bürger-Sicht. (Wirklich Ausgeloggte wurden oben schon abgefangen.)
+  if (!isAdmin && !hatBeobachterRolle) {
+    redirect(
+      hatAufgaben(roleTypes)
+        ? `/${slugFromPath}/aufgaben`
+        : `/${slugFromPath}/umfragen`,
+    );
+  }
 
   // Beobachter: Digest-Karte nur mit stadtweitem Scope (Digests sind stadtweit).
   const zeigeDigestKarte = isAdmin || beobachterDarfTenantweitSehen(roleRows);
