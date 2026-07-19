@@ -154,6 +154,15 @@ export async function requireAdminCtx(): Promise<
  * requireAdminCtx — für tenant-übergreifende Betreiber-Sichten (Block N:
  * Interessenten-Leads). Die Rollen werden account-status-gefiltert geladen
  * (gesperrtes Konto ⇒ [] ⇒ kein Zugriff, selbst bei gültiger Session).
+ *
+ * GUARDRAIL (Multi-Tenant-Skalierung): Die Rolle `super_admin` ist
+ * BETREIBER-EXKLUSIV und darf NIE an Kunden-/Kommunen-Tenants vergeben werden.
+ * Sie ist das Gate für tenant-FREIE Sichten (z. B. die Roh-Lead-PII aller
+ * Interessenten, s. app/[tenant]/admin/interessenten/page.tsx) — ein super_admin
+ * in einem Kunden-Tenant erhielte damit globale Sicht auf fremde Roh-Leads.
+ * Heute unkritisch (nur der Plattform-Betreiber ist super_admin; ein kommune_admin
+ * kann sich nicht selbst hochstufen), aber beim Onboarding weiterer Tenants strikt
+ * einzuhalten: super_admin bleibt ausschließlich beim Betreiber.
  */
 export async function requireSuperAdminCtx(): Promise<
   | { ok: true; ctx: AuthedContext }

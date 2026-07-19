@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createDb } from "@/db/client";
 import { databaseUrl } from "@/lib/auth/action-context";
 import { tokenGueltig, verarbeiteWebhookEvent } from "@/lib/interessenten/webhook";
-import type { TymeslotWebhookBody } from "@/lib/interessenten/core";
+import { TYMESLOT_MAX_BODY_BYTES, type TymeslotWebhookBody } from "@/lib/interessenten/core";
 
 export const dynamic = "force-dynamic";
 
@@ -27,10 +27,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // --- Rohen Body lesen + Größen-Guard VOR dem Parsen (Gate-B): absurd große
+  //     Payloads werden billig verworfen, ohne ein Riesen-Objekt aufzubauen.
+  //     2xx OHNE Insert (2xx Pflicht wegen Tymeslot-Auto-Disable), PII-frei geloggt.
+  let raw: string;
+  try {
+    raw = await request.text();
+  } catch {
+    return NextResponse.json({ ok: true, ignored: true }, { status: 200 });
+  }
+  if (raw.length > TYMESLOT_MAX_BODY_BYTES) {
+    console.warn("[interessent-webhook] Payload zu groß — verworfen (kein Insert).");
+    return NextResponse.json({ ok: true, ignored: true }, { status: 200 });
+  }
+
   // --- Body parsen. Ungültiges JSON: 2xx (kein Auto-Disable), kein Insert. ---
   let body: TymeslotWebhookBody;
   try {
-    body = (await request.json()) as TymeslotWebhookBody;
+    body = JSON.parse(raw) as TymeslotWebhookBody;
   } catch {
     return NextResponse.json({ ok: true, ignored: true }, { status: 200 });
   }

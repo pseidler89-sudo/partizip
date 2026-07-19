@@ -13,7 +13,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { Db } from "@/db/client";
 import { interessenten, auditEvents } from "@/db/schema";
 import { sendInteressentNotification } from "@/lib/auth/mail";
-import { tymeslotZuInsert, type TymeslotWebhookBody } from "./core";
+import { tymeslotZuInsert, TYMESLOT_MAX_BODY_BYTES, type TymeslotWebhookBody } from "./core";
 import type { InteressentNotifier } from "./formular";
 
 /**
@@ -62,6 +62,14 @@ export async function verarbeiteWebhookEvent(
   opts: WebhookVerarbeitenOpts = {}
 ): Promise<WebhookVerarbeitenResult> {
   if (body?.event !== "meeting.created") return { inserted: false };
+
+  // Größen-Guard (Gate-B, defense-in-depth): absurd große Payloads werden OHNE
+  // Insert verworfen (der Route-Handler prüft zusätzlich schon den rohen Body).
+  // PII-frei geloggt; der Aufrufer antwortet weiterhin 2xx (Tymeslot-Auto-Disable).
+  if (JSON.stringify(body).length > TYMESLOT_MAX_BODY_BYTES) {
+    console.warn("[interessent-webhook] Payload zu groß — verworfen (kein Insert).");
+    return { inserted: false };
+  }
 
   const insert = tymeslotZuInsert(body);
   if (!insert) return { inserted: false };

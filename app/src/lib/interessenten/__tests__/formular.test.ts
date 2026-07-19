@@ -161,4 +161,34 @@ describe.skipIf(SKIP)("verarbeiteFormularLead (Integration)", () => {
       .where(eq(auditEvents.action, "interessent.rate_limited"));
     expect(rlAudits.length).toBeGreaterThan(0);
   });
+
+  it("ohne IP (No-IP-Sammel-Bucket) greift das IP-Limit trotz rotierender E-Mails", async () => {
+    // Gate-B FIX 2/5: fehlt x-forwarded-for (ipAddress null), teilen sich ALLE
+    // No-IP-Requests EIN IP-Budget. Rotierende E-Mails umgehen das nicht mehr.
+    const notify = vi.fn().mockResolvedValue(undefined);
+    for (let i = 0; i < INTERESSENT_RATE_LIMITS.IP_MAX; i++) {
+      const r = await verarbeiteFormularLead(db, {
+        tenantId,
+        tenantSlug: "pilot",
+        data: gueltigeDaten(`noip-${i}@beispiel.de`), // je Iteration andere E-Mail
+        ipAddress: null,
+        notify,
+      });
+      expect(r.gespeichert).toBe(true);
+    }
+    // Nächster No-IP-Request mit NEUER E-Mail → vom gemeinsamen IP-Bucket geblockt.
+    const blocked = await verarbeiteFormularLead(db, {
+      tenantId,
+      tenantSlug: "pilot",
+      data: gueltigeDaten("noip-final@beispiel.de"),
+      ipAddress: null,
+      notify,
+    });
+    expect(blocked.gespeichert).toBe(false);
+    const rows = await db
+      .select()
+      .from(interessenten)
+      .where(eq(interessenten.email, "noip-final@beispiel.de"));
+    expect(rows).toHaveLength(0);
+  });
 });

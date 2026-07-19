@@ -25,6 +25,28 @@ export const INTERESSENT_RATE_LIMITS = {
 } as const;
 
 /**
+ * Harte Längen-Obergrenzen für das Tymeslot-Mapping (N2). Das Formular (N1) ist
+ * bereits per zod-`max` begrenzt; der Webhook-Payload kommt jedoch von außen OHNE
+ * diese Schranken. Die gemappten Freitextfelder werden deshalb hart gekappt
+ * (slice nach Trim), damit ein manipuliertes Payload keine Riesen-Strings in die
+ * DB schreibt. Analog zu den zod-Grenzen des Formulars gewählt.
+ */
+export const TYMESLOT_FELD_MAX = {
+  ANSPRECHPARTNER: 200,
+  KOMMUNE: 200,
+  NACHRICHT: 2000,
+} as const;
+
+/**
+ * Obergrenze für die Größe des Tymeslot-Webhook-Bodys (Bytes/Zeichen). Ein
+ * normales `meeting.created`-Payload ist wenige hundert Zeichen groß; alles
+ * jenseits davon ist Missbrauch. Überschreitung ⇒ 2xx OHNE Insert (2xx bleibt
+ * Pflicht wegen Tymeslot-Auto-Disable). Wird im Route-Handler (roher Body) UND
+ * defensiv in verarbeiteWebhookEvent geprüft.
+ */
+export const TYMESLOT_MAX_BODY_BYTES = 64 * 1024;
+
+/**
  * Eingabe-Schema des Formulars. `email` wird über emailSchema kanonisiert
  * (trim + lowercase) UND validiert. Leere optionale Felder werden zu undefined
  * normalisiert, damit sie als NULL in die DB gehen (nicht als "").
@@ -113,6 +135,12 @@ function optionalString(v: unknown): string | null {
   return t.length > 0 ? t : null;
 }
 
+/** Kappt einen (evtl. null-)String hart auf `max` Zeichen (nach Trim in optionalString). */
+function cap(s: string | null, max: number): string | null {
+  if (s === null) return null;
+  return s.length > max ? s.slice(0, max) : s;
+}
+
 /**
  * Bildet ein `meeting.created`-Payload auf einen Insert-Datensatz ab.
  * Fail-soft: fehlt die Pflicht-`attendee.email` ODER die `meeting.uid`, ergibt
@@ -140,15 +168,18 @@ export function tymeslotZuInsert(body: TymeslotWebhookBody): InteressentInsert |
   }
 
   // ansprechpartner darf nicht leer sein (NOT NULL) — Fallback neutral, ohne PII-Erfindung.
-  const name = optionalString(meeting.attendee?.name) ?? "(ohne Namen)";
+  // Freitextfelder hart kappen (Payload von außen ohne zod-Grenzen, s. TYMESLOT_FELD_MAX).
+  const name =
+    cap(optionalString(meeting.attendee?.name), TYMESLOT_FELD_MAX.ANSPRECHPARTNER) ??
+    "(ohne Namen)";
 
   return {
-    kommune: optionalString(meeting.attendee?.company),
+    kommune: cap(optionalString(meeting.attendee?.company), TYMESLOT_FELD_MAX.KOMMUNE),
     ansprechpartner: name,
     email: emailParsed.data,
     rolle: null,
     groesse: null,
-    nachricht: optionalString(meeting.attendee?.message),
+    nachricht: cap(optionalString(meeting.attendee?.message), TYMESLOT_FELD_MAX.NACHRICHT),
     quelle: "tymeslot",
     tymeslotMeetingUid: uid,
     terminAm,

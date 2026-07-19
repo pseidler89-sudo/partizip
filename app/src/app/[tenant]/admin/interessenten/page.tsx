@@ -7,6 +7,12 @@
  * Query hier ROH auf `db`/`interessenten` zu — es gibt keine tenant_id, nach der
  * gescoped werden könnte. Legitimiert durch das super_admin-Gate davor
  * (requireSuperAdminCtx); ein kommune_admin sieht diese Seite nie.
+ *
+ * GUARDRAIL (Multi-Tenant-Skalierung): Diese Seite zeigt die ROH-Lead-PII ALLER
+ * Interessenten (tenant-übergreifend). Sie ist NUR sicher, solange `super_admin`
+ * BETREIBER-EXKLUSIV bleibt und NIE an Kunden-/Kommunen-Tenants vergeben wird
+ * (s. requireSuperAdminCtx). Wird die Rolle künftig an Tenant-Kunden vergeben,
+ * MUSS dieser Zugriff neu abgesichert werden (sonst globales PII-Leak).
  */
 
 import { notFound } from "next/navigation";

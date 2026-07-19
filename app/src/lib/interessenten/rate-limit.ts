@@ -4,8 +4,15 @@
  *
  * Eigene Scopes (getrennt von Login/Anliegen), damit sich die Budgets nicht
  * gegenseitig verbrauchen. Konservativ, weil das Lead-Formular niederfrequent ist:
- *   - IP:    5 / 60 min  (Spam-Bremse; nur wenn IP bekannt)
+ *   - IP:    5 / 60 min  (Spam-Bremse)
  *   - E-Mail: 3 / 60 min (kanonische Adresse, gehasht — nie Klartext)
+ *
+ * FEHLENDE IP (Gate-B): Kommt KEINE vertrauenswürdige Client-IP an (x-forwarded-for
+ * fehlt/nicht parsebar → ipAddress null), wird die IP-Dimension NICHT still
+ * übersprungen (sonst bliebe nur das schwache E-Mail-Limit, per Adress-Rotation
+ * umgehbar). Stattdessen teilen sich ALLE No-IP-Requests EINEN gemeinsamen
+ * Sammel-Bucket (fester Schlüssel) — rotierende E-Mails laufen so gemeinsam gegen
+ * das IP-Budget und werden geblockt.
  *
  * Der Rate-Limit-Kontext läuft über den host-aufgelösten (Pilot-)Tenant: die
  * /mitmachen-Seite HAT einen Tenant über den Host, auch wenn der Lead selbst
@@ -39,13 +46,20 @@ function emailKeyHash(tenantId: string, email: string): string {
   return hmacRateLimit(`interessent:${tenantId}:${normalizeEmail(email)}`);
 }
 
-function ipKeyHash(ip: string): string {
-  return hmacRateLimit(`interessent-ip:${ip}`);
+/**
+ * Bucket-Schlüssel der IP-Dimension. Bei fehlender IP (null) ein FESTER
+ * Sammel-Bucket ("noip:") statt Überspringen — alle No-IP-Requests teilen sich
+ * so EIN gemeinsames IP-Budget. Der "noip:"-Präfix trennt den Sammel-Bucket
+ * sauber von echten IP-Adressen (die diese Form nie annehmen).
+ */
+function ipKeyHash(ip: string | null): string {
+  const bucket = ip ?? "noip:no-forwarded-for";
+  return hmacRateLimit(`interessent-ip:${bucket}`);
 }
 
 /**
- * Schreibt die Rate-Limit-Events (IP nur wenn bekannt, E-Mail immer).
- * VOR der Prüfung aufrufen.
+ * Schreibt die Rate-Limit-Events (E-Mail immer; IP-Dimension IMMER — bei
+ * fehlender IP über den festen No-IP-Sammel-Bucket). VOR der Prüfung aufrufen.
  */
 export async function writeInteressentRateLimitEvents(
   db: Db,
@@ -53,10 +67,8 @@ export async function writeInteressentRateLimitEvents(
 ): Promise<void> {
   const toInsert: Array<{ scope: string; keyHash: string }> = [
     { scope: INTERESSENT_SCOPE_EMAIL, keyHash: emailKeyHash(opts.tenantId, opts.email) },
+    { scope: INTERESSENT_SCOPE_IP, keyHash: ipKeyHash(opts.ipAddress) },
   ];
-  if (opts.ipAddress) {
-    toInsert.push({ scope: INTERESSENT_SCOPE_IP, keyHash: ipKeyHash(opts.ipAddress) });
-  }
   await db.insert(rateLimitEvents).values(toInsert);
 }
 
@@ -85,25 +97,25 @@ export async function checkInteressentRateLimit(
 ): Promise<InteressentRateLimitResult> {
   await writeInteressentRateLimitEvents(db, opts);
 
-  // IP-Limit zuerst (grobes Netz gegen Bots), dann E-Mail.
-  if (opts.ipAddress) {
-    const ipSince = new Date(
-      Date.now() - INTERESSENT_RATE_LIMITS.IP_WINDOW_MIN * 60 * 1000
+  // IP-Limit zuerst (grobes Netz gegen Bots), dann E-Mail. Die IP-Dimension
+  // wird IMMER geprüft — bei fehlender IP über den festen No-IP-Sammel-Bucket
+  // (kein stiller Bypass per E-Mail-Rotation).
+  const ipSince = new Date(
+    Date.now() - INTERESSENT_RATE_LIMITS.IP_WINDOW_MIN * 60 * 1000
+  );
+  const ipRows = await db
+    .select({ n: count() })
+    .from(rateLimitEvents)
+    .where(
+      and(
+        eq(rateLimitEvents.scope, INTERESSENT_SCOPE_IP),
+        eq(rateLimitEvents.keyHash, ipKeyHash(opts.ipAddress)),
+        gt(rateLimitEvents.createdAt, ipSince)
+      )
     );
-    const ipRows = await db
-      .select({ n: count() })
-      .from(rateLimitEvents)
-      .where(
-        and(
-          eq(rateLimitEvents.scope, INTERESSENT_SCOPE_IP),
-          eq(rateLimitEvents.keyHash, ipKeyHash(opts.ipAddress)),
-          gt(rateLimitEvents.createdAt, ipSince)
-        )
-      );
-    if ((ipRows[0]?.n ?? 0) > INTERESSENT_RATE_LIMITS.IP_MAX) {
-      await writeAudit(db, opts.tenantId, "ip");
-      return { allowed: false, reason: "ip" };
-    }
+  if ((ipRows[0]?.n ?? 0) > INTERESSENT_RATE_LIMITS.IP_MAX) {
+    await writeAudit(db, opts.tenantId, "ip");
+    return { allowed: false, reason: "ip" };
   }
 
   const emailSince = new Date(

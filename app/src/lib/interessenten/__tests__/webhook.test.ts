@@ -17,6 +17,7 @@ import { eq, count } from "drizzle-orm";
 import * as schema from "@/db/schema.js";
 import type { Db } from "@/db/client";
 import { verarbeiteWebhookEvent } from "@/lib/interessenten/webhook";
+import { TYMESLOT_FELD_MAX, TYMESLOT_MAX_BODY_BYTES } from "@/lib/interessenten/core";
 
 const { interessenten, auditEvents } = schema;
 
@@ -123,6 +124,38 @@ describe.skipIf(SKIP)("verarbeiteWebhookEvent (Integration)", () => {
       .select()
       .from(interessenten)
       .where(eq(interessenten.tymeslotMeetingUid, "uid-CANCEL"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("überlanges message-Feld wird gekappt gespeichert (Gate-B FIX 4)", async () => {
+    const notify = vi.fn().mockResolvedValue(undefined);
+    const langeNachricht = "z".repeat(5000);
+    const body = meetingCreated("uid-CAP");
+    body.data.meeting.attendee.message = langeNachricht;
+    const res = await verarbeiteWebhookEvent(db, body, { notify });
+    expect(res.inserted).toBe(true);
+
+    const rows = await db
+      .select()
+      .from(interessenten)
+      .where(eq(interessenten.tymeslotMeetingUid, "uid-CAP"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].nachricht).toHaveLength(TYMESLOT_FELD_MAX.NACHRICHT);
+  });
+
+  it("Riesen-Payload → kein Insert (2xx-Fall, Größen-Guard)", async () => {
+    const notify = vi.fn().mockResolvedValue(undefined);
+    const body = meetingCreated("uid-HUGE");
+    // Body deutlich über der Byte-Grenze aufblähen.
+    body.data.meeting.attendee.message = "x".repeat(TYMESLOT_MAX_BODY_BYTES + 1000);
+    const res = await verarbeiteWebhookEvent(db, body, { notify });
+    expect(res.inserted).toBe(false);
+    expect(notify).not.toHaveBeenCalled();
+
+    const rows = await db
+      .select()
+      .from(interessenten)
+      .where(eq(interessenten.tymeslotMeetingUid, "uid-HUGE"));
     expect(rows).toHaveLength(0);
   });
 
