@@ -17,7 +17,13 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { validateSession } from "@/lib/auth/session";
 import { apiError } from "@/lib/api-error";
 import { getStufe } from "@/lib/eligibility/stufe";
-import { getUserRoleTypes, isAdmin } from "@/lib/auth/roles";
+import {
+  getUserRoleTypes,
+  isAdmin,
+  canVerify,
+  canRedaktion,
+  canBeobachten,
+} from "@/lib/auth/roles";
 import { istRollentraeger } from "@/lib/identity/anzeige";
 import { getEinrichtungsStatus } from "@/lib/konto/einrichtung";
 import { isDemoTenant } from "@/lib/demo/config";
@@ -102,6 +108,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       stufe: getStufe(user),
       // Admin-Sichtbarkeit (kommune_admin/super_admin) für die Verwaltung-Karte.
       isAdmin: isAdmin(roleTypes),
+      // Feine Fähigkeiten für die Aufgaben-Ansicht (Discoverability im Konto).
+      // Nur Anzeige — die Zielseiten erzwingen die Berechtigung weiterhin
+      // serverseitig. Aus den account_status-gefilterten roleTypes berechnet.
+      canVerify: canVerify(roleTypes),
+      canRedaktion: canRedaktion(roleTypes),
+      canBeobachten: canBeobachten(roleTypes),
       // Block J1: Rollenträger-Identität. Die Klarname-/Funktion-Sektion (und der
       // Nudge) erscheinen im Konto NUR für Rollenträger — Bürger bleiben pseudonym.
       istRollentraeger: istRollentraeger(roleTypes),
