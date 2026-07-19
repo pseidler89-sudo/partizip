@@ -100,8 +100,9 @@ export function QrVerwaltung({ liste, erlaubteEbenen }: Props) {
   );
   const [scopeCode, setScopeCode] = useState("");
   const [label, setLabel] = useState("");
-  const [maxRedemptions, setMaxRedemptions] = useState("50");
-  const [gueltigkeitStunden, setGueltigkeitStunden] = useState("24");
+  // Verifizierung 2.0: Einmal-Code — maxRedemptions ist serverseitig fest 1
+  // (kein Eingabefeld mehr). Kurze Standard-Laufzeit (persönlich ausgehändigt).
+  const [gueltigkeitStunden, setGueltigkeitStunden] = useState("1");
 
   const [formError, setFormError] = useState<string | null>(null);
   const [erstellt, setErstellt] = useState<ErstelltState | null>(null);
@@ -112,12 +113,7 @@ export function QrVerwaltung({ liste, erlaubteEbenen }: Props) {
     setFormError(null);
     setErstellt(null);
 
-    const max = Number(maxRedemptions);
     const std = Number(gueltigkeitStunden);
-    if (!Number.isInteger(max) || max < 1) {
-      setFormError("Max. Einlösungen muss eine ganze Zahl ≥ 1 sein.");
-      return;
-    }
     if (!Number.isInteger(std) || std < 1) {
       setFormError("Gültigkeit muss eine ganze Zahl ≥ 1 (Stunden) sein.");
       return;
@@ -128,7 +124,8 @@ export function QrVerwaltung({ liste, erlaubteEbenen }: Props) {
         scopeLevel,
         scopeCode: scopeLevel === "ortsteil" && scopeCode.trim() ? scopeCode.trim() : null,
         label: label.trim() || null,
-        maxRedemptions: max,
+        // Einmal-Code: serverseitig auf 1 geklemmt (der Wert hier ist unerheblich).
+        maxRedemptions: 1,
         gueltigkeitStunden: std,
       });
       if (!result.ok || !result.redeemUrl) {
@@ -170,7 +167,7 @@ export function QrVerwaltung({ liste, erlaubteEbenen }: Props) {
         </h2>
         <p className="mt-1 text-sm" style={{ color: "var(--pz-muted)" }}>
           Der QR-Code ist nach dem Erstellen GENAU EINMAL sichtbar — bitte direkt
-          ausdrucken oder teilen.
+          ausdrucken oder am Bildschirm zeigen und der Person aushändigen.
         </p>
 
         {/* Hand-an-die-Hand-Erklärung: was der Code tut + wer was sieht. */}
@@ -180,10 +177,15 @@ export function QrVerwaltung({ liste, erlaubteEbenen }: Props) {
         >
           <p className="font-semibold" style={{ color: "var(--pz-ink)" }}>So funktioniert die Verifizierung</p>
           <ol className="mt-2 list-decimal space-y-1 pl-4">
-            <li>Sie geben den QR-Code <strong>vor Ort</strong> aus — ausgedruckt, am Bildschirm oder als Aushang (z. B. Bürgerbüro, Veranstaltung).</li>
-            <li>Bürger:innen scannen ihn, melden sich an und sind damit <strong>wohnsitz-verifiziert (Stufe 2)</strong> — für 24 Monate.</li>
+            <li><strong>Einmal-Code:</strong> nach Ausweis-Prüfung persönlich ausgehändigt (Ausdruck oder Bildschirm). <strong>Nicht aushängen.</strong></li>
+            <li>Die Person scannt ihn, meldet sich an und ist damit <strong>wohnsitz-verifiziert (Stufe 2)</strong> — für 24 Monate. Der Code gilt für <strong>genau eine</strong> Verifizierung.</li>
             <li>Erst mit Stufe 2 können sie an <strong>verbindlichen</strong> Abstimmungen teilnehmen. Fragen und Ergebnisse <strong>ansehen</strong> kann jede:r — auch ohne Verifizierung.</li>
           </ol>
+          <p className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
+            Tipp: Bequemer ist der umgekehrte Weg — die Person zeigt ihren eigenen
+            Verifizierungs-QR, den Sie mit der Kamera scannen. Dann ist kein
+            Code-Ausdruck nötig.
+          </p>
         </div>
 
         <form onSubmit={handleErstellen} className="mt-4 space-y-4">
@@ -250,43 +252,25 @@ export function QrVerwaltung({ liste, erlaubteEbenen }: Props) {
             </p>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="maxRedemptions" className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
-                Max. Einlösungen (1–10000)
-              </label>
-              <input
-                id="maxRedemptions"
-                type="number"
-                min={1}
-                max={10000}
-                value={maxRedemptions}
-                onChange={(e) => setMaxRedemptions(e.target.value)}
-                className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
-                style={{ borderColor: "var(--pz-line)" }}
-              />
-              <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--pz-muted)" }}>
-                Wie viele Personen sich mit diesem einen Code verifizieren können. Danach ist er aufgebraucht.
-              </p>
-            </div>
-            <div>
-              <label htmlFor="gueltigkeit" className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
-                Gültigkeit in Stunden (1–720)
-              </label>
-              <input
-                id="gueltigkeit"
-                type="number"
-                min={1}
-                max={720}
-                value={gueltigkeitStunden}
-                onChange={(e) => setGueltigkeitStunden(e.target.value)}
-                className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
-                style={{ borderColor: "var(--pz-line)" }}
-              />
-              <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--pz-muted)" }}>
-                Wie lange der Code funktioniert (24 = 1 Tag). Danach läuft er automatisch ab — schützt vor Weitergabe.
-              </p>
-            </div>
+          <div>
+            <label htmlFor="gueltigkeit" className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
+              Gültigkeit in Stunden (1–24)
+            </label>
+            <input
+              id="gueltigkeit"
+              type="number"
+              min={1}
+              max={24}
+              value={gueltigkeitStunden}
+              onChange={(e) => setGueltigkeitStunden(e.target.value)}
+              className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)] sm:max-w-xs"
+              style={{ borderColor: "var(--pz-line)" }}
+            />
+            <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--pz-muted)" }}>
+              Einmal-Code: Der Code verifiziert genau eine Person. Wählen Sie die
+              Laufzeit kurz — er wird direkt vor Ort ausgehändigt und danach
+              eingelöst. Danach läuft er automatisch ab.
+            </p>
           </div>
 
           {formError && (
@@ -309,7 +293,7 @@ export function QrVerwaltung({ liste, erlaubteEbenen }: Props) {
         {erstellt && (
           <div className="mt-6 rounded-lg border p-4" style={{ borderColor: "var(--pz-line)", backgroundColor: "var(--pz-brand-soft)" }}>
             <p className="text-sm font-semibold" style={{ color: "var(--pz-ink)" }}>
-              QR-Code erstellt — jetzt ausdrucken oder teilen.
+              Einmal-Code erstellt — jetzt der Person aushändigen (Ausdruck/Bildschirm).
             </p>
             <p className="mt-1 text-xs" style={{ color: "var(--pz-body)" }}>
               Dieser Code wird aus Sicherheitsgründen <strong>nicht erneut</strong>{" "}

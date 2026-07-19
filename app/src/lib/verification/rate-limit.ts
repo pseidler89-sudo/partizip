@@ -64,3 +64,65 @@ export async function checkQrRedeemRateLimit(
 }
 
 export const QR_RATE_LIMITS = { IP_WINDOW_MIN, IP_MAX, SCOPE_IP } as const;
+
+// ---------------------------------------------------------------------------
+// Konto-QR (V3): eigener Rate-Limit-Scope für das Erzeugen eines Konto-Belegs.
+// Verhindert, dass ein eingeloggtes Konto in kurzer Zeit sehr viele Belege
+// erzeugt (Audit-/DB-Spam) — die Belege sind ohnehin einzeln kurzlebig und
+// jeweils invalidieren sie den Vorgänger. Bewusst eng, aber alltagstauglich.
+// ---------------------------------------------------------------------------
+
+const PROOF_WINDOW_MIN = 60;
+const PROOF_MAX = 30; // 30 Neu-Erzeugungen/Stunde/IP — genug fürs echte „neu erzeugen"
+const SCOPE_PROOF_IP = "proof_create_ip";
+
+function proofIpKeyHash(ipAddress: string): string {
+  return hmacRateLimit(`proof:ip:${ipAddress}`);
+}
+
+/**
+ * Prüft das IP-Rate-Limit für das Erzeugen eines Konto-QR-Belegs (V3). Ohne IP
+ * → immer erlaubt (write-then-count, wie checkQrRedeemRateLimit).
+ */
+export async function checkProofCreateRateLimit(
+  db: Db,
+  opts: { tenantId: string; ipAddress: string | null },
+): Promise<QrRateLimitResult> {
+  if (!opts.ipAddress) return { allowed: true };
+
+  await db.insert(rateLimitEvents).values({
+    scope: SCOPE_PROOF_IP,
+    keyHash: proofIpKeyHash(opts.ipAddress),
+  });
+
+  const since = new Date(Date.now() - PROOF_WINDOW_MIN * 60 * 1000);
+  const rows = await db
+    .select({ n: count() })
+    .from(rateLimitEvents)
+    .where(
+      and(
+        eq(rateLimitEvents.scope, SCOPE_PROOF_IP),
+        eq(rateLimitEvents.keyHash, proofIpKeyHash(opts.ipAddress)),
+        gt(rateLimitEvents.createdAt, since),
+      ),
+    );
+
+  if ((rows[0]?.n ?? 0) > PROOF_MAX) {
+    await db.insert(auditEvents).values({
+      tenantId: opts.tenantId,
+      actorType: "user",
+      actorRef: null,
+      action: "proof.rate_limited",
+      metadata: { dimension: "ip" },
+    });
+    return { allowed: false };
+  }
+
+  return { allowed: true };
+}
+
+export const PROOF_RATE_LIMITS = {
+  PROOF_WINDOW_MIN,
+  PROOF_MAX,
+  SCOPE_PROOF_IP,
+} as const;

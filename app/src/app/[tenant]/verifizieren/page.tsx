@@ -43,6 +43,7 @@ import { formatSlotLabel, formatDay } from "@/lib/verification/slot-format";
 import VerifizierenBestaetigen from "./VerifizierenBestaetigen";
 import TerminAbsagen from "./TerminAbsagen";
 import StellenListe, { type StelleVM } from "./StellenListe";
+import MeinKontoQr from "./MeinKontoQr";
 
 export const dynamic = "force-dynamic";
 
@@ -327,7 +328,7 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
           {[
             { icon: MapPin, h: "Stelle in Ihrer Nähe finden", p: "Wählen Sie eine Verifizierungsstelle aus der Liste unten." },
             { icon: CalendarCheck, h: "Hingehen — oder Termin, falls nötig", p: "Bei den meisten Stellen genügt ein Besuch während der Öffnungszeiten. Verlangt eine Stelle einen Termin, buchen Sie ihn dort." },
-            { icon: BadgeCheck, h: "Vor Ort kurz ausweisen", p: "Personalausweis zeigen, fertig. Wir speichern kein Ausweisbild — nur, dass Ihr Wohnsitz bestätigt ist." },
+            { icon: BadgeCheck, h: "Ausweisen und Ihren Verifizierungs-QR zeigen", p: "Personalausweis zeigen und Ihren persönlichen QR (unten) vorzeigen — die verifizierende Person scannt ihn, fertig. Wir speichern kein Ausweisbild, nur dass Ihr Wohnsitz bestätigt ist." },
           ].map((s, i, arr) => {
             const Icon = s.icon;
             return (
@@ -402,6 +403,23 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
               </Link>
             </p>
           )}
+        </section>
+      )}
+
+      {/* Vor Ort verifizieren — der eingeloggte Bürger zeigt seinen Konto-QR (V3). */}
+      {!verifiziert && eingeloggt && (
+        <section className="mt-6" aria-labelledby="konto-qr-heading">
+          <h2 id="konto-qr-heading" className="text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
+            Vor Ort verifizieren
+          </h2>
+          <p className="mt-1 text-sm" style={{ color: "var(--pz-body)" }}>
+            Sind Sie an einer Stelle: Weisen Sie sich mit dem Personalausweis aus
+            und zeigen Sie diesen QR-Code. Die verifizierende Person scannt ihn —
+            das bestätigt Ihren Wohnsitz (Stufe 2).
+          </p>
+          <div className="mt-3">
+            <MeinKontoQr />
+          </div>
         </section>
       )}
 

@@ -59,6 +59,9 @@ export const verificationMethodEnum = pgEnum("verification_method", [
   "eid", // reserviert, im Pilot nicht vergeben
   // ADR-014 Block 2: QR-Verifizierung (Verifier/Admin erzeugt QR, Bürger löst ein)
   "qr",
+  // Verifizierung 2.0 (V3): umgekehrte QR-Richtung — der Bürger zeigt seinen
+  // Konto-QR, der Verifizierer scannt/bestätigt vor Ort (verification_proofs).
+  "qr_konto",
 ]);
 
 export const roleTypeEnum = pgEnum("role_type", [
@@ -1609,6 +1612,57 @@ export const qrRedemptions = pgTable(
     // Idempotenz: pro QR-Code genau eine Einlösung je User (kein Doppel-Verbrauch)
     unique("qr_redemptions_qr_user_unique").on(t.qrCodeId, t.userId),
     index("idx_qr_redemptions_qr_code_id").on(t.qrCodeId),
+  ]
+);
+
+// ---------------------------------------------------------------------------
+// verification_proofs (Verifizierung 2.0 — V3, „QR-Richtung umdrehen")
+//
+// Umkehrung der QR-Verifizierung: NICHT der Verifizierer erzeugt einen QR, den
+// der Bürger scannt — sondern der EINGELOGGTE Bürger erzeugt einen kurzlebigen,
+// einmaligen „Konto-Beleg" (Proof), zeigt dessen QR/Code vor Ort, und der
+// Verifizierer scannt/bestätigt ihn nach Ausweis-Prüfung. Der Verifizierer
+// erfährt die Bürger-Identität NICHT über diese Tabelle (nur die user_id als
+// interner Anker für grantResidency; die UI zeigt sie nie).
+//
+// SICHERHEITS-DESIGN (analog qr_codes / auth_tokens):
+//   - token_hash = sha256Hex(rawToken): der RAW-Token verlässt nie den Server-
+//     Speicher (steht nur im QR-Deep-Link/Klartext-Code, EINMALIG beim Erzeugen).
+//   - Einmaligkeit + Ablauf: consumed_at (Single-Use) + expires_at (kurze TTL).
+//     Der Konsum ist ein atomarer bedingter UPDATE (consumed_at IS NULL AND
+//     expires_at > now()) — race-frei, kein Doppel-Grant.
+//   - Ein aktiver Proof je Person: das Erzeugen invalidiert vorher offene Proofs.
+//   - Tenant-Isolation: JEDE Query/jedes Update ist tenant-scoped.
+// ---------------------------------------------------------------------------
+
+export const verificationProofs = pgTable(
+  "verification_proofs",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    // Tenant-Löschung explizit blockieren (konsistent mit qr_codes).
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    // Der Bürger, dessen Konto-Beleg dies ist. User-Löschung löscht seine Belege.
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // SHA-256-Hex des Roh-Tokens — Roh-Token verlässt nie Server-Gedächtnis,
+    // steht NUR im Deep-Link/Code. UNIQUE für O(1)-Lookup beim Bestätigen.
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    // NULL = offen; gesetzt = eingelöst (Single-Use). Atomar bedingt gesetzt.
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    // Verifizierer, der den Beleg konsumiert hat (Audit-Spur). SET NULL: der
+    // Verifizierer kann gelöscht werden, der Beleg bleibt (Audit via audit_events).
+    consumedBy: uuid("consumed_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (t) => [
+    // Auffinden offener Belege einer Person (Invalidierung/Vorabprüfung).
+    index("idx_verification_proofs_tenant_user").on(t.tenantId, t.userId),
   ]
 );
 
