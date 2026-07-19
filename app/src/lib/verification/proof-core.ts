@@ -109,8 +109,12 @@ export async function meinProofErzeugenCore(
 
   return db.transaction(async (tx: Db) => {
     // 1. Alle noch nicht konsumierten Belege dieses Users invalidieren (Ablauf
-    //    auf jetzt setzen; DB-now() — kein JS-Date in Roh-SQL). Ein aktiver
-    //    Beleg je Person.
+    //    auf jetzt setzen; DB-now() — kein JS-Date in Roh-SQL). Im Normalfall
+    //    bleibt so nur EIN aktiver Beleg je Person; die Invariante ist per
+    //    Konvention/Tx gesichert, NICHT per DB-Constraint (bei zwei exakt
+    //    gleichzeitigen Erzeugungen könnten kurzzeitig zwei offene Belege
+    //    existieren — unkritisch: beide sind single-use und granten dieselbe
+    //    Residency an dieselbe Person, zudem pro Konto rate-limitiert).
     await tx
       .update(verificationProofs)
       .set({ expiresAt: sql`now()` })

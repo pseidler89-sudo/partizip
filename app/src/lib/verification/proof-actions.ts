@@ -22,7 +22,6 @@ import { z } from "zod";
 import {
   requireStufe1Ctx,
   requireVerifierCtx,
-  getClientIp,
 } from "@/lib/auth/action-context";
 import {
   meinProofErzeugenCore,
@@ -68,9 +67,13 @@ export async function meinVerifizierungsProofErzeugen(): Promise<ProofErzeugenAc
     };
   }
 
-  // Eigener Rate-Limit-Scope (proof_create) gegen Erzeugungs-Spam.
-  const ip = await getClientIp();
-  const rl = await checkProofCreateRateLimit(ctx.db, { tenantId: ctx.tenant.id, ipAddress: ip });
+  // Eigener Rate-Limit-Scope (proof_create) gegen Erzeugungs-Spam — nach Konto
+  // dimensioniert (siehe checkProofCreateRateLimit: geteilte IPs sperren sonst
+  // echte Bürger im Bürgerbüro-WLAN gegenseitig aus).
+  const rl = await checkProofCreateRateLimit(ctx.db, {
+    tenantId: ctx.tenant.id,
+    userId: ctx.userId,
+  });
   if (!rl.allowed) {
     return {
       ok: false,
@@ -123,6 +126,14 @@ export async function verifizierungPerProofBestaetigen(
   const auth = await requireVerifierCtx();
   if (!auth.ok) return { ok: false, error: auth.error };
   const { ctx } = auth;
+
+  // Demo-Fence fail-closed, spiegelbildlich zur Erzeugung: auf dem Demo-Mandanten
+  // wird NIE ein echter Grant erteilt. Heute schon durch Absenz gesichert (Demo
+  // erzeugt keinen Beleg), aber explizit gefenced, falls je ein Demo-Beleg
+  // entsteht (Seed/Reset) — sonst könnte ein Demo-Verifizierer Stufe 2 vergeben.
+  if (isDemoTenant(ctx.tenant.slug)) {
+    return { ok: false, error: "In der Demo ist die Vor-Ort-Verifizierung nicht verfügbar." };
+  }
 
   const tokenParsed = z.string().trim().min(1).max(512).safeParse(rawToken);
   if (!tokenParsed.success) return { ok: false, error: "Dieser Beleg ist ungültig." };

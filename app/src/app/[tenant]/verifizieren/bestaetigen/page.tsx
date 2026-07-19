@@ -50,7 +50,7 @@ export const metadata: Metadata = {
 
 interface PageProps {
   params: Promise<{ tenant: string }>;
-  searchParams: Promise<{ proof?: string }>;
+  searchParams: Promise<{ proof?: string | string[] }>;
 }
 
 function databaseUrl(): string {
@@ -69,7 +69,10 @@ function Schale({ children }: { children: React.ReactNode }) {
 
 export default async function BestaetigenPage({ params, searchParams }: PageProps) {
   const { tenant: slugFromPath } = await params;
-  const { proof: proofToken } = await searchParams;
+  // `?proof=a&proof=b` liefert in Next ein Array — auf den ersten String normalisieren
+  // (kein ungeprüfter string[] in den Hash-Lookup).
+  const proofRaw = (await searchParams).proof;
+  const proofToken = Array.isArray(proofRaw) ? proofRaw[0] : proofRaw;
 
   const headerStore = await headers();
   const host = headerStore.get("host") ?? "localhost";

@@ -67,7 +67,7 @@ export default function MeinKontoQr() {
           {isPending ? "Wird erzeugt…" : "Meinen Verifizierungs-QR anzeigen"}
         </button>
         {error && (
-          <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+          <div role="alert" className="mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
             {error}
           </div>
         )}
@@ -131,7 +131,7 @@ export default function MeinKontoQr() {
       </button>
 
       {error && (
-        <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+        <div role="alert" className="mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
           {error}
         </div>
       )}

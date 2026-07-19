@@ -73,26 +73,27 @@ export const QR_RATE_LIMITS = { IP_WINDOW_MIN, IP_MAX, SCOPE_IP } as const;
 // ---------------------------------------------------------------------------
 
 const PROOF_WINDOW_MIN = 60;
-const PROOF_MAX = 30; // 30 Neu-Erzeugungen/Stunde/IP — genug fürs echte „neu erzeugen"
-const SCOPE_PROOF_IP = "proof_create_ip";
+const PROOF_MAX = 30; // 30 Neu-Erzeugungen/Stunde/Konto — genug fürs echte „neu erzeugen"
+const SCOPE_PROOF_USER = "proof_create_user";
 
-function proofIpKeyHash(ipAddress: string): string {
-  return hmacRateLimit(`proof:ip:${ipAddress}`);
+function proofUserKeyHash(userId: string): string {
+  return hmacRateLimit(`proof:user:${userId}`);
 }
 
 /**
- * Prüft das IP-Rate-Limit für das Erzeugen eines Konto-QR-Belegs (V3). Ohne IP
- * → immer erlaubt (write-then-count, wie checkQrRedeemRateLimit).
+ * Prüft das Rate-Limit für das Erzeugen eines Konto-QR-Belegs (V3). Dimensioniert
+ * nach **userId**, nicht nach IP: die Erzeugung ist immer authentifiziert (Stufe ≥ 1),
+ * und ein IP-Limit würde in geteilten Netzen (Bürgerbüro-/Café-WLAN, CGNAT) echte
+ * Bürger gegenseitig aussperren. Pro Konto reicht 30/h für „neu erzeugen"; ein
+ * einzelnes Konto kann damit nicht spammen. Write-then-count (wie checkQrRedeemRateLimit).
  */
 export async function checkProofCreateRateLimit(
   db: Db,
-  opts: { tenantId: string; ipAddress: string | null },
+  opts: { tenantId: string; userId: string },
 ): Promise<QrRateLimitResult> {
-  if (!opts.ipAddress) return { allowed: true };
-
   await db.insert(rateLimitEvents).values({
-    scope: SCOPE_PROOF_IP,
-    keyHash: proofIpKeyHash(opts.ipAddress),
+    scope: SCOPE_PROOF_USER,
+    keyHash: proofUserKeyHash(opts.userId),
   });
 
   const since = new Date(Date.now() - PROOF_WINDOW_MIN * 60 * 1000);
@@ -101,8 +102,8 @@ export async function checkProofCreateRateLimit(
     .from(rateLimitEvents)
     .where(
       and(
-        eq(rateLimitEvents.scope, SCOPE_PROOF_IP),
-        eq(rateLimitEvents.keyHash, proofIpKeyHash(opts.ipAddress)),
+        eq(rateLimitEvents.scope, SCOPE_PROOF_USER),
+        eq(rateLimitEvents.keyHash, proofUserKeyHash(opts.userId)),
         gt(rateLimitEvents.createdAt, since),
       ),
     );
@@ -113,7 +114,7 @@ export async function checkProofCreateRateLimit(
       actorType: "user",
       actorRef: null,
       action: "proof.rate_limited",
-      metadata: { dimension: "ip" },
+      metadata: { dimension: "user" },
     });
     return { allowed: false };
   }
@@ -124,5 +125,5 @@ export async function checkProofCreateRateLimit(
 export const PROOF_RATE_LIMITS = {
   PROOF_WINDOW_MIN,
   PROOF_MAX,
-  SCOPE_PROOF_IP,
+  SCOPE_PROOF_USER,
 } as const;
