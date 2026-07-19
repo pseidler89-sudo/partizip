@@ -59,7 +59,7 @@ export function istVerwaltungsPerspektive(): boolean {
 }
 
 /** Obergrenze des Schrittzählers (Anzahl Verwaltungs-Schritte im Guide). */
-export const DEMO_VERWALTUNG_SCHRITTE_MAX = 5;
+export const DEMO_VERWALTUNG_SCHRITTE_MAX = 6;
 
 /** sessionStorage lesen — fehlertolerant (Privacy-Modi), auf 1–5 geklemmt. */
 export function gespeicherterSchritt(): number {

@@ -32,12 +32,21 @@ export default function MeinKontoQr() {
   const [isPending, startTransition] = useTransition();
   const [proof, setProof] = useState<ProofState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Demo-Mandant: die Vor-Ort-Verifizierung ist bewusst gefenced (kein echter
+  // Beleg). Das ist KEIN Fehler — darum getrennt vom `error`-State geführt und
+  // als neutraler Info-Hinweis (nicht rot, kein role="alert") gerendert.
+  const [demoHinweis, setDemoHinweis] = useState(false);
 
   function erzeugen() {
     setError(null);
+    setDemoHinweis(false);
     startTransition(async () => {
       try {
         const r = await meinVerifizierungsProofErzeugen();
+        if (r.demo) {
+          setDemoHinweis(true);
+          return;
+        }
         if (!r.ok || !r.code || !r.proofUrl) {
           setError(r.error ?? "QR-Code konnte nicht erzeugt werden.");
           return;
@@ -66,6 +75,16 @@ export default function MeinKontoQr() {
           <QrCode aria-hidden className="mr-1.5 h-4 w-4" strokeWidth={2} />
           {isPending ? "Wird erzeugt…" : "Meinen Verifizierungs-QR anzeigen"}
         </button>
+        {demoHinweis && (
+          <div
+            className="pz-card mt-3 p-3.5 text-sm"
+            style={{ color: "var(--pz-body)" }}
+          >
+            In der Demo bleibt es bei der Vorschau — auf einer echten Kommune
+            erzeugt dieser Knopf Ihren persönlichen QR, den die verifizierende
+            Stelle scannt.
+          </div>
+        )}
         {error && (
           <div role="alert" className="mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
             {error}

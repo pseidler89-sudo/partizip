@@ -131,14 +131,25 @@ export default async function AdminDashboardPage({ params }: PageProps) {
         label: "Verifizierungs-Standort anlegen",
         // Block K1: direkt zur Standort-/Sprechzeiten-Verwaltung (vorher gab es
         // keine UI dafür — der Link zeigte nur auf die Verifizierungs-Übersicht).
+        // Deckt das Verifizierungs-Setup jetzt allein ab (Verifizierung 2.0: der
+        // Bürger zeigt seinen Konto-QR, die Stelle scannt — es muss kein QR-Code
+        // mehr vom Amt erzeugt werden).
         href: `/${slugFromPath}/admin/verifizierung/standorte`,
         erledigt: Number(locRows[0]?.c ?? 0) > 0,
       },
-      {
-        label: "QR-Code erstellen",
-        href: `/${slugFromPath}/admin/verifizierung`,
-        erledigt: Number(qrRows[0]?.c ?? 0) > 0,
-      },
+      // „QR-Code erstellen" nur, solange der Verifizierer-Einmal-Code aktiv ist.
+      // Ist er ausgeblendet (FEATURE_VERIFIER_EINMAL_CODE=false), gibt es keine
+      // Erstell-UI mehr → der Schritt wäre nie erfüllbar (Dauer-Sackgasse). Der
+      // Standort-Schritt oben deckt das Verifizierungs-Setup dann ab.
+      ...(FEATURE_VERIFIER_EINMAL_CODE
+        ? [
+            {
+              label: "QR-Code erstellen",
+              href: `/${slugFromPath}/admin/verifizierung`,
+              erledigt: Number(qrRows[0]?.c ?? 0) > 0,
+            },
+          ]
+        : []),
       {
         label: "Erste Umfrage stellen",
         href: `/${slugFromPath}/admin/abstimmungen`,

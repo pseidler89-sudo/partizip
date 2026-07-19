@@ -170,13 +170,13 @@ export function WohnortSection({
             </>
           ) : (
             <p className="mt-0.5 text-xs" style={{ color: "var(--pz-muted)" }}>
-              Noch nicht per QR-Code verifiziert.
+              Wohnsitz noch nicht bestätigt.
             </p>
           )}
           <p className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
             Der verbindliche Wohnsitz bestimmt, wo Ihre <strong>verbindliche</strong>{" "}
-            Stimme zählt. Er ist nur über einen QR-Code Ihrer Kommune änderbar — nicht
-            hier im Konto.
+            Stimme zählt. Er ist nur vor Ort bei einer Verifizierungsstelle änderbar —
+            nicht hier im Konto.
           </p>
         </div>
       </div>

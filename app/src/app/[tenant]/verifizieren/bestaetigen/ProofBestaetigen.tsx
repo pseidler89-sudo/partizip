@@ -30,6 +30,8 @@ interface Props {
 type Result =
   | { kind: "idle" }
   | { kind: "success"; verifiedUntil?: string }
+  // Demo-Mandant: bewusst kein Grant — neutraler Hinweis statt Fehler.
+  | { kind: "demo" }
   | { kind: "error"; message: string };
 
 function formatDate(iso: string): string {
@@ -77,6 +79,10 @@ export default function ProofBestaetigen({
     startTransition(async () => {
       try {
         const r = await verifizierungPerProofBestaetigen(proofToken, regionId);
+        if (r.demo) {
+          setResult({ kind: "demo" });
+          return;
+        }
         if (!r.ok) {
           setResult({ kind: "error", message: r.error ?? "Bestätigung fehlgeschlagen." });
           return;
@@ -214,6 +220,13 @@ export default function ProofBestaetigen({
         <p id="proof-confirm-hint" className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
           Bitte bestätigen Sie beide Punkte, um fortzufahren.
         </p>
+      )}
+
+      {result.kind === "demo" && (
+        <div className="pz-card mt-4 p-3.5 text-sm" style={{ color: "var(--pz-body)" }}>
+          In der Demo bleibt es bei der Vorschau — auf einer echten Kommune
+          bestätigt dieser Knopf den Wohnsitz für das gescannte Konto.
+        </div>
       )}
 
       {result.kind === "error" && (
