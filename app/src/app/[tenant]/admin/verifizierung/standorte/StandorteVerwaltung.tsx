@@ -111,12 +111,39 @@ function formatOeffnungKurz(fenster: OeffnungszeitFenster[] | null): string {
     .join(", ");
 }
 
-/** Leeres Koordinatenfeld → null; sonst die Zahl (NaN → null, fail-closed). */
-function parseKoord(s: string): number | null {
-  const t = s.trim();
+const KOORD_UNGUELTIG = Symbol("koord-ungueltig");
+
+/**
+ * Leeres Koordinatenfeld → null; gültige Zahl → number (deutsches Dezimalkomma
+ * wird zu Punkt normalisiert, „50,14" ⇒ 50.14). Nicht-leere, nicht-parsebare
+ * Eingabe → KOORD_UNGUELTIG (statt stillem Verlust — die Zahl darf nicht
+ * kommentarlos verschwinden).
+ */
+function parseKoord(s: string): number | null | typeof KOORD_UNGUELTIG {
+  const t = s.trim().replace(",", ".");
   if (t === "") return null;
   const n = Number(t);
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) ? n : KOORD_UNGUELTIG;
+}
+
+/**
+ * Parst beide Koordinatenfelder gemeinsam. Rückgabe entweder die Werte oder eine
+ * Fehlermeldung (ungültige Zahl), damit die Handler vor dem Server-Call abbrechen
+ * und Nutzer-Feedback geben, statt Koordinaten still zu verwerfen.
+ */
+function parseKoordPaar(
+  latRoh: string,
+  lonRoh: string,
+): { lat: number | null; lon: number | null } | { fehler: string } {
+  const lat = parseKoord(latRoh);
+  const lon = parseKoord(lonRoh);
+  if (lat === KOORD_UNGUELTIG || lon === KOORD_UNGUELTIG) {
+    return {
+      fehler:
+        "Koordinaten müssen Zahlen sein (z. B. 50.14 oder 50,14). Bitte prüfen oder leer lassen.",
+    };
+  }
+  return { lat, lon };
 }
 
 /**
@@ -406,13 +433,18 @@ export function StandorteVerwaltung({ standorte }: Props) {
   function handleAnlegen(e: React.FormEvent) {
     e.preventDefault();
     setNeuFehler(null);
+    const koord = parseKoordPaar(neuLat, neuLon);
+    if ("fehler" in koord) {
+      setNeuFehler(koord.fehler);
+      return;
+    }
     startTransition(async () => {
       const r = await standortErstellen({
         name: neuName.trim(),
         address: neuAddress.trim(),
         hinweise: neuHinweise.trim() || null,
-        lat: parseKoord(neuLat),
-        lon: parseKoord(neuLon),
+        lat: koord.lat,
+        lon: koord.lon,
         oeffnungszeiten: neuOeffnung,
         terminErforderlich: neuTermin,
         barrierefrei: wahlZuBarrierefrei(neuBarrierefrei),
@@ -453,13 +485,18 @@ export function StandorteVerwaltung({ standorte }: Props) {
   function handleBearbeiten(e: React.FormEvent, standortId: string) {
     e.preventDefault();
     setzeFehler(standortId, null);
+    const koord = parseKoordPaar(editLat, editLon);
+    if ("fehler" in koord) {
+      setzeFehler(standortId, koord.fehler);
+      return;
+    }
     startTransition(async () => {
       const r = await standortBearbeiten(standortId, {
         name: editName.trim(),
         address: editAddress.trim(),
         hinweise: editHinweise.trim() || null,
-        lat: parseKoord(editLat),
-        lon: parseKoord(editLon),
+        lat: koord.lat,
+        lon: koord.lon,
         oeffnungszeiten: editOeffnung,
         terminErforderlich: editTermin,
         barrierefrei: wahlZuBarrierefrei(editBarrierefrei),

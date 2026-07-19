@@ -111,12 +111,16 @@ function standortFelder(input: StandortInput) {
     input.oeffnungszeiten && input.oeffnungszeiten.length > 0
       ? input.oeffnungszeiten
       : null;
+  // Koordinaten-Paarigkeit auch an der Datenquelle erzwingen (nicht nur am
+  // zod-Boundary): ein halbes Paar (nur lat ODER nur lon) würde die spätere
+  // V2-Distanzberechnung mit NaN vergiften → beide auf NULL normalisieren.
+  const koordPaar = input.lat != null && input.lon != null;
   return {
     name: input.name,
     address: input.address ?? null,
     hinweise: input.hinweise ?? null,
-    lat: input.lat == null ? null : String(input.lat),
-    lon: input.lon == null ? null : String(input.lon),
+    lat: koordPaar ? String(input.lat) : null,
+    lon: koordPaar ? String(input.lon) : null,
     oeffnungszeiten: oeffnung,
     terminErforderlich: input.terminErforderlich ?? false,
     barrierefrei: input.barrierefrei ?? null,
