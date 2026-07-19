@@ -279,6 +279,13 @@ function TenantLayoutInner({
             Für Kommunen
           </Link>
           <span aria-hidden>·</span>
+          <Link
+            href={`/${slugFromPath}/ueber-uns`}
+            className="hover:text-pz-ink transition-colors"
+          >
+            Über uns &amp; Presse
+          </Link>
+          <span aria-hidden>·</span>
           <a
             href="https://github.com/pseidler89-sudo/partizip"
             className="hover:text-pz-ink transition-colors"
