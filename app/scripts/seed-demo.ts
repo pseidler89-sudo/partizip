@@ -285,21 +285,67 @@ async function main() {
   }
 
   // ----- 4. Demo-Standort + Slots + offener Termin -------------------------
+  // Verifizierung 2.0 / V2: Koordinaten + strukturierte Öffnungszeiten, damit die
+  // Bürger-Liste „Stellen in Ihrer Nähe" im Demo etwas zeigt (Walk-in + Distanz).
+  // Als Beispiel gekennzeichnet („(Demo)"); Koordinaten ungefähr Taunusstein.
+  const rathausFelder = {
+    address: "Aarstraße 150, 65232 Taunusstein",
+    hinweise: "Bitte einen amtlichen Lichtbildausweis mitbringen.",
+    isActive: true,
+    lat: "50.1470",
+    lon: "8.1510",
+    oeffnungszeiten: [
+      { tag: 1, von: "08:00", bis: "16:00" },
+      { tag: 2, von: "08:00", bis: "16:00" },
+      { tag: 3, von: "08:00", bis: "16:00" },
+      { tag: 4, von: "08:00", bis: "18:00" },
+      { tag: 5, von: "08:00", bis: "12:00" },
+    ],
+    terminErforderlich: false,
+    barrierefrei: true,
+    kontakt: "06128 000-0",
+  };
   const [loc] = await db
     .insert(verificationLocations)
     .values({
       tenantId,
       name: "Bürgerbüro Rathaus (Demo)",
-      address: "Aarstraße 150, 65232 Taunusstein",
-      hinweise: "Bitte einen amtlichen Lichtbildausweis mitbringen.",
-      isActive: true,
+      ...rathausFelder,
     })
     .onConflictDoUpdate({
       target: [verificationLocations.tenantId, verificationLocations.name],
-      set: { isActive: true, updatedAt: now },
+      set: { ...rathausFelder, updatedAt: now },
     })
     .returning({ id: verificationLocations.id });
   const locationId = loc.id;
+
+  // Zweiter Beispiel-Standort (Walk-in, andere Koordinaten) — zeigt die
+  // Distanz-Sortierung der Nähe-Liste. Ohne Slots (reiner Walk-in).
+  const wehenFelder = {
+    address: "Kirchgasse 5, 65232 Taunusstein-Wehen",
+    hinweise: "Kleinere Außenstelle — an Markttagen kann es voller werden.",
+    isActive: true,
+    lat: "50.1680",
+    lon: "8.1420",
+    oeffnungszeiten: [
+      { tag: 2, von: "09:00", bis: "12:00" },
+      { tag: 4, von: "14:00", bis: "18:00" },
+    ],
+    terminErforderlich: false,
+    barrierefrei: false,
+    kontakt: null,
+  };
+  await db
+    .insert(verificationLocations)
+    .values({
+      tenantId,
+      name: "Ortsverwaltung Wehen (Demo)",
+      ...wehenFelder,
+    })
+    .onConflictDoUpdate({
+      target: [verificationLocations.tenantId, verificationLocations.name],
+      set: { ...wehenFelder, updatedAt: now },
+    });
 
   // Slot-Zeiten DETERMINISTISCH am UTC-Tag verankert (nicht an der exakten Uhrzeit),
   // damit ein erneuter Lauf am selben Tag dieselben Slots trifft (Idempotenz über

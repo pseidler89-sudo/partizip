@@ -14,11 +14,13 @@
 import { and, eq, gt, asc, count, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import {
+  regions,
   verificationBookings,
   verificationLocations,
   verificationSlots,
   type OeffnungszeitFenster,
 } from "@/db/schema";
+import { haversineKm } from "@/lib/region/core";
 
 export interface StandortAdminItem {
   locationId: string;
@@ -164,6 +166,150 @@ export async function getStandorteFuerAdmin(
     freiePlaetze: Number(slotsByLoc.get(l.id)?.frei ?? 0),
     offeneBuchungen: Number(bookingsByLoc.get(l.id) ?? 0),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Bürger-Sicht „Stellen in Ihrer Nähe" (Verifizierung 2.0 / V2, rein lesend)
+// ---------------------------------------------------------------------------
+
+export interface StandortNaehe {
+  locationId: string;
+  name: string;
+  address: string | null;
+  hinweise: string | null;
+  /** Koordinaten (paarweise oder beide null) — für die Distanz-Sortierung. */
+  lat: number | null;
+  lon: number | null;
+  oeffnungszeiten: OeffnungszeitFenster[] | null;
+  /** true = nur Termin (kein Walk-in). */
+  terminErforderlich: boolean;
+  /** Tri-State (null = unbekannt). */
+  barrierefrei: boolean | null;
+  kontakt: string | null;
+  /**
+   * Luftlinie zum Referenzpunkt in km — NUR wenn sowohl ein Referenzpunkt als
+   * auch Standort-Koordinaten vorliegen; sonst null (Standort landet dann ans
+   * Listenende, graceful, Owner-Entscheid 2026-07-19).
+   */
+  distanzKm: number | null;
+}
+
+/**
+ * Aktive Verifizierungs-Stellen des Tenants für die Bürger-Sicht, nach Distanz
+ * zum Referenzpunkt (`refLat`/`refLon`) sortiert. BEWUSST OHNE "use server"
+ * (Muster booking-queries.ts): reine, tenant-scoped Lesezugriffe.
+ *
+ * Distanz (`haversineKm`) wird NUR berechnet, wenn ein Referenzpunkt UND
+ * Standort-Koordinaten (lat & lon) vorliegen — sonst `distanzKm = null`.
+ * Sortierung: Standorte MIT Distanz aufsteigend zuerst (Gleichstand: Name),
+ * danach die ohne Distanz alphabetisch — so bleibt die Liste ohne
+ * Referenzpunkt/Koordinaten trotzdem sinnvoll (graceful).
+ *
+ * Kein Cross-Tenant: eq(tenantId) + isActive.
+ */
+export async function standorteInDerNaehe(
+  db: Db,
+  tenantId: string,
+  refLat?: number | null,
+  refLon?: number | null,
+): Promise<StandortNaehe[]> {
+  const rows = (await db
+    .select({
+      id: verificationLocations.id,
+      name: verificationLocations.name,
+      address: verificationLocations.address,
+      hinweise: verificationLocations.hinweise,
+      lat: verificationLocations.lat,
+      lon: verificationLocations.lon,
+      oeffnungszeiten: verificationLocations.oeffnungszeiten,
+      terminErforderlich: verificationLocations.terminErforderlich,
+      barrierefrei: verificationLocations.barrierefrei,
+      kontakt: verificationLocations.kontakt,
+    })
+    .from(verificationLocations)
+    .where(
+      and(
+        eq(verificationLocations.tenantId, tenantId),
+        eq(verificationLocations.isActive, true),
+      ),
+    )) as {
+    id: string;
+    name: string;
+    address: string | null;
+    hinweise: string | null;
+    // numeric-Spalten liefert der Treiber als String — hier zu number gewandelt.
+    lat: string | null;
+    lon: string | null;
+    oeffnungszeiten: OeffnungszeitFenster[] | null;
+    terminErforderlich: boolean;
+    barrierefrei: boolean | null;
+    kontakt: string | null;
+  }[];
+
+  const hatRef =
+    refLat != null &&
+    refLon != null &&
+    Number.isFinite(refLat) &&
+    Number.isFinite(refLon);
+
+  const items: StandortNaehe[] = rows.map((r) => {
+    const lat = r.lat == null ? null : Number(r.lat);
+    const lon = r.lon == null ? null : Number(r.lon);
+    const distanzKm =
+      hatRef && lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon)
+        ? haversineKm(refLat as number, refLon as number, lat, lon)
+        : null;
+    return {
+      locationId: r.id,
+      name: r.name,
+      address: r.address,
+      hinweise: r.hinweise,
+      lat,
+      lon,
+      oeffnungszeiten: r.oeffnungszeiten ?? null,
+      terminErforderlich: r.terminErforderlich,
+      barrierefrei: r.barrierefrei,
+      kontakt: r.kontakt,
+      distanzKm,
+    };
+  });
+
+  // Mit Distanz aufsteigend zuerst, dann der Rest alphabetisch (Name als
+  // Gleichstand-Tiebreak, deutsches Collation).
+  items.sort((a, b) => {
+    if (a.distanzKm != null && b.distanzKm != null) {
+      return a.distanzKm - b.distanzKm || a.name.localeCompare(b.name, "de");
+    }
+    if (a.distanzKm != null) return -1;
+    if (b.distanzKm != null) return 1;
+    return a.name.localeCompare(b.name, "de");
+  });
+
+  return items;
+}
+
+/**
+ * Ungefähres Zentrum (lat/lon) eines Region-Knotens — Referenzpunkt-Fallback
+ * (b) der V2-Nähe-Sortierung (Browser-Geolocation ist Priorität (a) und läuft
+ * clientseitig). null, wenn die Region nicht existiert oder keine Koordinaten
+ * hat (dann keine Server-Distanz → einfache Liste). Tenant-frei lesbar: der
+ * Gebietsbaum ist global, die Isolation der Standorte bleibt über tenantId.
+ */
+export async function regionZentrum(
+  db: Db,
+  regionId: string,
+): Promise<{ lat: number; lon: number } | null> {
+  const rows = (await db
+    .select({ lat: regions.lat, lon: regions.lon })
+    .from(regions)
+    .where(eq(regions.id, regionId))
+    .limit(1)) as { lat: string | null; lon: string | null }[];
+  const r = rows[0];
+  if (!r || r.lat == null || r.lon == null) return null;
+  const lat = Number(r.lat);
+  const lon = Number(r.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return { lat, lon };
 }
 
 export interface SlotAdminItem {
