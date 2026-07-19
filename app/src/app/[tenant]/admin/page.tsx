@@ -120,12 +120,18 @@ export default async function AdminDashboardPage({ params }: PageProps) {
   // stehen (Sackgasse, Gate-B MINOR-3).
   let ersteSchritte: { label: string; href: string; erledigt: boolean }[] | null = null;
   if (isAdmin && !isDemoTenant(tenant.slug)) {
-    const [locRows, qrRows, pollRows, digestRows] = await Promise.all([
+    const [locRows, pollRows, digestRows] = await Promise.all([
       db.select({ c: count() }).from(verificationLocations).where(eq(verificationLocations.tenantId, tenant.id)),
-      db.select({ c: count() }).from(qrCodes).where(eq(qrCodes.tenantId, tenant.id)),
       db.select({ c: count() }).from(polls).where(eq(polls.tenantId, tenant.id)),
       db.select({ c: count() }).from(digests).where(eq(digests.tenantId, tenant.id)),
     ]);
+    // QR-Codes nur zählen, wenn der Einmal-Code-Schritt überhaupt angezeigt wird
+    // (sonst überflüssiger Query bei jedem Admin-Dashboard-Load).
+    const qrCount = FEATURE_VERIFIER_EINMAL_CODE
+      ? Number(
+          (await db.select({ c: count() }).from(qrCodes).where(eq(qrCodes.tenantId, tenant.id)))[0]?.c ?? 0,
+        )
+      : 0;
     const schritte = [
       {
         label: "Verifizierungs-Standort anlegen",
@@ -146,7 +152,7 @@ export default async function AdminDashboardPage({ params }: PageProps) {
             {
               label: "QR-Code erstellen",
               href: `/${slugFromPath}/admin/verifizierung`,
-              erledigt: Number(qrRows[0]?.c ?? 0) > 0,
+              erledigt: qrCount > 0,
             },
           ]
         : []),
