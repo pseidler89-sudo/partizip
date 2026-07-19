@@ -122,8 +122,9 @@ export default function TerminBuchen({
         <div className="mt-4 flex items-start gap-2 text-sm" style={{ color: "var(--pz-body)" }}>
           <Info aria-hidden className="mt-0.5 h-[17px] w-[17px] shrink-0" style={{ color: "var(--pz-brand-strong)" }} strokeWidth={2} />
           <p>
-            Bitte bringen Sie Ihren <b>Personalausweis oder Reisepass</b> mit. Wir
-            speichern kein Ausweisbild — nur, dass Ihr Wohnsitz bestätigt ist.
+            Bitte bringen Sie Ihren <b>Personalausweis oder Reisepass</b> mit. Der
+            Ausweis dient nur zum Abgleich vor Ort; gespeichert wird nichts davon,
+            nur dass Ihr Wohnsitz bestätigt ist.
           </p>
         </div>
         <Link
