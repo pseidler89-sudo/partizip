@@ -23,7 +23,6 @@ import {
   ShieldAlert,
   ShieldCheck,
   Info,
-  QrCode,
 } from "lucide-react";
 import { createDb } from "@/db/client";
 import { getTenantFromHost } from "@/lib/tenant";
@@ -34,9 +33,16 @@ import { getStufe } from "@/lib/eligibility/stufe";
 import { qrTokenMeta, type QrTokenMeta } from "@/lib/verification/queries";
 import { regionTypLabel } from "@/lib/region/ebenen";
 import { getMeinOffenerTermin } from "@/lib/verification/booking-queries";
+import {
+  standorteInDerNaehe,
+  regionZentrum,
+} from "@/lib/verification/standort-queries";
+import { resolveGemeindeRegionId } from "@/lib/region/scope";
+import { formatOeffnungszeiten } from "@/lib/verification/oeffnungszeiten-format";
 import { formatSlotLabel, formatDay } from "@/lib/verification/slot-format";
 import VerifizierenBestaetigen from "./VerifizierenBestaetigen";
 import TerminAbsagen from "./TerminAbsagen";
+import StellenListe, { type StelleVM } from "./StellenListe";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +63,16 @@ function scopeBezeichnung(meta: QrTokenMeta, tenantName: string): string {
   if (meta.regionTyp === "gemeinde") return tenantName;
   const lvl = regionTypLabel(meta.regionTyp);
   return meta.regionTyp === "ortsteil" ? `${lvl} ${meta.regionName}` : lvl;
+}
+
+/** Kürzt einen Hinweistext auf max. `max` Zeichen (Wort-schonend, mit „…"). */
+function kuerzen(text: string | null, max: number): string | null {
+  if (!text) return null;
+  const t = text.trim();
+  if (t.length <= max) return t;
+  const schnitt = t.slice(0, max);
+  const letzterRaum = schnitt.lastIndexOf(" ");
+  return `${(letzterRaum > max * 0.6 ? schnitt.slice(0, letzterRaum) : schnitt).trimEnd()}…`;
 }
 
 function Schale({ children }: { children: React.ReactNode }) {
@@ -82,6 +98,7 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
   let userId: string | null = null;
   let stufe = 0;
   let residencyVerifiedUntil: Date | null = null;
+  let homeRegionId: string | null = null;
   const cookieStore = await cookies();
   const rawSession = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (rawSession) {
@@ -102,6 +119,7 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
         userId = userRows[0].id;
         stufe = getStufe(userRows[0]);
         residencyVerifiedUntil = userRows[0].residencyVerifiedUntil ?? null;
+        homeRegionId = userRows[0].homeRegionId ?? null;
       }
     }
   }
@@ -196,6 +214,30 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
   const offenerTermin =
     eingeloggt && userId ? await getMeinOffenerTermin(db, tenant.id, userId) : null;
 
+  // „Stellen in Ihrer Nähe" (Walk-in-first) — nur laden, wenn noch relevant
+  // (weder verifiziert noch mit offenem Termin). Referenzpunkt (b): Zentrum der
+  // Wohn-Region bzw. der Gemeinde des Tenants. Priorität (a) Browser-Geolocation
+  // läuft clientseitig in StellenListe (Koordinaten verlassen den Browser nie).
+  let stellen: StelleVM[] = [];
+  if (!verifiziert && !offenerTermin) {
+    const refRegionId = homeRegionId ?? (await resolveGemeindeRegionId(db, tenant.id));
+    const ref = refRegionId ? await regionZentrum(db, refRegionId) : null;
+    const rohe = await standorteInDerNaehe(db, tenant.id, ref?.lat, ref?.lon);
+    stellen = rohe.map((s) => ({
+      locationId: s.locationId,
+      name: s.name,
+      address: s.address,
+      oeffnungszeitenText: formatOeffnungszeiten(s.oeffnungszeiten),
+      hinweiseKurz: kuerzen(s.hinweise, 120),
+      barrierefrei: s.barrierefrei,
+      kontakt: s.kontakt,
+      terminErforderlich: s.terminErforderlich,
+      lat: s.lat,
+      lon: s.lon,
+      distanzKm: s.distanzKm,
+    }));
+  }
+
   return (
     <main className="mx-auto min-h-screen max-w-md px-5 py-10">
       <h1 className="text-2xl font-semibold" style={{ color: "var(--pz-ink)" }}>
@@ -283,8 +325,8 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
       {!verifiziert && !offenerTermin && (
         <ol className="mt-6 space-y-0">
           {[
-            { icon: MapPin, h: "Standort wählen", p: "Wählen Sie ein Bürgerbüro in Ihrer Nähe." },
-            { icon: CalendarCheck, h: "Termin buchen", p: "Suchen Sie einen freien Termin — meist noch in dieser Woche." },
+            { icon: MapPin, h: "Stelle in Ihrer Nähe finden", p: "Wählen Sie eine Verifizierungsstelle aus der Liste unten." },
+            { icon: CalendarCheck, h: "Hingehen — oder Termin, falls nötig", p: "Bei den meisten Stellen genügt ein Besuch während der Öffnungszeiten. Verlangt eine Stelle einen Termin, buchen Sie ihn dort." },
             { icon: BadgeCheck, h: "Vor Ort kurz ausweisen", p: "Personalausweis zeigen, fertig. Wir speichern kein Ausweisbild — nur, dass Ihr Wohnsitz bestätigt ist." },
           ].map((s, i, arr) => {
             const Icon = s.icon;
@@ -329,28 +371,48 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
         </div>
       )}
 
+      {/* Stellen in Ihrer Nähe (Walk-in-first) */}
+      {!verifiziert && !offenerTermin && (
+        <section className="mt-6" aria-labelledby="stellen-heading">
+          <h2 id="stellen-heading" className="text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
+            Stellen in Ihrer Nähe
+          </h2>
+          {stellen.length === 0 ? (
+            <div className="mt-3 pz-card p-5">
+              <p className="text-sm" style={{ color: "var(--pz-body)" }}>
+                Für Ihre Kommune sind derzeit keine Verifizierungsstellen
+                hinterlegt. Bitte versuchen Sie es später erneut.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-3">
+              <StellenListe stellen={stellen} tenantSlug={slugFromPath} />
+            </div>
+          )}
+          {!eingeloggt && stellen.length > 0 && (
+            <p className="mt-3 text-sm" style={{ color: "var(--pz-muted)" }}>
+              Zum Abschließen ist eine kurze Anmeldung per E-Mail-Link nötig — so
+              hängt die Verifizierung an einer bestätigten Person.{" "}
+              <Link
+                href={`/${slugFromPath}/anmelden`}
+                className="font-semibold underline-offset-2 hover:underline"
+                style={{ color: "var(--pz-brand-strong)" }}
+              >
+                Jetzt anmelden
+              </Link>
+            </p>
+          )}
+        </section>
+      )}
+
       {/* CTA */}
       <div className="mt-6 flex flex-col gap-3">
-        {verifiziert ? (
+        {verifiziert && (
           <Link
             href={`/${slugFromPath}/konto`}
             className="pz-btn pz-btn-primary pz-btn-lg"
           >
             Zum Konto
-          </Link>
-        ) : offenerTermin ? null : eingeloggt ? (
-          <Link
-            href={`/${slugFromPath}/verifizieren/termin`}
-            className="pz-btn pz-btn-primary pz-btn-lg"
-          >
-            <MapPin aria-hidden className="h-[18px] w-[18px]" strokeWidth={2} /> Standort wählen
-          </Link>
-        ) : (
-          <Link
-            href={`/${slugFromPath}/anmelden`}
-            className="pz-btn pz-btn-primary pz-btn-lg"
-          >
-            Anmelden, um Termin zu buchen
           </Link>
         )}
         <Link
@@ -358,18 +420,9 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
           className="self-center text-sm font-semibold underline-offset-2 hover:underline"
           style={{ color: "var(--pz-brand-strong)" }}
         >
-          Später — erst einmal mitmachen
+          {verifiziert ? "Zur Startseite" : "Später — erst einmal mitmachen"}
         </Link>
       </div>
-
-      {/* QR-Fallback-Hinweis */}
-      <p className="mt-6 flex items-start gap-2 border-t pt-4 text-xs" style={{ color: "var(--pz-muted)", borderColor: "var(--pz-line)" }}>
-        <QrCode aria-hidden className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={2} />
-        <span>
-          Sie haben einen QR-Code Ihrer Kommune (z. B. im Bürgerbüro)? Scannen Sie
-          ihn — das verifiziert Sie sofort, ohne Termin.
-        </span>
-      </p>
     </main>
   );
 }

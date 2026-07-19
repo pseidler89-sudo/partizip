@@ -40,6 +40,7 @@ import {
 import {
   getSlotsFuerStandortAdmin,
   getStandorteFuerAdmin,
+  standorteInDerNaehe,
 } from "@/lib/verification/standort-queries";
 import { bookSlotCore, bookingWahrnehmenCore } from "@/lib/verification/booking-core";
 import {
@@ -917,5 +918,93 @@ describe("Standort-Verwaltung (Integration)", () => {
     const r = await bookSlotCore(racedDb as never, tenantId, await makeUser(tenantId), slot.slotId);
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/nicht mehr verfügbar/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Verifizierung 2.0 / V2 — Bürger-Sicht „Stellen in Ihrer Nähe"
+// (standorteInDerNaehe): Distanz-Sortierung, Standorte ohne Koordinaten ans
+// Ende, Tenant-Isolation, isActive-Filter. Ruft die ECHTE Query.
+// ---------------------------------------------------------------------------
+describe("standorteInDerNaehe (Integration, V2)", () => {
+  let sql_: postgres.Sql;
+  let db: DbType;
+  let tenantId: string;
+  let tenant2Id: string;
+  let adminId: string;
+
+  // Referenzpunkt für die Distanz (nahe „B").
+  const REF = { lat: 50.15, lon: 8.15 };
+
+  beforeAll(async () => {
+    if (SKIP) return;
+    const reset = postgres(TEST_DB_URL!, { max: 1 });
+    await reset`DROP SCHEMA IF EXISTS public CASCADE`;
+    await reset`DROP SCHEMA IF EXISTS drizzle CASCADE`;
+    await reset`CREATE SCHEMA public`;
+    await reset.end();
+
+    sql_ = postgres(TEST_DB_URL!, { max: 5 });
+    db = drizzle(sql_);
+    await migrate(db, { migrationsFolder });
+
+    const [t1] = await db.insert(tenants).values({ slug: `nh-${Date.now()}`, name: "NH" }).returning();
+    tenantId = t1.id;
+    const [t2] = await db.insert(tenants).values({ slug: `nh2-${Date.now()}`, name: "NH2" }).returning();
+    tenant2Id = t2.id;
+    const [u] = await db
+      .insert(users)
+      .values({ tenantId, email: `nh-${Date.now()}@nh-test.de`, minAgeConfirmedAt: new Date(), verificationStatus: "pending" })
+      .returning();
+    adminId = u.id;
+  });
+
+  afterAll(async () => {
+    if (SKIP || !sql_) return;
+    await sql_.end();
+  });
+
+  it.skipIf(SKIP)("DATABASE_URL_TEST nicht gesetzt", () => expect(true).toBe(true));
+
+  it.skipIf(SKIP)("sortiert MIT Koordinaten nach Distanz aufsteigend, ohne Koordinaten ans Ende (alphabetisch)", async () => {
+    // A-fern (weit), B-nah (nah am Ref), C-ohne + D-ohne (keine Koordinaten).
+    await standortErstellenCore(db as never, tenantId, adminId, { name: "A-fern", address: "x", lat: 50.30, lon: 8.15 });
+    await standortErstellenCore(db as never, tenantId, adminId, { name: "B-nah", address: "x", lat: 50.16, lon: 8.15 });
+    await standortErstellenCore(db as never, tenantId, adminId, { name: "C-ohne", address: "x" });
+    await standortErstellenCore(db as never, tenantId, adminId, { name: "D-ohne", address: "x" });
+
+    const liste = await standorteInDerNaehe(db as never, tenantId, REF.lat, REF.lon);
+    expect(liste.map((s) => s.name)).toEqual(["B-nah", "A-fern", "C-ohne", "D-ohne"]);
+
+    const b = liste[0];
+    const a = liste[1];
+    expect(b.distanzKm).not.toBeNull();
+    expect(a.distanzKm).not.toBeNull();
+    expect(b.distanzKm! < a.distanzKm!).toBe(true);
+    // Ohne Koordinaten → keine Distanz.
+    expect(liste[2].distanzKm).toBeNull();
+    expect(liste[3].distanzKm).toBeNull();
+  });
+
+  it.skipIf(SKIP)("ohne Referenzpunkt → keine Distanz, rein alphabetische Liste", async () => {
+    const liste = await standorteInDerNaehe(db as never, tenantId);
+    expect(liste.map((s) => s.name)).toEqual(["A-fern", "B-nah", "C-ohne", "D-ohne"]);
+    for (const s of liste) expect(s.distanzKm).toBeNull();
+  });
+
+  it.skipIf(SKIP)("Tenant-Isolation: fremde Standorte tauchen nicht auf", async () => {
+    await standortErstellenCore(db as never, tenant2Id, adminId, { name: "Fremd-Standort", address: "x", lat: 50.15, lon: 8.15 });
+    const liste = await standorteInDerNaehe(db as never, tenantId, REF.lat, REF.lon);
+    expect(liste.some((s) => s.name === "Fremd-Standort")).toBe(false);
+    // Gegenprobe: im anderen Tenant ist er da.
+    const liste2 = await standorteInDerNaehe(db as never, tenant2Id, REF.lat, REF.lon);
+    expect(liste2.some((s) => s.name === "Fremd-Standort")).toBe(true);
+  });
+
+  it.skipIf(SKIP)("deaktivierte Standorte werden ausgeblendet", async () => {
+    const r = await standortErstellenCore(db as never, tenantId, adminId, { name: "E-inaktiv", address: "x", lat: 50.16, lon: 8.15 });
+    await standortAktivSetzenCore(db as never, tenantId, adminId, r.locationId!, false);
+    const liste = await standorteInDerNaehe(db as never, tenantId, REF.lat, REF.lon);
+    expect(liste.some((s) => s.name === "E-inaktiv")).toBe(false);
   });
 });

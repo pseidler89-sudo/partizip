@@ -21,6 +21,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { OeffnungszeitFenster } from "@/db/schema";
+import { formatOeffnungszeiten } from "@/lib/verification/oeffnungszeiten-format";
 import BestaetigungsDialog from "../../../BestaetigungsDialog";
 import {
   slotKapazitaetAendern,
@@ -97,18 +98,6 @@ function barrierefreiZuWahl(b: boolean | null): BarrierefreiWahl {
 }
 function wahlZuBarrierefrei(w: BarrierefreiWahl): boolean | null {
   return w === "ja" ? true : w === "nein" ? false : null;
-}
-
-const ISO_TAG_KURZ = ["", "Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-
-/** Kompakte, menschenlesbare Öffnungszeiten-Zusammenfassung für die Karte. */
-function formatOeffnungKurz(fenster: OeffnungszeitFenster[] | null): string {
-  if (!fenster || fenster.length === 0) return "";
-  return fenster
-    .slice()
-    .sort((a, b) => a.tag - b.tag || a.von.localeCompare(b.von))
-    .map((f) => `${ISO_TAG_KURZ[f.tag] ?? f.tag} ${f.von}–${f.bis}`)
-    .join(", ");
 }
 
 const KOORD_UNGUELTIG = Symbol("koord-ungueltig");
@@ -765,7 +754,7 @@ export function StandorteVerwaltung({ standorte }: Props) {
                         s.oeffnungszeiten &&
                         s.oeffnungszeiten.length > 0 && (
                           <p className="mt-0.5 text-xs" style={{ color: "var(--pz-muted)" }}>
-                            Öffnungszeiten: {formatOeffnungKurz(s.oeffnungszeiten)}
+                            Öffnungszeiten: {formatOeffnungszeiten(s.oeffnungszeiten)}
                           </p>
                         )
                       )}
