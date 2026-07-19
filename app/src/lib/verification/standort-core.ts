@@ -38,11 +38,13 @@
  */
 
 import { and, eq, gt, lt, sql } from "drizzle-orm";
+import { z } from "zod";
 import type { Db } from "@/db/client";
 import {
   verificationLocations,
   verificationSlots,
   auditEvents,
+  type OeffnungszeitFenster,
 } from "@/db/schema";
 import { addMonths } from "@/lib/verification/qr-core";
 import { istPgFehler, PG_UNIQUE_VIOLATION } from "@/lib/db/pg-errors";
@@ -52,6 +54,21 @@ export const STANDORT_LIMITS = {
   NAME_MAX: 120,
   ADDRESS_MAX: 200,
   HINWEISE_MAX: 500,
+  KONTAKT_MAX: 120,
+  /** Wochentag als ISO-Wert Mo=1 … So=7 (Öffnungszeiten-Fenster). */
+  OEFFNUNG_TAG_MIN: 1,
+  OEFFNUNG_TAG_MAX: 7,
+  /**
+   * Harter Deckel der Öffnungszeiten-Fenster je Standort — Missbrauchsschutz
+   * (jsonb-Aufblähung). 7 Tage × ein paar Fenster reichen weit; 50 ist
+   * großzügig und verhindert dennoch beliebig große Payloads.
+   */
+  OEFFNUNG_MAX_FENSTER: 50,
+  /** Koordinaten-Bereiche (WGS84). */
+  LAT_MIN: -90,
+  LAT_MAX: 90,
+  LON_MIN: -180,
+  LON_MAX: 180,
   KAPAZITAET_MIN: 1,
   KAPAZITAET_MAX: 20,
   SLOT_DAUER_MIN: 10, // Minuten
@@ -83,11 +100,147 @@ function istUniqueKonflikt(err: unknown): boolean {
   return istPgFehler(err, PG_UNIQUE_VIOLATION);
 }
 
+/**
+ * Bildet die V1-Standortfelder auf die DB-Spaltenwerte ab (gemeinsam für
+ * Erstellen/Bearbeiten). `numeric` erwartet in Drizzle einen String — lat/lon
+ * werden daher als String gebunden. Leere Öffnungszeiten → NULL („keine
+ * Angabe"). Reines JSON, kein JS-`Date` (Konvention).
+ */
+function standortFelder(input: StandortInput) {
+  const oeffnung =
+    input.oeffnungszeiten && input.oeffnungszeiten.length > 0
+      ? input.oeffnungszeiten
+      : null;
+  // Koordinaten-Paarigkeit auch an der Datenquelle erzwingen (nicht nur am
+  // zod-Boundary): ein halbes Paar (nur lat ODER nur lon) würde die spätere
+  // V2-Distanzberechnung mit NaN vergiften → beide auf NULL normalisieren.
+  const koordPaar = input.lat != null && input.lon != null;
+  return {
+    name: input.name,
+    address: input.address ?? null,
+    hinweise: input.hinweise ?? null,
+    lat: koordPaar ? String(input.lat) : null,
+    lon: koordPaar ? String(input.lon) : null,
+    oeffnungszeiten: oeffnung,
+    terminErforderlich: input.terminErforderlich ?? false,
+    barrierefrei: input.barrierefrei ?? null,
+    kontakt: input.kontakt ?? null,
+  };
+}
+
 export interface StandortInput {
   name: string;
   address?: string | null;
   hinweise?: string | null;
+  /** Verifizierung 2.0 / V1 — optionale Koordinaten (paarweise oder keins). */
+  lat?: number | null;
+  lon?: number | null;
+  /** Strukturierte Öffnungs-/Sprechzeiten; leer/None → in der DB NULL. */
+  oeffnungszeiten?: OeffnungszeitFenster[] | null;
+  /** true = nur Termin (kein Walk-in). */
+  terminErforderlich?: boolean;
+  /** Tri-State: true/false/null (unbekannt). */
+  barrierefrei?: boolean | null;
+  /** Optionale Telefon-/Mail-Kurzangabe (≤120). */
+  kontakt?: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// zod-Schema der Standort-Eingabe (V1) — Single Source of Truth, in core statt
+// in der "use server"-Actions-Datei, damit es als ECHTE Funktion (safeParse)
+// direkt getestet werden kann (keine Logik-Spiegelung). Die Action ruft es am
+// Boundary auf; Grenzen kommen aus STANDORT_LIMITS.
+// ---------------------------------------------------------------------------
+
+/** „HH:MM" (00:00–23:59). */
+const ZEIT_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Minuten seit Mitternacht aus validiertem „HH:MM". */
+function hhmmMinuten(zeit: string): number {
+  const [h, m] = zeit.split(":").map(Number);
+  return h * 60 + m;
+}
+
+const oeffnungszeitFensterSchema = z
+  .object({
+    tag: z
+      .number()
+      .int()
+      .min(STANDORT_LIMITS.OEFFNUNG_TAG_MIN, "Öffnungszeiten: Wochentag muss 1 (Mo) bis 7 (So) sein.")
+      .max(STANDORT_LIMITS.OEFFNUNG_TAG_MAX, "Öffnungszeiten: Wochentag muss 1 (Mo) bis 7 (So) sein."),
+    von: z.string().regex(ZEIT_RE, "Öffnungszeiten: ungültige Uhrzeit (HH:MM)."),
+    bis: z.string().regex(ZEIT_RE, "Öffnungszeiten: ungültige Uhrzeit (HH:MM)."),
+  })
+  .refine((f) => hhmmMinuten(f.von) < hhmmMinuten(f.bis), {
+    message: "Öffnungszeiten: Beginn muss vor Ende liegen.",
+  });
+
+/**
+ * Validiert die komplette Standort-Eingabe (anlegen + bearbeiten). Trimmt
+ * Strings, prüft Koordinaten paarweise + Bereich, Öffnungszeiten-Fenster und
+ * die Pflichtfeld-Regel: name + address + (mindestens ein Öffnungszeiten-Fenster
+ * ODER termin_erforderlich=true). Fail-closed.
+ */
+export const standortEingabeSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(STANDORT_LIMITS.NAME_MIN, `Name: mindestens ${STANDORT_LIMITS.NAME_MIN} Zeichen.`)
+      .max(STANDORT_LIMITS.NAME_MAX, `Name: höchstens ${STANDORT_LIMITS.NAME_MAX} Zeichen.`),
+    address: z
+      .string()
+      .trim()
+      .min(1, "Adresse ist erforderlich.")
+      .max(STANDORT_LIMITS.ADDRESS_MAX, `Adresse: höchstens ${STANDORT_LIMITS.ADDRESS_MAX} Zeichen.`),
+    hinweise: z
+      .string()
+      .trim()
+      .max(STANDORT_LIMITS.HINWEISE_MAX, `Hinweise: höchstens ${STANDORT_LIMITS.HINWEISE_MAX} Zeichen.`)
+      .optional()
+      .nullable(),
+    lat: z
+      .number()
+      .min(STANDORT_LIMITS.LAT_MIN, `Breitengrad: ${STANDORT_LIMITS.LAT_MIN} bis ${STANDORT_LIMITS.LAT_MAX}.`)
+      .max(STANDORT_LIMITS.LAT_MAX, `Breitengrad: ${STANDORT_LIMITS.LAT_MIN} bis ${STANDORT_LIMITS.LAT_MAX}.`)
+      .optional()
+      .nullable(),
+    lon: z
+      .number()
+      .min(STANDORT_LIMITS.LON_MIN, `Längengrad: ${STANDORT_LIMITS.LON_MIN} bis ${STANDORT_LIMITS.LON_MAX}.`)
+      .max(STANDORT_LIMITS.LON_MAX, `Längengrad: ${STANDORT_LIMITS.LON_MIN} bis ${STANDORT_LIMITS.LON_MAX}.`)
+      .optional()
+      .nullable(),
+    oeffnungszeiten: z
+      .array(oeffnungszeitFensterSchema)
+      .max(STANDORT_LIMITS.OEFFNUNG_MAX_FENSTER, `Höchstens ${STANDORT_LIMITS.OEFFNUNG_MAX_FENSTER} Öffnungszeiten-Fenster.`)
+      .optional()
+      .nullable(),
+    terminErforderlich: z.boolean().optional().default(false),
+    barrierefrei: z.boolean().optional().nullable(),
+    kontakt: z
+      .string()
+      .trim()
+      .max(STANDORT_LIMITS.KONTAKT_MAX, `Kontakt: höchstens ${STANDORT_LIMITS.KONTAKT_MAX} Zeichen.`)
+      .optional()
+      .nullable(),
+  })
+  // Koordinaten paarweise: beide gesetzt oder beide leer.
+  .refine(
+    (d) => (d.lat == null) === (d.lon == null),
+    { message: "Koordinaten bitte paarweise angeben (Breiten- UND Längengrad oder keines).", path: ["lat"] },
+  )
+  // Pflichtfeld-Regel: mindestens ein Öffnungszeiten-Fenster ODER Termin-Pflicht.
+  .refine(
+    (d) => (d.oeffnungszeiten != null && d.oeffnungszeiten.length > 0) || d.terminErforderlich === true,
+    {
+      message:
+        "Bitte mindestens ein Öffnungszeiten-Fenster angeben oder die Termin-Pflicht aktivieren.",
+      path: ["oeffnungszeiten"],
+    },
+  );
+
+export type StandortEingabe = z.infer<typeof standortEingabeSchema>;
 
 /**
  * Legt einen Verifizierungs-Standort an (tenant-scoped). region_id wird
@@ -108,9 +261,7 @@ export async function standortErstellenCore(
         .insert(verificationLocations)
         .values({
           tenantId,
-          name: input.name,
-          address: input.address ?? null,
-          hinweise: input.hinweise ?? null,
+          ...standortFelder(input),
           // region_id bewusst weggelassen → Trigger setzt den Gemeinde-Knoten.
         })
         .returning({ id: verificationLocations.id });
@@ -151,11 +302,7 @@ export async function standortBearbeitenCore(
     return await db.transaction(async (tx: Db) => {
       const updated = await tx
         .update(verificationLocations)
-        .set({
-          name: input.name,
-          address: input.address ?? null,
-          hinweise: input.hinweise ?? null,
-        })
+        .set(standortFelder(input))
         .where(
           and(
             eq(verificationLocations.id, locationId),

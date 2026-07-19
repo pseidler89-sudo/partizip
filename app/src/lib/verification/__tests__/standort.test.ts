@@ -34,6 +34,7 @@ import {
   sprechzeitenAnlegenCore,
   standortAktivSetzenCore,
   standortBearbeitenCore,
+  standortEingabeSchema,
   standortErstellenCore,
 } from "@/lib/verification/standort-core";
 import {
@@ -176,6 +177,130 @@ describe("generiereSerienSlotZeiten (Unit)", () => {
         timeZone: "Europe/Berlin",
       }).format(s.startsAt);
       expect(wochentag).toBe("Tue");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Standort-Eingabe-Validierung (V1) — ruft das ECHTE zod-Schema
+// (standortEingabeSchema), keine gespiegelte Logik. Läuft ohne DB.
+// ---------------------------------------------------------------------------
+
+describe("standortEingabeSchema (Unit, V1)", () => {
+  const basis = {
+    name: "Bürgerbüro Rathaus",
+    address: "Aarstr. 150",
+    oeffnungszeiten: [{ tag: 1, von: "09:00", bis: "12:00" }],
+  };
+
+  it("gültige Eingabe mit Öffnungszeiten wird akzeptiert (getrimmt)", () => {
+    const r = standortEingabeSchema.safeParse({ ...basis, name: "  Bürgerbüro  " });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.name).toBe("Bürgerbüro");
+  });
+
+  it("Öffnungszeiten: von ≥ bis wird abgelehnt", () => {
+    const r = standortEingabeSchema.safeParse({
+      ...basis,
+      oeffnungszeiten: [{ tag: 1, von: "12:00", bis: "09:00" }],
+    });
+    expect(r.success).toBe(false);
+    // Gleichstand (von == bis) ebenfalls ungültig.
+    const gleich = standortEingabeSchema.safeParse({
+      ...basis,
+      oeffnungszeiten: [{ tag: 1, von: "09:00", bis: "09:00" }],
+    });
+    expect(gleich.success).toBe(false);
+  });
+
+  it("Öffnungszeiten: ungültige Uhrzeit (kein HH:MM) wird abgelehnt", () => {
+    for (const bad of ["9:00", "24:00", "12:60", "abc"]) {
+      const r = standortEingabeSchema.safeParse({
+        ...basis,
+        oeffnungszeiten: [{ tag: 1, von: bad, bis: "23:00" }],
+      });
+      expect(r.success, `${bad} sollte ungültig sein`).toBe(false);
+    }
+  });
+
+  it("Öffnungszeiten: Wochentag außerhalb 1..7 wird abgelehnt", () => {
+    for (const tag of [0, 8, -1]) {
+      const r = standortEingabeSchema.safeParse({
+        ...basis,
+        oeffnungszeiten: [{ tag, von: "09:00", bis: "12:00" }],
+      });
+      expect(r.success, `Tag ${tag} sollte ungültig sein`).toBe(false);
+    }
+  });
+
+  it("mehrere Fenster am selben Tag sind erlaubt", () => {
+    const r = standortEingabeSchema.safeParse({
+      ...basis,
+      oeffnungszeiten: [
+        { tag: 1, von: "09:00", bis: "12:00" },
+        { tag: 1, von: "14:00", bis: "16:00" },
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("lat/lon paarweise: nur einer gesetzt wird abgelehnt", () => {
+    const nurLat = standortEingabeSchema.safeParse({ ...basis, lat: 50.14 });
+    expect(nurLat.success).toBe(false);
+    const nurLon = standortEingabeSchema.safeParse({ ...basis, lon: 8.15 });
+    expect(nurLon.success).toBe(false);
+    const beide = standortEingabeSchema.safeParse({ ...basis, lat: 50.14, lon: 8.15 });
+    expect(beide.success).toBe(true);
+  });
+
+  it("lat/lon außerhalb des Bereichs wird abgelehnt", () => {
+    expect(standortEingabeSchema.safeParse({ ...basis, lat: 91, lon: 0 }).success).toBe(false);
+    expect(standortEingabeSchema.safeParse({ ...basis, lat: 0, lon: 181 }).success).toBe(false);
+    expect(standortEingabeSchema.safeParse({ ...basis, lat: -90, lon: -180 }).success).toBe(true);
+  });
+
+  it("Pflichtfeld-Regel: termin_erforderlich=true erlaubt fehlende Öffnungszeiten", () => {
+    const r = standortEingabeSchema.safeParse({
+      name: "Nur-Termin-Standort",
+      address: "Musterweg 1",
+      terminErforderlich: true,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("Pflichtfeld-Regel: weder Öffnungszeiten noch Termin-Pflicht wird abgelehnt", () => {
+    const leer = standortEingabeSchema.safeParse({
+      name: "Leerer Standort",
+      address: "Musterweg 1",
+    });
+    expect(leer.success).toBe(false);
+    const leeresArray = standortEingabeSchema.safeParse({
+      name: "Leerer Standort",
+      address: "Musterweg 1",
+      oeffnungszeiten: [],
+      terminErforderlich: false,
+    });
+    expect(leeresArray.success).toBe(false);
+  });
+
+  it("Pflichtfeld-Regel: fehlende/leere Adresse wird abgelehnt", () => {
+    const ohne = standortEingabeSchema.safeParse({
+      name: "Kein-Adress-Standort",
+      oeffnungszeiten: [{ tag: 1, von: "09:00", bis: "12:00" }],
+    });
+    expect(ohne.success).toBe(false);
+    const leer = standortEingabeSchema.safeParse({ ...basis, address: "   " });
+    expect(leer.success).toBe(false);
+  });
+
+  it("kontakt über 120 Zeichen wird abgelehnt", () => {
+    const r = standortEingabeSchema.safeParse({ ...basis, kontakt: "x".repeat(121) });
+    expect(r.success).toBe(false);
+  });
+
+  it("barrierefrei als Tri-State: true/false/null gültig", () => {
+    for (const b of [true, false, null]) {
+      expect(standortEingabeSchema.safeParse({ ...basis, barrierefrei: b }).success).toBe(true);
     }
   });
 });
@@ -581,6 +706,84 @@ describe("Standort-Verwaltung (Integration)", () => {
     // Tenant-Isolation der Admin-Sicht.
     const fremd = await getStandorteFuerAdmin(db as never, tenant2Id);
     expect(fremd.find((s) => s.name === "Kennzahl-Standort")).toBeUndefined();
+  });
+
+  it.skipIf(SKIP)("V1: Erstellen persistiert Öffnungszeiten/Termin/Barrierefrei/Kontakt/Koordinaten; Query liest sie", async () => {
+    const oeffnung = [
+      { tag: 1, von: "09:00", bis: "12:00" },
+      { tag: 3, von: "14:00", bis: "18:00" },
+    ];
+    const r = await standortErstellenCore(db as never, tenantId, adminId, {
+      name: "V1-Standort",
+      address: "Aarstr. 200",
+      oeffnungszeiten: oeffnung,
+      terminErforderlich: false,
+      barrierefrei: true,
+      kontakt: "06128 / 000-0",
+      lat: 50.1409,
+      lon: 8.1508,
+    });
+    expect(r.ok).toBe(true);
+
+    // Direkt aus der DB: jsonb-Rundlauf + Spaltenwerte.
+    const [loc] = await db
+      .select()
+      .from(verificationLocations)
+      .where(eq(verificationLocations.id, r.locationId!));
+    expect(loc.oeffnungszeiten).toEqual(oeffnung);
+    expect(loc.terminErforderlich).toBe(false);
+    expect(loc.barrierefrei).toBe(true);
+    expect(loc.kontakt).toBe("06128 / 000-0");
+    expect(Number(loc.lat)).toBeCloseTo(50.1409, 4);
+    expect(Number(loc.lon)).toBeCloseTo(8.1508, 4);
+
+    // Admin-Query liefert die Felder typisiert (lat/lon als number).
+    const admin = await getStandorteFuerAdmin(db as never, tenantId);
+    const eintrag = admin.find((s) => s.name === "V1-Standort")!;
+    expect(eintrag.oeffnungszeiten).toEqual(oeffnung);
+    expect(eintrag.terminErforderlich).toBe(false);
+    expect(eintrag.barrierefrei).toBe(true);
+    expect(eintrag.kontakt).toBe("06128 / 000-0");
+    expect(eintrag.lat).toBeCloseTo(50.1409, 4);
+    expect(eintrag.lon).toBeCloseTo(8.1508, 4);
+  });
+
+  it.skipIf(SKIP)("V1: leere Öffnungszeiten werden als NULL gespeichert; Bearbeiten aktualisiert die Felder", async () => {
+    // Nur-Termin-Standort: leeres Öffnungszeiten-Array → NULL in der DB.
+    const r = await standortErstellenCore(db as never, tenantId, adminId, {
+      name: "V1-Termin-Standort",
+      address: "Musterweg 1",
+      oeffnungszeiten: [],
+      terminErforderlich: true,
+    });
+    expect(r.ok).toBe(true);
+    const [vor] = await db
+      .select()
+      .from(verificationLocations)
+      .where(eq(verificationLocations.id, r.locationId!));
+    expect(vor.oeffnungszeiten).toBeNull();
+    expect(vor.terminErforderlich).toBe(true);
+    expect(vor.barrierefrei).toBeNull(); // Tri-State: unbekannt
+
+    // Bearbeiten setzt Öffnungszeiten + Koordinaten, entfernt Termin-Pflicht.
+    const upd = await standortBearbeitenCore(db as never, tenantId, adminId, r.locationId!, {
+      name: "V1-Termin-Standort",
+      address: "Musterweg 1",
+      oeffnungszeiten: [{ tag: 5, von: "08:00", bis: "13:00" }],
+      terminErforderlich: false,
+      barrierefrei: false,
+      lat: 49.0,
+      lon: 8.4,
+    });
+    expect(upd.ok).toBe(true);
+    const [nach] = await db
+      .select()
+      .from(verificationLocations)
+      .where(eq(verificationLocations.id, r.locationId!));
+    expect(nach.oeffnungszeiten).toEqual([{ tag: 5, von: "08:00", bis: "13:00" }]);
+    expect(nach.terminErforderlich).toBe(false);
+    expect(nach.barrierefrei).toBe(false);
+    expect(Number(nach.lat)).toBeCloseTo(49.0, 4);
   });
 
   // --- Gate-B-Folge-Härtung ------------------------------------------------

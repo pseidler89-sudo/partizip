@@ -31,6 +31,7 @@ import {
   sprechzeitenAnlegenCore,
   standortAktivSetzenCore,
   standortBearbeitenCore,
+  standortEingabeSchema,
   standortErstellenCore,
   STANDORT_LIMITS,
   type SprechzeitenResult,
@@ -44,25 +45,8 @@ const DEMO_STANDORTE_GESPERRT = "In der Demo nicht verfügbar.";
 // zod-Schemata (Grenzen aus STANDORT_LIMITS — eine Quelle der Wahrheit)
 // ---------------------------------------------------------------------------
 
-const standortSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(STANDORT_LIMITS.NAME_MIN, `Name: mindestens ${STANDORT_LIMITS.NAME_MIN} Zeichen.`)
-    .max(STANDORT_LIMITS.NAME_MAX, `Name: höchstens ${STANDORT_LIMITS.NAME_MAX} Zeichen.`),
-  address: z
-    .string()
-    .trim()
-    .max(STANDORT_LIMITS.ADDRESS_MAX, `Adresse: höchstens ${STANDORT_LIMITS.ADDRESS_MAX} Zeichen.`)
-    .optional()
-    .nullable(),
-  hinweise: z
-    .string()
-    .trim()
-    .max(STANDORT_LIMITS.HINWEISE_MAX, `Hinweise: höchstens ${STANDORT_LIMITS.HINWEISE_MAX} Zeichen.`)
-    .optional()
-    .nullable(),
-});
+// Standort-Eingabe-Schema (V1) lebt in standort-core (Single Source of Truth,
+// direkt testbar) — hier nur importiert und am Boundary angewandt.
 
 const datumSchema = z
   .string()
@@ -122,14 +106,20 @@ export async function standortErstellen(rawData: unknown): Promise<StandortResul
   const { ctx } = auth;
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_STANDORTE_GESPERRT };
 
-  const parsed = standortSchema.safeParse(rawData);
+  const parsed = standortEingabeSchema.safeParse(rawData);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.errors[0]?.message ?? "Ungültige Eingabe." };
   }
   return standortErstellenCore(ctx.db, ctx.tenant.id, ctx.userId, {
     name: parsed.data.name,
-    address: parsed.data.address || null,
+    address: parsed.data.address,
     hinweise: parsed.data.hinweise || null,
+    lat: parsed.data.lat ?? null,
+    lon: parsed.data.lon ?? null,
+    oeffnungszeiten: parsed.data.oeffnungszeiten ?? null,
+    terminErforderlich: parsed.data.terminErforderlich,
+    barrierefrei: parsed.data.barrierefrei ?? null,
+    kontakt: parsed.data.kontakt || null,
   });
 }
 
@@ -144,14 +134,20 @@ export async function standortBearbeiten(
 
   const idParsed = z.string().uuid().safeParse(locationId);
   if (!idParsed.success) return { ok: false, error: "Ungültige Standort-ID." };
-  const parsed = standortSchema.safeParse(rawData);
+  const parsed = standortEingabeSchema.safeParse(rawData);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.errors[0]?.message ?? "Ungültige Eingabe." };
   }
   return standortBearbeitenCore(ctx.db, ctx.tenant.id, ctx.userId, idParsed.data, {
     name: parsed.data.name,
-    address: parsed.data.address || null,
+    address: parsed.data.address,
     hinweise: parsed.data.hinweise || null,
+    lat: parsed.data.lat ?? null,
+    lon: parsed.data.lon ?? null,
+    oeffnungszeiten: parsed.data.oeffnungszeiten ?? null,
+    terminErforderlich: parsed.data.terminErforderlich,
+    barrierefrei: parsed.data.barrierefrei ?? null,
+    kontakt: parsed.data.kontakt || null,
   });
 }
 

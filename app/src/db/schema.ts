@@ -486,6 +486,19 @@ export const roles = pgTable(
 // verification_locations
 // ---------------------------------------------------------------------------
 
+/**
+ * Verifizierung 2.0 / V1: ein Öffnungs-/Sprechzeiten-Fenster eines Standorts.
+ * `tag` = ISO-Wochentag Mo=1 … So=7; `von`/`bis` = Wandzeit „HH:MM". Mehrere
+ * Einträge je Tag = mehrere Fenster. Am Action-Boundary per zod validiert
+ * (von < bis, HH:MM-Regex, Tag 1–7); die DB speichert reines JSON (kein
+ * JS-`Date` in Roh-SQL, siehe Konvention).
+ */
+export interface OeffnungszeitFenster {
+  tag: number; // 1..7 (Mo=1 … So=7)
+  von: string; // "HH:MM"
+  bis: string; // "HH:MM"
+}
+
 export const verificationLocations = pgTable(
   "verification_locations",
   {
@@ -499,6 +512,16 @@ export const verificationLocations = pgTable(
     hinweise: text("hinweise"),
     lat: numeric("lat"),
     lon: numeric("lon"),
+    // Verifizierung 2.0 / V1 (Migration 0037, additiv):
+    // Strukturierte Öffnungs-/Sprechzeiten. NULL / [] = „keine Angabe". Shape
+    // Array<{tag:1..7, von:"HH:MM", bis:"HH:MM"}> — zod validiert am Boundary.
+    oeffnungszeiten: jsonb("oeffnungszeiten").$type<OeffnungszeitFenster[]>(),
+    // true = Verifizierung NUR über Termin (K1-Slots), kein Walk-in.
+    terminErforderlich: boolean("termin_erforderlich").notNull().default(false),
+    // null = unbekannt (Tri-State) — für Bürger-Anzeige (V2).
+    barrierefrei: boolean("barrierefrei"),
+    // Optionale Telefon-/Mail-Kurzangabe (≤120, per zod erzwungen).
+    kontakt: text("kontakt"),
     // ADR-024 / GEBIETSMODELL §3.2: Gebietsknoten des Standorts. verification_locations
     // trug nie einen scope_level — der Standort gehört zur Kommune, der BEFORE-INSERT-
     // Trigger leitet region_id auf den Gemeinde-Knoten des Tenants ab (Sicherheitsnetz
