@@ -64,3 +64,66 @@ export async function checkQrRedeemRateLimit(
 }
 
 export const QR_RATE_LIMITS = { IP_WINDOW_MIN, IP_MAX, SCOPE_IP } as const;
+
+// ---------------------------------------------------------------------------
+// Konto-QR (V3): eigener Rate-Limit-Scope für das Erzeugen eines Konto-Belegs.
+// Verhindert, dass ein eingeloggtes Konto in kurzer Zeit sehr viele Belege
+// erzeugt (Audit-/DB-Spam) — die Belege sind ohnehin einzeln kurzlebig und
+// jeweils invalidieren sie den Vorgänger. Bewusst eng, aber alltagstauglich.
+// ---------------------------------------------------------------------------
+
+const PROOF_WINDOW_MIN = 60;
+const PROOF_MAX = 30; // 30 Neu-Erzeugungen/Stunde/Konto — genug fürs echte „neu erzeugen"
+const SCOPE_PROOF_USER = "proof_create_user";
+
+function proofUserKeyHash(userId: string): string {
+  return hmacRateLimit(`proof:user:${userId}`);
+}
+
+/**
+ * Prüft das Rate-Limit für das Erzeugen eines Konto-QR-Belegs (V3). Dimensioniert
+ * nach **userId**, nicht nach IP: die Erzeugung ist immer authentifiziert (Stufe ≥ 1),
+ * und ein IP-Limit würde in geteilten Netzen (Bürgerbüro-/Café-WLAN, CGNAT) echte
+ * Bürger gegenseitig aussperren. Pro Konto reicht 30/h für „neu erzeugen"; ein
+ * einzelnes Konto kann damit nicht spammen. Write-then-count (wie checkQrRedeemRateLimit).
+ */
+export async function checkProofCreateRateLimit(
+  db: Db,
+  opts: { tenantId: string; userId: string },
+): Promise<QrRateLimitResult> {
+  await db.insert(rateLimitEvents).values({
+    scope: SCOPE_PROOF_USER,
+    keyHash: proofUserKeyHash(opts.userId),
+  });
+
+  const since = new Date(Date.now() - PROOF_WINDOW_MIN * 60 * 1000);
+  const rows = await db
+    .select({ n: count() })
+    .from(rateLimitEvents)
+    .where(
+      and(
+        eq(rateLimitEvents.scope, SCOPE_PROOF_USER),
+        eq(rateLimitEvents.keyHash, proofUserKeyHash(opts.userId)),
+        gt(rateLimitEvents.createdAt, since),
+      ),
+    );
+
+  if ((rows[0]?.n ?? 0) > PROOF_MAX) {
+    await db.insert(auditEvents).values({
+      tenantId: opts.tenantId,
+      actorType: "user",
+      actorRef: null,
+      action: "proof.rate_limited",
+      metadata: { dimension: "user" },
+    });
+    return { allowed: false };
+  }
+
+  return { allowed: true };
+}
+
+export const PROOF_RATE_LIMITS = {
+  PROOF_WINDOW_MIN,
+  PROOF_MAX,
+  SCOPE_PROOF_USER,
+} as const;

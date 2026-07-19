@@ -267,6 +267,13 @@
       "when": 1784434336647,
       "tag": "0037_abandoned_justin_hammer",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1784439098011,
+      "tag": "0038_graceful_moonstone",
+      "breakpoints": true
     }
   ]
 }

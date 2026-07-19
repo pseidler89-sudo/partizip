@@ -240,33 +240,36 @@ describe("verification/qr (Integration)", () => {
     expect(wr2.ok).toBe(false);
   });
 
-  // --- Cap erschöpft -------------------------------------------------------
-  it.skipIf(SKIP)("Cap erschöpft: nach maxRedemptions wird weitere Einlösung abgelehnt", async () => {
+  // --- Einmal-Code (Verifizierung 2.0): maxRedemptions serverseitig fest 1 ---
+  it.skipIf(SKIP)("Einmal-Code: maxRedemptions wird auf 1 geklemmt — 2. Einlösung abgelehnt", async () => {
+    // Aufrufer verlangt 2 — serverseitig auf 1 geklemmt (Owner-Entscheid V3).
     const r = await qrErstellenCore(db as never, tenantId, verifierId, {
       scopeLevel: "stadt",
       maxRedemptions: 2,
       gueltigkeitStunden: 24,
     }, ADMIN);
+    // Gespeichert ist genau 1 (nicht der angefragte Wert).
+    const [erstellt] = await db.select().from(qrCodes).where(eq(qrCodes.id, r.qrId));
+    expect(erstellt.maxRedemptions).toBe(1);
+
     const u1 = await makeUser(tenantId);
     const u2 = await makeUser(tenantId);
-    const u3 = await makeUser(tenantId);
 
     expect((await qrEinloesenCore(db as never, tenantId, u1.id, r.rawToken)).ok).toBe(true);
-    expect((await qrEinloesenCore(db as never, tenantId, u2.id, r.rawToken)).ok).toBe(true);
-    const third = await qrEinloesenCore(db as never, tenantId, u3.id, r.rawToken);
-    expect(third.ok).toBe(false);
-    expect(third.error).toMatch(/aufgebraucht|abgelaufen/i);
+    const second = await qrEinloesenCore(db as never, tenantId, u2.id, r.rawToken);
+    expect(second.ok).toBe(false);
+    expect(second.error).toMatch(/aufgebraucht|abgelaufen/i);
 
     const [qr] = await db.select().from(qrCodes).where(eq(qrCodes.id, r.qrId));
-    expect(qr.redemptionCount).toBe(2); // exakt am Limit, kein Überlauf
-    // u3 bleibt Stufe 1 + keine Redemption-Zeile (Rollback).
-    const [after3] = await db.select().from(users).where(eq(users.id, u3.id));
-    expect(getStufe(after3)).toBe(1);
-    const reds3 = await db
+    expect(qr.redemptionCount).toBe(1); // exakt am Limit, kein Überlauf
+    // u2 bleibt Stufe 1 + keine Redemption-Zeile (Rollback).
+    const [after2] = await db.select().from(users).where(eq(users.id, u2.id));
+    expect(getStufe(after2)).toBe(1);
+    const reds2 = await db
       .select()
       .from(qrRedemptions)
-      .where(and(eq(qrRedemptions.qrCodeId, r.qrId), eq(qrRedemptions.userId, u3.id)));
-    expect(reds3.length).toBe(0);
+      .where(and(eq(qrRedemptions.qrCodeId, r.qrId), eq(qrRedemptions.userId, u2.id)));
+    expect(reds2.length).toBe(0);
   });
 
   // --- Cap-Race ------------------------------------------------------------

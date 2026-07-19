@@ -47,8 +47,14 @@ export type ScopeLevel = ScopeInputLevel;
 /** Wohnsitz-Verifizierung gilt nach Einlösung standardmäßig 24 Monate. */
 export const QR_VERIFICATION_MONTHS = 24;
 
-/** Verifizierungs-Methode für die Stufe-2-Vergabe (QR oder Termin vor Ort). */
-export type ResidencyMethod = "qr" | "in_person";
+/**
+ * Verifizierungs-Methode für die Stufe-2-Vergabe:
+ *   - "qr"        — Bürger löst einen vom Verifizierer erzeugten QR ein (Alt-Weg).
+ *   - "in_person" — Termin vor Ort wahrgenommen.
+ *   - "qr_konto"  — V3 (umgekehrte Richtung): Verifizierer bestätigt den Konto-QR,
+ *                   den der Bürger vor Ort zeigt (verification_proofs).
+ */
+export type ResidencyMethod = "qr" | "in_person" | "qr_konto";
 
 /**
  * grantResidency — DER gemeinsame Stufe-2-Übergang (Privileg-Erhöhung), genutzt
@@ -115,8 +121,19 @@ export const QR_LIMITS = {
   MAX_REDEMPTIONS_MIN: 1,
   MAX_REDEMPTIONS_MAX: 10000,
   GUELTIGKEIT_STUNDEN_MIN: 1,
-  GUELTIGKEIT_STUNDEN_MAX: 720, // 30 Tage
+  // Verifizierung 2.0: der Alt-QR ist jetzt ein Einmal-Code, der nach Ausweis-
+  // Prüfung persönlich ausgehändigt wird (kein Aushang mehr). Deshalb kurze
+  // Maximal-Laufzeit — ein liegengelassener/weitergegebener Code läuft schnell ab.
+  GUELTIGKEIT_STUNDEN_MAX: 24, // vorher 720 (30 Tage) — bewusst deutlich gesenkt
 } as const;
+
+/**
+ * Verifizierung 2.0 (Owner-Entscheid): Der Alt-QR ist serverseitig ein
+ * EINMAL-Code. Egal welchen `maxRedemptions`-Wert der Aufrufer (oder ein
+ * manipulierter Request) übergibt — es wird immer genau 1 gespeichert. Das
+ * Feld bleibt in der Eingabe für Rückwärtskompatibilität, wird aber ignoriert.
+ */
+export const QR_MAX_REDEMPTIONS_FIXED = 1;
 
 export interface QrErstellenInput {
   scopeLevel: ScopeLevel;
@@ -223,7 +240,9 @@ export async function qrErstellenCore(
         regionId,
         tokenHash,
         label: input.label ?? null,
-        maxRedemptions: input.maxRedemptions,
+        // Einmal-Code fest erzwingen (Verifizierung 2.0) — input.maxRedemptions
+        // wird bewusst IGNORIERT (auch bei manipuliertem Request: gespeichert 1).
+        maxRedemptions: QR_MAX_REDEMPTIONS_FIXED,
         expiresAt,
         createdBy,
       })
@@ -240,7 +259,7 @@ export async function qrErstellenCore(
       metadata: {
         qrId: row.id,
         scopeLevel: input.scopeLevel,
-        maxRedemptions: input.maxRedemptions,
+        maxRedemptions: QR_MAX_REDEMPTIONS_FIXED,
       },
     });
 

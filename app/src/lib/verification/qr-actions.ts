@@ -58,7 +58,7 @@ const qrErstellenSchema = z.object({
     .number()
     .int()
     .min(QR_LIMITS.GUELTIGKEIT_STUNDEN_MIN, "Mindestens 1 Stunde.")
-    .max(QR_LIMITS.GUELTIGKEIT_STUNDEN_MAX, "Höchstens 720 Stunden (30 Tage)."),
+    .max(QR_LIMITS.GUELTIGKEIT_STUNDEN_MAX, "Höchstens 24 Stunden (Einmal-Code)."),
 });
 
 export interface QrErstellenActionResult {
