@@ -10,7 +10,7 @@
  *   - Status-UPDATE + Audit in Transaktion
  *   - Audit-Events PII-frei (actor_ref = User-UUID, keine E-Mail)
  *
- * createAnliegen: requireStufe(1), Zod-Validierung, scopedDb
+ * createAnliegen: requireStufe(2) — bestätigter Wohnsitz, Zod-Validierung, scopedDb
  * changeStatus: nur kommune_admin|super_admin, Status-Guard im WHERE
  * confirmMatch / rejectMatch: nur Admins, Match-Status-Guard
  */
@@ -140,7 +140,7 @@ const changeStatusSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Action: Anliegen erstellen (Stufe 1 erforderlich)
+// Action: Anliegen erstellen (Stufe 2 — bestätigter Wohnsitz — erforderlich)
 // ---------------------------------------------------------------------------
 
 export async function createAnliegen(
@@ -156,10 +156,11 @@ export async function createAnliegen(
   const ctx = await getAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
 
-  // Stufe-Prüfung
+  // Stufe-Prüfung: Anliegen einreichen erfordert einen bestätigten Wohnsitz
+  // (Stufe 2). getStufe auf der vollen user-row (kein Client-Trust). Fail-closed.
   const stufe = getStufe(ctx.user);
-  if (stufe < 1) {
-    return { ok: false, error: "Bitte melden Sie sich an." };
+  if (stufe < 2) {
+    return { ok: false, error: "Anliegen können nur mit bestätigtem Wohnsitz (Stufe 2) eingereicht werden." };
   }
 
   // Zod-Validierung
