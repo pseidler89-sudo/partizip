@@ -110,10 +110,9 @@ export default function ProofBestaetigen({
         </p>
         <Link
           href={`/${tenantSlug}/verifizieren/bestaetigen`}
-          className="mt-3 inline-block text-sm font-medium underline-offset-2 hover:underline"
-          style={{ color: "var(--pz-brand-strong)" }}
+          className="pz-btn pz-btn-primary mt-4"
         >
-          Nächste Person bestätigen
+          Nächste Person scannen
         </Link>
       </div>
     );

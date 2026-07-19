@@ -39,6 +39,7 @@ import {
   vorbelegtesGebiet,
 } from "@/lib/verification/proof-core";
 import ProofBestaetigen, { type ProofGebietOption } from "./ProofBestaetigen";
+import QrScanner from "./QrScanner";
 
 export const dynamic = "force-dynamic";
 
@@ -121,19 +122,14 @@ export default async function BestaetigenPage({ params, searchParams }: PageProp
     );
   }
 
-  // --- Kein Token in der URL → freundlicher Scan-Hinweis --------------------
+  // --- Kein Token in der URL → In-App-Scanner (PR-O2) -----------------------
+  // Der Auth-Guard oben (canVerify) bleibt vorgeschaltet; erst danach wird der
+  // Scanner gerendert. Er ist reines UX-Frontend: er zieht clientseitig den
+  // proof-Token und navigiert auf ?proof=<token> — die Server-Prüfung folgt.
   if (!proofToken) {
     return (
       <Schale>
-        <div className="pz-card p-6 text-center">
-          <h1 className="text-xl font-semibold" style={{ color: "var(--pz-ink)" }}>
-            Konto-QR scannen
-          </h1>
-          <p className="mt-2 text-sm" style={{ color: "var(--pz-body)" }}>
-            Bitten Sie die Person, ihren Verifizierungs-QR zu zeigen, und scannen
-            Sie ihn mit der Kamera. Der Link öffnet dann diese Bestätigungs-Seite.
-          </p>
-        </div>
+        <QrScanner tenantSlug={slugFromPath} />
       </Schale>
     );
   }
@@ -156,8 +152,7 @@ export default async function BestaetigenPage({ params, searchParams }: PageProp
           <p className="mt-2 text-sm" style={{ color: "var(--pz-body)" }}>{text}</p>
           <Link
             href={`/${slugFromPath}/verifizieren/bestaetigen`}
-            className="mt-4 inline-block text-sm font-medium underline-offset-2 hover:underline"
-            style={{ color: "var(--pz-brand-strong)" }}
+            className="pz-btn pz-btn-primary mt-4"
           >
             Nächsten Code scannen
           </Link>
