@@ -17,6 +17,7 @@ import {
   verificationBookings,
   verificationLocations,
   verificationSlots,
+  type OeffnungszeitFenster,
 } from "@/db/schema";
 
 export interface StandortAdminItem {
@@ -25,6 +26,17 @@ export interface StandortAdminItem {
   address: string | null;
   hinweise: string | null;
   isActive: boolean;
+  /** V1: Koordinaten (paarweise) — numerisch für Anzeige/V2-Distanz. */
+  lat: number | null;
+  lon: number | null;
+  /** V1: strukturierte Öffnungszeiten (NULL/[] = keine Angabe). */
+  oeffnungszeiten: OeffnungszeitFenster[] | null;
+  /** V1: nur mit Termin (kein Walk-in). */
+  terminErforderlich: boolean;
+  /** V1: Tri-State (null = unbekannt). */
+  barrierefrei: boolean | null;
+  /** V1: optionale Kontakt-Kurzangabe. */
+  kontakt: string | null;
   /** Anzahl künftiger Slots (starts_at > now()). */
   kommendeSlots: number;
   /** Summe freier Plätze über die künftigen Slots (capacity - booked_count). */
@@ -54,6 +66,12 @@ export async function getStandorteFuerAdmin(
       address: verificationLocations.address,
       hinweise: verificationLocations.hinweise,
       isActive: verificationLocations.isActive,
+      lat: verificationLocations.lat,
+      lon: verificationLocations.lon,
+      oeffnungszeiten: verificationLocations.oeffnungszeiten,
+      terminErforderlich: verificationLocations.terminErforderlich,
+      barrierefrei: verificationLocations.barrierefrei,
+      kontakt: verificationLocations.kontakt,
     })
     .from(verificationLocations)
     .where(eq(verificationLocations.tenantId, tenantId))
@@ -115,6 +133,13 @@ export async function getStandorteFuerAdmin(
     address: string | null;
     hinweise: string | null;
     isActive: boolean;
+    // numeric-Spalten liefert der Treiber als String — hier zu number gewandelt.
+    lat: string | null;
+    lon: string | null;
+    oeffnungszeiten: OeffnungszeitFenster[] | null;
+    terminErforderlich: boolean;
+    barrierefrei: boolean | null;
+    kontakt: string | null;
   };
   const slotsByLoc = new Map<string, SlotAggRow>(
     (slotAgg as SlotAggRow[]).map((r) => [r.locationId, r]),
@@ -129,6 +154,12 @@ export async function getStandorteFuerAdmin(
     address: l.address,
     hinweise: l.hinweise,
     isActive: l.isActive,
+    lat: l.lat == null ? null : Number(l.lat),
+    lon: l.lon == null ? null : Number(l.lon),
+    oeffnungszeiten: l.oeffnungszeiten ?? null,
+    terminErforderlich: l.terminErforderlich,
+    barrierefrei: l.barrierefrei,
+    kontakt: l.kontakt,
     kommendeSlots: Number(slotsByLoc.get(l.id)?.kommende ?? 0),
     freiePlaetze: Number(slotsByLoc.get(l.id)?.frei ?? 0),
     offeneBuchungen: Number(bookingsByLoc.get(l.id) ?? 0),
