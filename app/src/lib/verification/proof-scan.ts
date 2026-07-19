@@ -14,9 +14,9 @@
 
 // Der RAW-Token ist base64url (siehe generateRawToken: 32 Bytes → 43 Zeichen),
 // Zeichensatz A–Z a–z 0–9 - _. Untergrenze bewusst großzügig (16), damit ein
-// künftiger kürzerer Token nicht fälschlich verworfen wird; Müll mit Leer-/
-// Sonderzeichen fällt so aber zuverlässig heraus.
-const TOKEN_MUSTER = /^[A-Za-z0-9_-]{16,}$/;
+// künftiger kürzerer Token nicht fälschlich verworfen wird; Obergrenze 64 gegen
+// überlange Müll-Strings. Müll mit Leer-/Sonderzeichen fällt zuverlässig heraus.
+const TOKEN_MUSTER = /^[A-Za-z0-9_-]{16,64}$/;
 
 function istPlausiblerToken(kandidat: string): boolean {
   return TOKEN_MUSTER.test(kandidat);
@@ -39,6 +39,11 @@ export function extrahiereProofToken(scan: string): string | null {
   if (!getrimmt) return null;
 
   const istAbsolut = /^https?:\/\//i.test(getrimmt);
+  // Fremdes Schema (javascript:, data:, mailto:, …) explizit ablehnen: nur http(s)
+  // als absolute URL zulassen. Defense-in-Depth — die Navigation baut ohnehin nur
+  // einen lokalen Same-Origin-Pfad, aber so bleibt der Vertrag der Funktion sauber.
+  const hatFremdesSchema = /^[a-z][a-z0-9+.-]*:/i.test(getrimmt) && !istAbsolut;
+  if (hatFremdesSchema) return null;
   const siehtWieUrlAus = istAbsolut || getrimmt.startsWith("/") || getrimmt.includes("?");
 
   if (siehtWieUrlAus) {

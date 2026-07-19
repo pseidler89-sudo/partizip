@@ -63,6 +63,16 @@ export default function QrScanner({ tenantSlug }: { tenantSlug: string }) {
   // Aktiv-Flag: verhindert Doppel-Handling nach dem ersten Treffer und stoppt die
   // rAF-Schleife. Als Ref, damit Callbacks es ohne Neu-Binden lesen können.
   const aktivRef = useRef(false);
+  // Mounted-Flag: schützt gegen den Unmount-während-Kamera-Start-Race — wird die
+  // Seite verlassen, WÄHREND getUserMedia/import/decodeFromStream noch laufen,
+  // darf der danach erlangte Stream nicht ungestoppt bleiben (Kamera-Licht!).
+  const montiertRef = useRef(true);
+  useEffect(() => {
+    montiertRef.current = true;
+    return () => {
+      montiertRef.current = false;
+    };
+  }, []);
 
   // --- Kamera-Lifecycle: ALLES stoppen (kein weiterlaufendes Kamera-Licht) ----
   const stoppeKamera = useCallback(() => {
@@ -163,6 +173,11 @@ export default function QrScanner({ tenantSlug }: { tenantSlug: string }) {
       );
       return;
     }
+    // Race-Guard: Seite während getUserMedia verlassen → Stream sofort stoppen.
+    if (!montiertRef.current) {
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
     streamRef.current = stream;
     aktivRef.current = true;
     setScanning(true);
@@ -176,6 +191,11 @@ export default function QrScanner({ tenantSlug }: { tenantSlug: string }) {
         await video.play();
       } catch {
         /* Autoplay-Restriktionen — Bild kommt trotzdem, weiter */
+      }
+      // Nach dem video.play()-await erneut prüfen (Unmount-Race).
+      if (!montiertRef.current) {
+        stoppeKamera();
+        return;
       }
       try {
         detektorRef.current = new BarcodeDetector({ formats: ["qr_code"] });
@@ -199,6 +219,12 @@ export default function QrScanner({ tenantSlug }: { tenantSlug: string }) {
           if (result) handleErkannt(result.getText());
         },
       )) as ZxingControls;
+      // Nach den await-Punkten (import + decodeFromStream) erneut prüfen: bei
+      // zwischenzeitlichem Unmount Reader UND Stream sofort stoppen.
+      if (!montiertRef.current) {
+        stoppeKamera();
+        return;
+      }
     } catch {
       stoppeKamera();
       setFehler(

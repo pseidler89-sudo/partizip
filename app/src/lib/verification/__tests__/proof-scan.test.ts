@@ -71,6 +71,28 @@ describe("extrahiereProofToken", () => {
     expect(extrahiereProofToken("https://host.example/x?proof=nicht%20gut!")).toBeNull();
   });
 
+  // --- Angriffs-Anker: die gescannte Herkunft (Host/Schema) wird bewusst NIE
+  //     zur Navigation genutzt; nur der proof-Token wird gezogen. Diese Fälle
+  //     dokumentieren, dass ein feindlicher QR keinen Off-Site-/XSS-Vektor liefert.
+  it("ignoriert den Host einer fremden URL und zieht nur den Token", () => {
+    // evil.com wird verworfen — nur der Token bleibt (Navigation baut den Pfad lokal)
+    expect(extrahiereProofToken(`https://evil.com/phish?proof=${TOKEN}`)).toBe(TOKEN);
+  });
+
+  it("liefert keinen Token aus einem javascript:-Schema", () => {
+    expect(extrahiereProofToken(`javascript:alert(1)?proof=${TOKEN}`)).toBeNull();
+    expect(extrahiereProofToken("javascript:alert(1)")).toBeNull();
+  });
+
+  it("liefert keinen Token aus einem data:-Schema", () => {
+    expect(extrahiereProofToken(`data:text/html,x?proof=${TOKEN}`)).toBeNull();
+  });
+
+  it("verwirft einen überlangen Pseudo-Token (Obergrenze)", () => {
+    expect(extrahiereProofToken("A".repeat(5000))).toBeNull();
+    expect(extrahiereProofToken(`https://host.example/x?proof=${"A".repeat(5000)}`)).toBeNull();
+  });
+
   it("ist tolerant gegenüber nicht-String-Eingaben", () => {
     // @ts-expect-error absichtlich falscher Typ zur Laufzeit-Härtung
     expect(extrahiereProofToken(null)).toBeNull();
