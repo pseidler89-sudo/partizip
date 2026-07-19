@@ -205,7 +205,7 @@ export default function ProofBestaetigen({
         type="button"
         onClick={handleConfirm}
         disabled={isPending || !attestiert}
-        aria-describedby="proof-confirm-hint"
+        aria-describedby={attestiert ? undefined : "proof-confirm-hint"}
         className="pz-btn pz-btn-primary pz-btn-lg mt-4 w-full"
       >
         {isPending ? "Wird bestätigt…" : "Wohnsitz für dieses Konto bestätigen"}
