@@ -40,6 +40,7 @@ import {
 import { resolveGemeindeRegionId } from "@/lib/region/scope";
 import { formatOeffnungszeiten } from "@/lib/verification/oeffnungszeiten-format";
 import { formatSlotLabel, formatDay } from "@/lib/verification/slot-format";
+import { QR_VERIFICATION_MONTHS } from "@/lib/verification/qr-core";
 import VerifizierenBestaetigen from "./VerifizierenBestaetigen";
 import TerminAbsagen from "./TerminAbsagen";
 import StellenListe, { type StelleVM } from "./StellenListe";
@@ -263,7 +264,7 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
             </p>
             {residencyVerifiedUntil && (
               <p className="text-xs" style={{ color: "var(--pz-success-ink)" }}>
-                Gültig bis {formatDay(residencyVerifiedUntil)}.
+                Gültig bis {formatDay(residencyVerifiedUntil)} — {QR_VERIFICATION_MONTHS} Monate ab Verifizierung.
               </p>
             )}
           </div>
@@ -328,7 +329,7 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
           {[
             { icon: MapPin, h: "Stelle in Ihrer Nähe finden", p: "Wählen Sie eine Verifizierungsstelle aus der Liste unten." },
             { icon: CalendarCheck, h: "Hingehen — oder Termin, falls nötig", p: "Bei den meisten Stellen genügt ein Besuch während der Öffnungszeiten. Verlangt eine Stelle einen Termin, buchen Sie ihn dort." },
-            { icon: BadgeCheck, h: "Ausweisen und Ihren Verifizierungs-QR zeigen", p: "Personalausweis zeigen und Ihren persönlichen QR (unten) vorzeigen — die verifizierende Person scannt ihn, fertig. Wir speichern kein Ausweisbild, nur dass Ihr Wohnsitz bestätigt ist." },
+            { icon: BadgeCheck, h: "Ausweisen und Ihren Verifizierungs-QR zeigen", p: "Zeigen Sie kurz Ihren Ausweis und Ihren persönlichen QR (unten) — die verifizierende Person scannt ihn, fertig. Der Ausweis dient nur zum Abgleich vor Ort; gespeichert wird nichts davon, nur dass Ihr Wohnsitz bestätigt ist." },
           ].map((s, i, arr) => {
             const Icon = s.icon;
             return (

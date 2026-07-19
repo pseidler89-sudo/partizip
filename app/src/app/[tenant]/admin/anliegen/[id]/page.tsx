@@ -22,6 +22,7 @@ import {
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin, getUserRoleTypes } from "@/lib/auth/roles";
+import { FEATURE_ANLIEGEN_EINREICHEN } from "@/lib/features";
 import AdminAnliegenDetail from "./AdminAnliegenDetail";
 
 interface PageProps {
@@ -30,6 +31,10 @@ interface PageProps {
 
 export default async function AdminAnliegenDetailPage({ params }: PageProps) {
   const { tenant: slugFromPath, id: anliegenId } = await params;
+
+  // Anliegen-Modul ist im Pilot deaktiviert (Flag) — konsistent zur Liste auch
+  // die Detailseite aufs Admin-Dashboard umleiten (kein toter Zurück-Link).
+  if (!FEATURE_ANLIEGEN_EINREICHEN) redirect(`/${slugFromPath}/admin`);
 
   const headerStore = await headers();
   const host = headerStore.get("host") ?? "localhost";

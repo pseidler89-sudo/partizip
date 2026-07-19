@@ -15,6 +15,7 @@ import { anliegen, ortsteile, sessions, anliegenStatusEnum } from "@/db/schema";
 import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin, getUserRoleTypes } from "@/lib/auth/roles";
+import { FEATURE_ANLIEGEN_EINREICHEN } from "@/lib/features";
 import Link from "next/link";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -51,6 +52,10 @@ export default async function AdminAnliegenPage({ params, searchParams }: PagePr
   const tenant = await getTenantFromHost(host);
 
   if (!tenant || tenant.slug !== slugFromPath) notFound();
+
+  // Feature-Flag (ADR-014, global): solange das Anliegen-Modul deaktiviert ist,
+  // gibt es keine Anliegen-Verwaltung → zurück aufs Admin-Dashboard statt leere Liste.
+  if (!FEATURE_ANLIEGEN_EINREICHEN) redirect(`/${slugFromPath}/admin`);
 
   const cookieStore = await cookies();
   const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;

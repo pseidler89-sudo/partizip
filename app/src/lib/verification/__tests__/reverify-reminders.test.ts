@@ -77,7 +77,7 @@ describe("getReVerifyFaellige / markReVerifyReminded (Integration)", () => {
     const [tB] = await db.insert(tenants).values({ slug: `rv-b-${Date.now()}`, name: "RV-B" }).returning();
     const now = new Date();
     const inWindow = new Date(now.getTime() + TAG); // +10 Tage
-    const outside = new Date(now.getTime() + 60 * 86_400_000); // +60 Tage
+    const outside = new Date(now.getTime() + 90 * 86_400_000); // +90 Tage (außerhalb 60-Tage-Fenster)
     const expired = new Date(now.getTime() - 86_400_000); // -1 Tag
 
     const [due] = await db

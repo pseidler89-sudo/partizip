@@ -152,7 +152,7 @@ export function BenachrichtigungSection({
         <div className="pt-4">
           <ToggleRow
             titel="Erinnerung, wenn meine Wohnsitz-Verifizierung ausläuft"
-            beschreibung="Rechtzeitig vor Ablauf Ihrer Stufe-2-Verifizierung erinnern wir Sie, damit Sie sie erneuern und weiter verbindlich mitstimmen können."
+            beschreibung="Rechtzeitig vor Ablauf Ihrer Stufe-2-Verifizierung (sie gilt 24 Monate) erinnern wir Sie, damit Sie sie erneuern und weiter verbindlich mitstimmen können."
             initial={initialReverify}
             action={setReverifyBenachrichtigung}
             bestaetigungAn="Gespeichert — Sie werden vor Ablauf Ihrer Verifizierung erinnert."

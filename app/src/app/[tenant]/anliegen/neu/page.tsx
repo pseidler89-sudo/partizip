@@ -1,11 +1,11 @@
 /**
- * [tenant]/anliegen/neu/page.tsx — Anliegen erfassen (Stufe 1)
+ * [tenant]/anliegen/neu/page.tsx — Anliegen erfassen (Stufe 2)
  *
  * Formular: Titel (Pflicht ≤ 200), Beschreibung (optional ≤ 5000),
  * Ortsteil-Auswahl (optional).
  *
  * Redirect zur Erfolgsseite mit Tracking-Code nach Einreichung.
- * Stufe-0-User: Redirect zur Login-Seite.
+ * Ohne bestätigten Wohnsitz (Stufe < 2): Redirect zur Verifizierungs-Übersicht.
  */
 
 import { notFound, redirect } from "next/navigation";
@@ -103,9 +103,11 @@ export default async function AnliegenNeuPage({ params }: PageProps) {
     redirect("/");
   }
 
+  // Anliegen einreichen erfordert einen bestätigten Wohnsitz (Stufe 2) — ohne
+  // den zur Verifizierungs-Übersicht statt zur Startseite (verständlicher Pfad).
   const stufe = getStufe(user);
-  if (stufe < 1) {
-    redirect("/");
+  if (stufe < 2) {
+    redirect(`/${slugFromPath}/verifizieren`);
   }
 
   // Ortsteile für diesen Tenant laden
@@ -129,8 +131,9 @@ export default async function AnliegenNeuPage({ params }: PageProps) {
         <p className="text-sm mt-2" style={{ color: "var(--pz-body)" }}>
           Beschreiben Sie Ihr Anliegen in eigenen Worten. Danach erhalten Sie einen
           persönlichen Tracking-Code (zusätzlich per E-Mail), mit dem Sie den
-          Bearbeitungsstand verfolgen können. Ihr Anliegen wird <strong>pseudonym</strong>{" "}
-          gespeichert — Ihr Name erscheint nirgends.
+          Bearbeitungsstand verfolgen können. Anliegen können nur mit{" "}
+          <strong>bestätigtem Wohnsitz</strong> eingereicht werden. Ihr Anliegen wird{" "}
+          <strong>pseudonym</strong> gespeichert — Ihr Name erscheint nirgends.
         </p>
       </div>
 

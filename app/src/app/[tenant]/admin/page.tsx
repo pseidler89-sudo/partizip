@@ -18,6 +18,7 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isAdmin as isAdminCheck, beobachterDarfTenantweitSehen, canRedaktion, getUserRolesMitScope } from "@/lib/auth/roles";
 import { getAdminKennzahlen, maskTeilnahme } from "@/lib/admin/kennzahlen";
 import { isDemoTenant } from "@/lib/demo/config";
+import { FEATURE_ANLIEGEN_EINREICHEN, FEATURE_VERIFIER_EINMAL_CODE } from "@/lib/features";
 import Link from "next/link";
 
 /** Eine Kennzahl-Kachel (PII-frei). `hint` erklärt z. B. die Re-Identifikations-Maskierung. */
@@ -230,8 +231,12 @@ export default async function AdminDashboardPage({ params }: PageProps) {
                 : undefined
             }
           />
-          <Kennzahl label="Aktive QR-Codes" wert={String(kennzahlen.aktiveQrCodes)} />
-          <Kennzahl label="Offene Anliegen" wert={String(kennzahlen.offeneAnliegen)} />
+          {FEATURE_VERIFIER_EINMAL_CODE && (
+            <Kennzahl label="Aktive QR-Codes" wert={String(kennzahlen.aktiveQrCodes)} />
+          )}
+          {FEATURE_ANLIEGEN_EINREICHEN && (
+            <Kennzahl label="Offene Anliegen" wert={String(kennzahlen.offeneAnliegen)} />
+          )}
         </div>
       )}
 
@@ -271,8 +276,8 @@ export default async function AdminDashboardPage({ params }: PageProps) {
           </Link>
         )}
 
-        {/* Karte: Anliegen */}
-        {isAdmin && (
+        {/* Karte: Anliegen — nur wenn das Anliegen-Modul aktiv ist (Flag global). */}
+        {isAdmin && FEATURE_ANLIEGEN_EINREICHEN && (
         <Link
           href={`/${slugFromPath}/admin/anliegen`}
           className="group rounded-lg border border-pz-line p-6 hover:border-pz-line hover:bg-pz-brand-soft transition-colors"

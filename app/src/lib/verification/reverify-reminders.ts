@@ -17,8 +17,8 @@ import type { Db } from "@/db/client";
 import { users, tenants } from "@/db/schema";
 import { BRAND_COLOR } from "@/lib/brand";
 
-/** Standard-Fenster: 30 Tage vor Ablauf erinnern. */
-export const DEFAULT_REVERIFY_WINDOW_DAYS = 30;
+/** Standard-Fenster: 60 Tage (rund 2 Monate) vor Ablauf erinnern. */
+export const DEFAULT_REVERIFY_WINDOW_DAYS = 60;
 
 export interface ReVerifyFaellig {
   userId: string;
