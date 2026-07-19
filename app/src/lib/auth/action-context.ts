@@ -24,7 +24,7 @@ import { getTenantFromHost, type TenantRow } from "@/lib/tenant";
 import { clientIpFromForwardedFor } from "@/lib/client-ip";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getStufe } from "@/lib/eligibility/stufe";
-import { getUserRoleTypes, canVerify, isAdmin } from "@/lib/auth/roles";
+import { getUserRoleTypes, canVerify, isAdmin, isSuperAdmin } from "@/lib/auth/roles";
 
 export type UserRow = typeof users.$inferSelect;
 
@@ -145,6 +145,35 @@ export async function requireAdminCtx(): Promise<
   const admin = isAdmin(await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId));
   if (!admin) {
     return { ok: false, error: "Keine Berechtigung (kommune_admin oder super_admin erforderlich)." };
+  }
+  return { ok: true, ctx: { ...ctx, userId: ctx.userId } };
+}
+
+/**
+ * Verlangt einen eingeloggten super_admin-Caller (Betreiber). ENGER als
+ * requireAdminCtx — für tenant-übergreifende Betreiber-Sichten (Block N:
+ * Interessenten-Leads). Die Rollen werden account-status-gefiltert geladen
+ * (gesperrtes Konto ⇒ [] ⇒ kein Zugriff, selbst bei gültiger Session).
+ *
+ * GUARDRAIL (Multi-Tenant-Skalierung): Die Rolle `super_admin` ist
+ * BETREIBER-EXKLUSIV und darf NIE an Kunden-/Kommunen-Tenants vergeben werden.
+ * Sie ist das Gate für tenant-FREIE Sichten (z. B. die Roh-Lead-PII aller
+ * Interessenten, s. app/[tenant]/admin/interessenten/page.tsx) — ein super_admin
+ * in einem Kunden-Tenant erhielte damit globale Sicht auf fremde Roh-Leads.
+ * Heute unkritisch (nur der Plattform-Betreiber ist super_admin; ein kommune_admin
+ * kann sich nicht selbst hochstufen), aber beim Onboarding weiterer Tenants strikt
+ * einzuhalten: super_admin bleibt ausschließlich beim Betreiber.
+ */
+export async function requireSuperAdminCtx(): Promise<
+  | { ok: true; ctx: AuthedContext }
+  | { ok: false; error: string }
+> {
+  const ctx = await getOptionalAuthContext();
+  if (!ctx) return { ok: false, error: "Diese Seite ist nicht erreichbar." };
+  if (!ctx.userId) return { ok: false, error: "Nicht authentifiziert." };
+  const superAdmin = isSuperAdmin(await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId));
+  if (!superAdmin) {
+    return { ok: false, error: "Keine Berechtigung (super_admin erforderlich)." };
   }
   return { ok: true, ctx: { ...ctx, userId: ctx.userId } };
 }

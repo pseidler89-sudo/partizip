@@ -289,7 +289,26 @@ export default async function DatenschutzPage() {
         )}
       </Abschnitt>
 
-      <Abschnitt titel="15. Änderungen">
+      <Abschnitt titel="15. Interessenten-Kontaktformular (Mitmachen)">
+        <p>
+          Über das „Mitmachen“-Formular für Kommunen, Kreise, Vereine und
+          Verwaltungen können Sie uns freiwillig kontaktieren. Wir verarbeiten
+          dabei die von Ihnen angegebenen Daten — Name der Ansprechperson und
+          E-Mail-Adresse (erforderlich) sowie optional Organisation, Funktion und
+          eine Freitext-Nachricht — ausschließlich, um Ihre Anfrage zu bearbeiten
+          und mit Ihnen Kontakt aufzunehmen. Dasselbe gilt, wenn Sie über unsere
+          Terminbuchung einen Gesprächstermin vereinbaren; dabei werden die von
+          Ihnen dort angegebenen Kontaktdaten und der Terminzeitpunkt an uns
+          übermittelt. Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Anbahnung
+          eines Vertrags/einer Zusammenarbeit) bzw. lit. f DSGVO (Bearbeitung
+          Ihrer Kontaktanfrage). Es wird hierfür kein Cookie gesetzt. Wir
+          speichern diese Angaben nur so lange, wie es für die Bearbeitung
+          erforderlich ist, und löschen sie auf Ihre Anfrage jederzeit; Kontakt
+          siehe Ziff. 1.
+        </p>
+      </Abschnitt>
+
+      <Abschnitt titel="16. Änderungen">
         <p>
           Wir passen diese Erklärung an, wenn sich Funktionsumfang oder
           Rechtslage ändern. Es gilt die hier veröffentlichte Fassung.

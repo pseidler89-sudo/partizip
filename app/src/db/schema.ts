@@ -1621,3 +1621,64 @@ export const auditEvents = pgTable(
     index("idx_audit_tenant_created_at").on(t.tenantId, t.createdAt),
   ]
 );
+
+// ---------------------------------------------------------------------------
+// Block N — interessenten (B2G-„Mitmachen"-Leads)
+//
+// Bewusst TENANT-FREI: Ein Lead entsteht VOR der Existenz eines Tenants — eine
+// Kommune/ein Verein hinterlässt Interesse (Formular) oder bucht einen Termin
+// (Tymeslot-Webhook), lange bevor ein Mandant provisioniert ist. Deshalb KEIN
+// tenant_id und KEINE FKs auf tenants/users (anders als jede andere Fach-Tabelle).
+// Die Betreiber-Admin-Sicht ist super_admin-gated (kein scopedDb-Zwang, siehe
+// admin/interessenten/page.tsx). Hard-Delete durch den Betreiber ist erlaubt
+// (kein Konto, keine pseudonyme Verknüpfung).
+//
+// PII-DESIGN: ansprechpartner/email/nachricht sind Klartext-PII — sie erscheinen
+// NIEMALS in audit_events/Logs (dort nur { quelle } bzw. die id). Rechtsgrundlage
+// Art. 6 Abs. 1 lit. b/f DSGVO; Löschung auf Anfrage (Hard-Delete-Action).
+// ---------------------------------------------------------------------------
+
+export const interessentStatusEnum = pgEnum("interessent_status", [
+  "neu",
+  "kontaktiert",
+  "pilot",
+  "abgelehnt",
+]);
+
+export const interessenten = pgTable(
+  "interessenten",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    // Organisation (Kommune/Kreis/Verein) — optional, Freitext.
+    kommune: text("kommune"),
+    // Name der Ansprechperson (Pflicht).
+    ansprechpartner: text("ansprechpartner").notNull(),
+    // Kontakt-Adresse — immer normalisiert (trim + lowercase) gespeichert.
+    // Zweckbindung Kontaktaufnahme; NIEMALS in Logs/Audit.
+    email: text("email").notNull(),
+    rolle: text("rolle"),
+    groesse: text("groesse"),
+    nachricht: text("nachricht"),
+    // Lead-Herkunft: 'formular' | 'tymeslot'. Bewusst text (kein Enum) — nur
+    // zwei interne Werte, serverseitig gesetzt, kein Nutzer-Input.
+    quelle: text("quelle").notNull(),
+    // Idempotenz-Schlüssel des Tymeslot-Webhooks (nur bei quelle='tymeslot').
+    tymeslotMeetingUid: text("tymeslot_meeting_uid"),
+    // Terminzeitpunkt aus dem Webhook (start_time), nullable.
+    terminAm: timestamp("termin_am", { withTimezone: true }),
+    status: interessentStatusEnum("status").notNull().default("neu"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`)
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index("idx_interessenten_created_at").on(t.createdAt.desc()),
+    // Webhook-Idempotenz: mehrfache Zustellung DESSELBEN Meetings erzeugt EINEN
+    // Lead. Partiell — Formular-Leads (uid NULL) sind davon unberührt.
+    uniqueIndex("interessenten_tymeslot_uid_unique")
+      .on(t.tymeslotMeetingUid)
+      .where(sql`${t.tymeslotMeetingUid} IS NOT NULL`),
+  ]
+);

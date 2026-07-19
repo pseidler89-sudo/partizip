@@ -15,6 +15,7 @@
 
 import nodemailer from "nodemailer";
 import { BRAND_COLOR } from "@/lib/brand";
+import { ANBIETER } from "@/lib/legal/anbieter";
 
 const SMTP_URL =
   process.env.SMTP_URL ??
@@ -133,6 +134,51 @@ export async function sendEmailChangedInfoEmail(
       <p>Die E-Mail-Adresse Ihres Partizip-Kontos wurde soeben geändert. Ab jetzt erfolgt die Anmeldung über die neue Adresse.</p>
       <p style="color:#6b7280;font-size:14px;">Waren Sie das nicht, wenden Sie sich bitte umgehend an <a href="mailto:${kontaktEmail}">${kontaktEmail}</a> (oder antworten Sie auf diese E-Mail).</p>
     `,
+  });
+}
+
+/**
+ * Block N: Benachrichtigt den Betreiber (ANBIETER.email) über einen neuen
+ * Interessenten-Lead (Formular oder Tymeslot-Buchung). Diese Mail geht an
+ * Patricks EIGENES Postfach (den Betreiber) und darf daher die Lead-Angaben
+ * enthalten — sie sind der Zweck der Benachrichtigung. `replyTo` = Adresse des
+ * Interessenten, damit Patrick direkt antworten kann.
+ *
+ * WICHTIG: Best-effort — der Aufrufer fängt Fehler ab (der Lead ist bereits
+ * gespeichert und darf nicht durch einen Mailfehler verloren gehen). Das
+ * PII-freie Auditieren passiert getrennt beim Aufrufer (nur { quelle }).
+ */
+export async function sendInteressentNotification(lead: {
+  quelle: "formular" | "tymeslot";
+  ansprechpartner: string;
+  email: string;
+  kommune: string | null;
+  rolle: string | null;
+  groesse: string | null;
+  nachricht: string | null;
+  terminAm: Date | null;
+}): Promise<void> {
+  const transport = createTransport();
+
+  const herkunft =
+    lead.quelle === "tymeslot" ? "Terminbuchung (Tymeslot)" : "Mitmachen-Formular";
+  const zeilen: string[] = [
+    `Herkunft: ${herkunft}`,
+    lead.kommune ? `Organisation: ${lead.kommune}` : null,
+    `Ansprechpartner: ${lead.ansprechpartner}`,
+    `E-Mail: ${lead.email}`,
+    lead.rolle ? `Funktion: ${lead.rolle}` : null,
+    lead.groesse ? `Größe: ${lead.groesse}` : null,
+    lead.terminAm ? `Termin: ${lead.terminAm.toISOString()}` : null,
+    lead.nachricht ? `\nNachricht:\n${lead.nachricht}` : null,
+  ].filter((z): z is string => z !== null);
+
+  await transport.sendMail({
+    from: EMAIL_FROM,
+    to: ANBIETER.email,
+    replyTo: lead.email,
+    subject: `Neuer Interessent (${herkunft})${lead.kommune ? ` — ${lead.kommune}` : ""}`,
+    text: `Es ist ein neuer Interessent eingegangen:\n\n${zeilen.join("\n")}\n\nZur Verwaltung: /admin/interessenten`,
   });
 }
 

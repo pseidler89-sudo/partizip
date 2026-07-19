@@ -86,6 +86,15 @@ export function isAdmin(roleTypes: string[]): boolean {
 }
 
 /**
+ * NUR der Betreiber (super_admin) — enger als isAdmin. Block N: die tenant-freie
+ * Interessenten-Sicht (Leads über alle Kommunen hinweg) ist ausschließlich für
+ * den Plattform-Betreiber, NICHT für einen kommune_admin einer einzelnen Kommune.
+ */
+export function isSuperAdmin(roleTypes: string[]): boolean {
+  return roleTypes.includes("super_admin");
+}
+
+/**
  * Darf QR-Codes für die Wohnsitz-Verifizierung erstellen/widerrufen
  * (verifier oder Admin). ADR-014 Block 2 — serverseitig hart erzwungen.
  */
