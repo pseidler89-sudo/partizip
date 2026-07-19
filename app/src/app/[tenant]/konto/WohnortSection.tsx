@@ -119,6 +119,7 @@ export function WohnortSection({
                     value={homeOrtsteilCode ?? ""}
                     onChange={handleOrtsteilChange}
                     disabled={pending}
+                    aria-describedby="ortsteil-nudge"
                     className="mt-1 w-full rounded-md border border-[color:var(--pz-line)] bg-pz-surface px-2 py-1.5 text-sm disabled:opacity-60"
                     style={{ color: "var(--pz-ink)" }}
                   >
@@ -129,6 +130,10 @@ export function WohnortSection({
                       </option>
                     ))}
                   </select>
+                  {/* Sanfter Hinweis (kein Zwang): betrifft nur den Anzeige-Wohnort. */}
+                  <span id="ortsteil-nudge" className="mt-1 block text-xs" style={{ color: "var(--pz-muted)" }}>
+                    Wählen Sie Ihren Ortsteil, damit Sie auch Ortsteil-Fragen sehen.
+                  </span>
                 </label>
               )}
 
