@@ -121,6 +121,10 @@ export default function VerifyConfirm({
       >
         {state.status === "idle" ? "Jetzt anmelden" : "Einen Moment …"}
       </button>
+      <p className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
+        Aus Sicherheitsgründen ist ein letzter Klick nötig — so kann kein
+        automatischer E-Mail-Scanner Ihren Anmeldelink versehentlich verbrauchen.
+      </p>
       <p aria-live="polite" className="mt-2 text-xs" style={{ color: "var(--pz-muted)" }}>
         {state.status === "submitting" && "Ihre Anmeldung wird geprüft …"}
         {state.status === "success" && "Anmeldung erfolgreich — Sie werden weitergeleitet …"}
