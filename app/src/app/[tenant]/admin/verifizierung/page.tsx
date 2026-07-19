@@ -83,13 +83,17 @@ export default async function AdminVerifizierungPage({ params }: PageProps) {
   // Admins sehen alle Ebenen wie bisher. Die eigentliche Durchsetzung liegt
   // serverseitig in qrErstellenCore (ltree-Pfad-Abdeckung, fail-closed).
   const callerIstAdmin = isAdmin(roleTypes);
-  const erlaubteEbenen = callerIstAdmin
-    ? [...SCOPE_INPUT_LEVELS]
-    : erlaubteScopeEbenenFuerVerifier(
-        await getUserRolesMitScope(db, tenant.id, session.userId),
-      );
+  // Einmal-Code-Daten nur laden, wenn die (flag-gated) Erstellen-Sektion auch
+  // gerendert wird — sonst unnötige DB-Arbeit bei jedem Seitenaufruf.
+  const erlaubteEbenen = !FEATURE_VERIFIER_EINMAL_CODE
+    ? []
+    : callerIstAdmin
+      ? [...SCOPE_INPUT_LEVELS]
+      : erlaubteScopeEbenenFuerVerifier(
+          await getUserRolesMitScope(db, tenant.id, session.userId),
+        );
 
-  const liste = await qrCodesListe(db, tenant.id);
+  const liste = FEATURE_VERIFIER_EINMAL_CODE ? await qrCodesListe(db, tenant.id) : [];
   const termineRaw = await getOffeneTermineFuerVerifier(db, tenant.id);
   const termine = termineRaw.map((t) => ({
     bookingId: t.bookingId,
