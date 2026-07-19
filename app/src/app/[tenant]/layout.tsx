@@ -280,6 +280,13 @@ function TenantLayoutInner({
           </Link>
           <span aria-hidden>·</span>
           <Link
+            href={`/${slugFromPath}/mitmachen`}
+            className="hover:text-pz-ink transition-colors"
+          >
+            Mitmachen
+          </Link>
+          <span aria-hidden>·</span>
+          <Link
             href={`/${slugFromPath}/ueber-uns`}
             className="hover:text-pz-ink transition-colors"
           >
