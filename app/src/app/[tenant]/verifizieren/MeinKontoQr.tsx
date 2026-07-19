@@ -8,14 +8,22 @@
  * Beleg erzeugt und angezeigt.
  *
  * Der QR/Code ist bewusst kurzlebig; nach Ablauf einfach „neu erzeugen".
+ *
+ * Vor-Ort-Befund C: sobald der QR sichtbar ist, pollt der Client GET /api/me alle
+ * 3 s. Bestätigt der Verifizierer, springt die Stufe auf 2 → hier erscheint ein
+ * freundlicher Erfolgs-Screen mit Konfetti (statt dass der Bürger ratlos vor dem
+ * QR wartet). Polling stoppt bei Erfolg, bei Unmount und nach einer Obergrenze.
  */
 
 "use client";
 
 import Image from "next/image";
-import { useState, useTransition } from "react";
-import { QrCode, RefreshCw, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useState, useTransition } from "react";
+import { QrCode, RefreshCw, ShieldCheck, PartyPopper } from "lucide-react";
 import { meinVerifizierungsProofErzeugen } from "@/lib/verification/proof-actions";
+import { istVerifiziert, type MeStatusResponse } from "@/lib/verification/me-status";
+import Konfetti from "@/components/Konfetti";
 
 interface ProofState {
   code: string;
@@ -24,11 +32,16 @@ interface ProofState {
   expiresAt: string;
 }
 
+// Polling: alle 3 s, Obergrenze ~100 Versuche (≈ 5 min, deckt den Proof-Ablauf
+// ab) — danach still stoppen, damit keine Endlos-Schleife läuft.
+const POLL_INTERVAL_MS = 3000;
+const POLL_MAX_VERSUCHE = 100;
+
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function MeinKontoQr() {
+export default function MeinKontoQr({ tenantSlug }: { tenantSlug: string }) {
   const [isPending, startTransition] = useTransition();
   const [proof, setProof] = useState<ProofState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +49,8 @@ export default function MeinKontoQr() {
   // Beleg). Das ist KEIN Fehler — darum getrennt vom `error`-State geführt und
   // als neutraler Info-Hinweis (nicht rot, kein role="alert") gerendert.
   const [demoHinweis, setDemoHinweis] = useState(false);
+  // Vor-Ort-Befund C: true, sobald der Verifizierer bestätigt hat (Stufe ≥ 2).
+  const [verifiziert, setVerifiziert] = useState(false);
 
   function erzeugen() {
     setError(null);
@@ -61,6 +76,71 @@ export default function MeinKontoQr() {
         setError("Verbindungsfehler — bitte erneut versuchen.");
       }
     });
+  }
+
+  // Live-Bestätigung: nur solange ein Beleg sichtbar UND noch nicht verifiziert.
+  // Startet KEIN Polling im Demo-Fence (kein proof) oder nicht eingeloggten Zustand
+  // (Komponente wird dort gar nicht gerendert).
+  useEffect(() => {
+    if (!proof || verifiziert) return;
+
+    let versuche = 0;
+    let abgebrochen = false;
+
+    const timer = setInterval(async () => {
+      versuche += 1;
+      if (versuche > POLL_MAX_VERSUCHE) {
+        clearInterval(timer);
+        return;
+      }
+      try {
+        const res = await fetch("/api/me", {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!res.ok) return; // z. B. Session weg — tolerant, weiterversuchen
+        const data = (await res.json()) as MeStatusResponse;
+        if (!abgebrochen && istVerifiziert(data)) {
+          setVerifiziert(true);
+          clearInterval(timer);
+        }
+      } catch {
+        // Netzfehler beim Poll: tolerant ignorieren, nächster Tick versucht erneut.
+      }
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      abgebrochen = true;
+      clearInterval(timer);
+    };
+  }, [proof, verifiziert]);
+
+  // Erfolgs-Screen (Vor-Ort-Befund C): löst den QR ab, sobald bestätigt.
+  if (verifiziert) {
+    return (
+      <div className="pz-card relative overflow-hidden p-6 text-center" role="status">
+        <Konfetti />
+        <div className="relative">
+          <PartyPopper
+            aria-hidden
+            className="mx-auto h-9 w-9"
+            style={{ color: "var(--pz-brand-strong)" }}
+            strokeWidth={2}
+          />
+          <h3 className="mt-3 text-lg font-semibold" style={{ color: "var(--pz-ink)" }}>
+            Geschafft — danke fürs Mitmachen!
+          </h3>
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed" style={{ color: "var(--pz-body)" }}>
+            Ihr Wohnsitz ist jetzt bestätigt (Stufe 2). Sie können bei
+            verbindlichen Abstimmungen mitentscheiden.
+          </p>
+          <Link href={`/${tenantSlug}/umfragen`} className="pz-btn pz-btn-primary mt-4">
+            Zu den Abstimmungen
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   if (!proof) {
@@ -137,6 +217,12 @@ export default function MeinKontoQr() {
           Gültig bis {formatTime(proof.expiresAt)} Uhr. Danach einfach neu erzeugen.
         </p>
       )}
+
+      {/* Live-Hinweis: der QR bleibt stehen, bis der Verifizierer bestätigt —
+          dann wechselt diese Ansicht automatisch zum Erfolgs-Screen. */}
+      <p aria-live="polite" className="mt-3 text-center text-xs" style={{ color: "var(--pz-muted)" }}>
+        Sobald bestätigt wurde, geht es hier automatisch weiter …
+      </p>
 
       <button
         type="button"

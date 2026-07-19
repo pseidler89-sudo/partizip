@@ -361,8 +361,11 @@ export default async function TenantLandingPage({ params }: PageProps) {
       {/* Ein-Schritt-Nudge (Einrichtungs-Checkliste Fläche B): ersetzt den
           reinen Stufen-Streifen — zeigt den EINEN nächsten Einrichtungs-Schritt
           (Wohnort → Verifizierung → Benachrichtigung → Teilnahme) und
-          verschwindet vollständig, wenn alles erledigt ist. */}
-      {eingeloggt && einrichtungsSchritt && (
+          verschwindet vollständig, wenn alles erledigt ist.
+          Der „teilnahme"-Schritt entfällt hier (wie schon auf /umfragen): die
+          Featured-Frage folgt direkt darunter — der „Jetzt mitmachen"-Nudge wäre
+          redundant (Vor-Ort-Befund D). */}
+      {eingeloggt && einrichtungsSchritt && einrichtungsSchritt !== "teilnahme" && (
         <div className="mx-auto max-w-3xl px-6 pt-6">
           <NaechsterSchritt schritt={einrichtungsSchritt} tenantSlug={slug} />
         </div>
