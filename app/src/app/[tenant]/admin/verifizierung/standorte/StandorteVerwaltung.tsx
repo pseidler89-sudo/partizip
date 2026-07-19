@@ -20,6 +20,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { OeffnungszeitFenster } from "@/db/schema";
 import BestaetigungsDialog from "../../../BestaetigungsDialog";
 import {
   slotKapazitaetAendern,
@@ -44,6 +45,12 @@ export interface StandortVM {
   address: string | null;
   hinweise: string | null;
   isActive: boolean;
+  lat: number | null;
+  lon: number | null;
+  oeffnungszeiten: OeffnungszeitFenster[] | null;
+  terminErforderlich: boolean;
+  barrierefrei: boolean | null;
+  kontakt: string | null;
   kommendeSlots: number;
   freiePlaetze: number;
   offeneBuchungen: number;
@@ -69,8 +76,264 @@ const WOCHENTAGE: { wert: number; label: string }[] = [
   { wert: 0, label: "So" },
 ];
 
+/** ISO-Wochentage (Mo=1 … So=7) für die strukturierten Öffnungszeiten. */
+const ISO_WOCHENTAGE: { wert: number; label: string }[] = [
+  { wert: 1, label: "Mo" },
+  { wert: 2, label: "Di" },
+  { wert: 3, label: "Mi" },
+  { wert: 4, label: "Do" },
+  { wert: 5, label: "Fr" },
+  { wert: 6, label: "Sa" },
+  { wert: 7, label: "So" },
+];
+
 const inputKlasse =
   "mt-1 w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]";
+
+/** Barrierefrei-Tri-State ↔ Select-Wert. */
+type BarrierefreiWahl = "unbekannt" | "ja" | "nein";
+function barrierefreiZuWahl(b: boolean | null): BarrierefreiWahl {
+  return b === true ? "ja" : b === false ? "nein" : "unbekannt";
+}
+function wahlZuBarrierefrei(w: BarrierefreiWahl): boolean | null {
+  return w === "ja" ? true : w === "nein" ? false : null;
+}
+
+const ISO_TAG_KURZ = ["", "Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+
+/** Kompakte, menschenlesbare Öffnungszeiten-Zusammenfassung für die Karte. */
+function formatOeffnungKurz(fenster: OeffnungszeitFenster[] | null): string {
+  if (!fenster || fenster.length === 0) return "";
+  return fenster
+    .slice()
+    .sort((a, b) => a.tag - b.tag || a.von.localeCompare(b.von))
+    .map((f) => `${ISO_TAG_KURZ[f.tag] ?? f.tag} ${f.von}–${f.bis}`)
+    .join(", ");
+}
+
+/** Leeres Koordinatenfeld → null; sonst die Zahl (NaN → null, fail-closed). */
+function parseKoord(s: string): number | null {
+  const t = s.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Zeilen-Editor für strukturierte Öffnungszeiten (V1): je Zeile Wochentag-Select
+ * (Mo=1 … So=7) + von/bis (HH:MM). Mehrere Zeilen / mehrere Fenster je Tag
+ * erlaubt. Rein clientseitig; die serverseitige zod-Prüfung (von<bis, HH:MM,
+ * Tag 1–7) bleibt maßgeblich.
+ */
+function OeffnungszeitenEditor({
+  wert,
+  onChange,
+  idPrefix,
+}: {
+  wert: OeffnungszeitFenster[];
+  onChange: (next: OeffnungszeitFenster[]) => void;
+  idPrefix: string;
+}) {
+  function setzeFeld(i: number, feld: keyof OeffnungszeitFenster, v: string | number) {
+    const next = wert.map((f, idx) => (idx === i ? { ...f, [feld]: v } : f));
+    onChange(next);
+  }
+  return (
+    <div className="space-y-2">
+      {wert.length === 0 && (
+        <p className="text-xs" style={{ color: "var(--pz-muted)" }}>
+          Noch keine Öffnungszeiten. Fügen Sie ein Zeitfenster hinzu — oder
+          aktivieren Sie die Termin-Pflicht.
+        </p>
+      )}
+      {wert.map((f, i) => (
+        <div key={i} className="flex flex-wrap items-end gap-2">
+          <div>
+            <label htmlFor={`${idPrefix}-tag-${i}`} className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
+              Wochentag
+            </label>
+            <select
+              id={`${idPrefix}-tag-${i}`}
+              value={f.tag}
+              onChange={(e) => setzeFeld(i, "tag", Number(e.target.value))}
+              className="mt-1 rounded-md border px-2 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
+              style={{ borderColor: "var(--pz-line)" }}
+            >
+              {ISO_WOCHENTAGE.map((w) => (
+                <option key={w.wert} value={w.wert}>
+                  {w.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor={`${idPrefix}-von-${i}`} className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
+              von
+            </label>
+            <input
+              id={`${idPrefix}-von-${i}`}
+              type="time"
+              value={f.von}
+              onChange={(e) => setzeFeld(i, "von", e.target.value)}
+              className="mt-1 rounded-md border px-2 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
+              style={{ borderColor: "var(--pz-line)" }}
+            />
+          </div>
+          <div>
+            <label htmlFor={`${idPrefix}-bis-${i}`} className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
+              bis
+            </label>
+            <input
+              id={`${idPrefix}-bis-${i}`}
+              type="time"
+              value={f.bis}
+              onChange={(e) => setzeFeld(i, "bis", e.target.value)}
+              className="mt-1 rounded-md border px-2 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
+              style={{ borderColor: "var(--pz-line)" }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => onChange(wert.filter((_, idx) => idx !== i))}
+            className="pz-btn pz-btn-secondary pz-btn-sm"
+            aria-label={`Zeitfenster ${i + 1} entfernen`}
+          >
+            Entfernen
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...wert, { tag: 1, von: "09:00", bis: "12:00" }])}
+        className="pz-btn pz-btn-secondary pz-btn-sm"
+      >
+        Zeitfenster hinzufügen
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Gemeinsame V1-Zusatzfelder (Koordinaten, Öffnungszeiten, Termin-Pflicht,
+ * Barrierefreiheit, Kontakt) für das Anlegen- UND das Bearbeiten-Formular.
+ */
+function StandortZusatzFelder(props: {
+  idPrefix: string;
+  lat: string;
+  setLat: (v: string) => void;
+  lon: string;
+  setLon: (v: string) => void;
+  oeffnung: OeffnungszeitFenster[];
+  setOeffnung: (v: OeffnungszeitFenster[]) => void;
+  termin: boolean;
+  setTermin: (v: boolean) => void;
+  barrierefrei: BarrierefreiWahl;
+  setBarrierefrei: (v: BarrierefreiWahl) => void;
+  kontakt: string;
+  setKontakt: (v: string) => void;
+}) {
+  const { idPrefix } = props;
+  return (
+    <>
+      <fieldset>
+        <legend className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
+          Öffnungszeiten (für Verifizierung ohne Termin)
+        </legend>
+        <div className="mt-1">
+          <OeffnungszeitenEditor
+            wert={props.oeffnung}
+            onChange={props.setOeffnung}
+            idPrefix={`${idPrefix}-oz`}
+          />
+        </div>
+      </fieldset>
+
+      <label className="flex items-center gap-2 text-sm" style={{ color: "var(--pz-body)" }}>
+        <input
+          type="checkbox"
+          checked={props.termin}
+          onChange={(e) => props.setTermin(e.target.checked)}
+        />
+        Verifizierung nur mit Termin — kein Walk-in
+      </label>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label htmlFor={`${idPrefix}-lat`} className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
+            Breitengrad (optional)
+          </label>
+          <input
+            id={`${idPrefix}-lat`}
+            type="number"
+            step="any"
+            min={-90}
+            max={90}
+            value={props.lat}
+            onChange={(e) => props.setLat(e.target.value)}
+            placeholder="z. B. 50.1409"
+            className={inputKlasse}
+            style={{ borderColor: "var(--pz-line)" }}
+          />
+        </div>
+        <div>
+          <label htmlFor={`${idPrefix}-lon`} className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
+            Längengrad (optional)
+          </label>
+          <input
+            id={`${idPrefix}-lon`}
+            type="number"
+            step="any"
+            min={-180}
+            max={180}
+            value={props.lon}
+            onChange={(e) => props.setLon(e.target.value)}
+            placeholder="z. B. 8.1508"
+            className={inputKlasse}
+            style={{ borderColor: "var(--pz-line)" }}
+          />
+        </div>
+      </div>
+      <p className="text-xs" style={{ color: "var(--pz-muted)" }}>
+        Koordinaten aus der Karten-App kopieren — ermöglicht später die Sortierung
+        nach Nähe. Beide Felder gemeinsam ausfüllen oder beide leer lassen.
+      </p>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label htmlFor={`${idPrefix}-barrierefrei`} className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
+            Barrierefrei
+          </label>
+          <select
+            id={`${idPrefix}-barrierefrei`}
+            value={props.barrierefrei}
+            onChange={(e) => props.setBarrierefrei(e.target.value as BarrierefreiWahl)}
+            className={inputKlasse}
+            style={{ borderColor: "var(--pz-line)" }}
+          >
+            <option value="unbekannt">unbekannt</option>
+            <option value="ja">ja</option>
+            <option value="nein">nein</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor={`${idPrefix}-kontakt`} className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
+            Kontakt (optional, z. B. Telefon)
+          </label>
+          <input
+            id={`${idPrefix}-kontakt`}
+            type="text"
+            maxLength={120}
+            value={props.kontakt}
+            onChange={(e) => props.setKontakt(e.target.value)}
+            placeholder="z. B. 06128 / 000-0"
+            className={inputKlasse}
+            style={{ borderColor: "var(--pz-line)" }}
+          />
+        </div>
+      </div>
+    </>
+  );
+}
 
 export function StandorteVerwaltung({ standorte }: Props) {
   const router = useRouter();
@@ -80,6 +343,12 @@ export function StandorteVerwaltung({ standorte }: Props) {
   const [neuName, setNeuName] = useState("");
   const [neuAddress, setNeuAddress] = useState("");
   const [neuHinweise, setNeuHinweise] = useState("");
+  const [neuLat, setNeuLat] = useState("");
+  const [neuLon, setNeuLon] = useState("");
+  const [neuOeffnung, setNeuOeffnung] = useState<OeffnungszeitFenster[]>([]);
+  const [neuTermin, setNeuTermin] = useState(false);
+  const [neuBarrierefrei, setNeuBarrierefrei] = useState<BarrierefreiWahl>("unbekannt");
+  const [neuKontakt, setNeuKontakt] = useState("");
   const [neuFehler, setNeuFehler] = useState<string | null>(null);
 
   // Je-Standort-UI-Zustand
@@ -87,6 +356,12 @@ export function StandorteVerwaltung({ standorte }: Props) {
   const [editName, setEditName] = useState("");
   const [editAddress, setEditAddress] = useState("");
   const [editHinweise, setEditHinweise] = useState("");
+  const [editLat, setEditLat] = useState("");
+  const [editLon, setEditLon] = useState("");
+  const [editOeffnung, setEditOeffnung] = useState<OeffnungszeitFenster[]>([]);
+  const [editTermin, setEditTermin] = useState(false);
+  const [editBarrierefrei, setEditBarrierefrei] = useState<BarrierefreiWahl>("unbekannt");
+  const [editKontakt, setEditKontakt] = useState("");
   const [aufgeklappt, setAufgeklappt] = useState<Set<string>>(new Set());
   const [standortFehler, setStandortFehler] = useState<Record<string, string>>({});
   const [standortInfo, setStandortInfo] = useState<Record<string, string>>({});
@@ -134,8 +409,14 @@ export function StandorteVerwaltung({ standorte }: Props) {
     startTransition(async () => {
       const r = await standortErstellen({
         name: neuName.trim(),
-        address: neuAddress.trim() || null,
+        address: neuAddress.trim(),
         hinweise: neuHinweise.trim() || null,
+        lat: parseKoord(neuLat),
+        lon: parseKoord(neuLon),
+        oeffnungszeiten: neuOeffnung,
+        terminErforderlich: neuTermin,
+        barrierefrei: wahlZuBarrierefrei(neuBarrierefrei),
+        kontakt: neuKontakt.trim() || null,
       });
       if (!r.ok) {
         setNeuFehler(r.error ?? "Anlegen fehlgeschlagen.");
@@ -144,6 +425,12 @@ export function StandorteVerwaltung({ standorte }: Props) {
       setNeuName("");
       setNeuAddress("");
       setNeuHinweise("");
+      setNeuLat("");
+      setNeuLon("");
+      setNeuOeffnung([]);
+      setNeuTermin(false);
+      setNeuBarrierefrei("unbekannt");
+      setNeuKontakt("");
       router.refresh();
     });
   }
@@ -153,6 +440,12 @@ export function StandorteVerwaltung({ standorte }: Props) {
     setEditName(s.name);
     setEditAddress(s.address ?? "");
     setEditHinweise(s.hinweise ?? "");
+    setEditLat(s.lat == null ? "" : String(s.lat));
+    setEditLon(s.lon == null ? "" : String(s.lon));
+    setEditOeffnung(s.oeffnungszeiten ?? []);
+    setEditTermin(s.terminErforderlich);
+    setEditBarrierefrei(barrierefreiZuWahl(s.barrierefrei));
+    setEditKontakt(s.kontakt ?? "");
     setzeFehler(s.locationId, null);
     setzeInfo(s.locationId, null);
   }
@@ -163,8 +456,14 @@ export function StandorteVerwaltung({ standorte }: Props) {
     startTransition(async () => {
       const r = await standortBearbeiten(standortId, {
         name: editName.trim(),
-        address: editAddress.trim() || null,
+        address: editAddress.trim(),
         hinweise: editHinweise.trim() || null,
+        lat: parseKoord(editLat),
+        lon: parseKoord(editLon),
+        oeffnungszeiten: editOeffnung,
+        terminErforderlich: editTermin,
+        barrierefrei: wahlZuBarrierefrei(editBarrierefrei),
+        kontakt: editKontakt.trim() || null,
       });
       if (!r.ok) {
         setzeFehler(standortId, r.error ?? "Speichern fehlgeschlagen.");
@@ -329,11 +628,12 @@ export function StandorteVerwaltung({ standorte }: Props) {
           </div>
           <div>
             <label htmlFor="neu-address" className="block text-xs font-medium" style={{ color: "var(--pz-body)" }}>
-              Adresse (optional)
+              Adresse
             </label>
             <input
               id="neu-address"
               type="text"
+              required
               maxLength={200}
               value={neuAddress}
               onChange={(e) => setNeuAddress(e.target.value)}
@@ -357,6 +657,21 @@ export function StandorteVerwaltung({ standorte }: Props) {
               style={{ borderColor: "var(--pz-line)" }}
             />
           </div>
+          <StandortZusatzFelder
+            idPrefix="neu"
+            lat={neuLat}
+            setLat={setNeuLat}
+            lon={neuLon}
+            setLon={setNeuLon}
+            oeffnung={neuOeffnung}
+            setOeffnung={setNeuOeffnung}
+            termin={neuTermin}
+            setTermin={setNeuTermin}
+            barrierefrei={neuBarrierefrei}
+            setBarrierefrei={setNeuBarrierefrei}
+            kontakt={neuKontakt}
+            setKontakt={setNeuKontakt}
+          />
           {neuFehler && (
             <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
               {neuFehler}
@@ -403,6 +718,27 @@ export function StandorteVerwaltung({ standorte }: Props) {
                       {s.hinweise && (
                         <p className="mt-0.5 text-xs" style={{ color: "var(--pz-muted)" }}>
                           {s.hinweise}
+                        </p>
+                      )}
+                      {s.terminErforderlich ? (
+                        <p className="mt-0.5 text-xs" style={{ color: "var(--pz-muted)" }}>
+                          Nur mit Termin (kein Walk-in)
+                        </p>
+                      ) : (
+                        s.oeffnungszeiten &&
+                        s.oeffnungszeiten.length > 0 && (
+                          <p className="mt-0.5 text-xs" style={{ color: "var(--pz-muted)" }}>
+                            Öffnungszeiten: {formatOeffnungKurz(s.oeffnungszeiten)}
+                          </p>
+                        )
+                      )}
+                      {(s.barrierefrei !== null || s.kontakt || (s.lat != null && s.lon != null)) && (
+                        <p className="mt-0.5 text-xs" style={{ color: "var(--pz-muted)" }}>
+                          {s.barrierefrei !== null && (s.barrierefrei ? "barrierefrei" : "nicht barrierefrei")}
+                          {s.barrierefrei !== null && (s.kontakt || (s.lat != null && s.lon != null)) ? " · " : ""}
+                          {s.kontakt}
+                          {s.kontakt && s.lat != null && s.lon != null ? " · " : ""}
+                          {s.lat != null && s.lon != null ? `${s.lat}, ${s.lon}` : ""}
                         </p>
                       )}
                       <p className="mt-1.5 text-xs" style={{ color: "var(--pz-muted)" }}>
@@ -492,6 +828,7 @@ export function StandorteVerwaltung({ standorte }: Props) {
                         <input
                           id={`edit-address-${s.locationId}`}
                           type="text"
+                          required
                           maxLength={200}
                           value={editAddress}
                           onChange={(e) => setEditAddress(e.target.value)}
@@ -513,6 +850,21 @@ export function StandorteVerwaltung({ standorte }: Props) {
                           style={{ borderColor: "var(--pz-line)" }}
                         />
                       </div>
+                      <StandortZusatzFelder
+                        idPrefix={`edit-${s.locationId}`}
+                        lat={editLat}
+                        setLat={setEditLat}
+                        lon={editLon}
+                        setLon={setEditLon}
+                        oeffnung={editOeffnung}
+                        setOeffnung={setEditOeffnung}
+                        termin={editTermin}
+                        setTermin={setEditTermin}
+                        barrierefrei={editBarrierefrei}
+                        setBarrierefrei={setEditBarrierefrei}
+                        kontakt={editKontakt}
+                        setKontakt={setEditKontakt}
+                      />
                       <div className="flex gap-2">
                         <button type="submit" disabled={isPending} aria-busy={isPending} className="pz-btn pz-btn-primary pz-btn-sm">
                           {isPending ? "…" : "Speichern"}
