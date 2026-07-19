@@ -26,6 +26,7 @@ import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getUserRoleTypes } from "@/lib/auth/roles";
 import { aufgabenKacheln, hatAufgaben } from "@/lib/aufgaben/kacheln";
+import { isDemoTenant } from "@/lib/demo/config";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,10 @@ export default async function AufgabenPage({ params }: PageProps) {
   const host = headerStore.get("host") ?? "localhost";
   const tenant = await getTenantFromHost(host);
   if (!tenant || tenant.slug !== slugFromPath) notFound();
+  // Demo-Mandant hat seinen eigenen Perspektiv-Track (DemoGuide) — die echte
+  // Aufgaben-Ansicht bleibt dort aus (konsistent zum Umschalter, der auf Demo
+  // nicht gerendert wird). Der ephemere Demo-Admin nutzt den Demo-Rundgang.
+  if (isDemoTenant(tenant.slug)) redirect(`/${slugFromPath}`);
 
   const db = createDb(databaseUrl());
   const cookieStore = await cookies();

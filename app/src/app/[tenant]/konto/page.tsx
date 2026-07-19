@@ -322,10 +322,11 @@ export default function KontoPage() {
           den /aufgaben-Guard (hatAufgaben) — die Zielseiten gaten weiterhin selbst.
           Bewusst über die Fähigkeits-Flags, NICHT istRollentraeger: ein reiner
           Reserve-Rollenträger ohne Aufgabe würde sonst ins Leere geführt. */}
-      {(data.user.canVerify ||
-        data.user.canRedaktion ||
-        data.user.canBeobachten ||
-        data.user.isAdmin) && (
+      {!data.tenant.istDemo &&
+        (data.user.canVerify ||
+          data.user.canRedaktion ||
+          data.user.canBeobachten ||
+          data.user.isAdmin) && (
         <Link
           href={`/${data.tenant.slug}/aufgaben`}
           className="pz-card pz-card-hover mb-6 flex items-center justify-between gap-3 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
