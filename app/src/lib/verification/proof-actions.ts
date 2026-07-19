@@ -116,6 +116,8 @@ export async function meinVerifizierungsProofErzeugen(): Promise<ProofErzeugenAc
 export interface ProofBestaetigenActionResult {
   ok: boolean;
   verifiedUntil?: string;
+  /** true ⇒ Demo-Mandant: bewusst KEIN Grant (Client zeigt neutralen Hinweis, kein Fehler). */
+  demo?: boolean;
   error?: string;
 }
 
@@ -132,7 +134,7 @@ export async function verifizierungPerProofBestaetigen(
   // erzeugt keinen Beleg), aber explizit gefenced, falls je ein Demo-Beleg
   // entsteht (Seed/Reset) — sonst könnte ein Demo-Verifizierer Stufe 2 vergeben.
   if (isDemoTenant(ctx.tenant.slug)) {
-    return { ok: false, error: "In der Demo ist die Vor-Ort-Verifizierung nicht verfügbar." };
+    return { ok: false, demo: true, error: "In der Demo ist die Vor-Ort-Verifizierung nicht verfügbar." };
   }
 
   const tokenParsed = z.string().trim().min(1).max(512).safeParse(rawToken);

@@ -37,11 +37,14 @@ import {
 } from "@/lib/demo/perspektive-client";
 
 interface Step {
-  n: 1 | 2 | 3 | 4 | 5;
+  n: 1 | 2 | 3 | 4 | 5 | 6;
   label: string;
   /** Ziel der einen Weiter-Aktion (null auf dem letzten Schritt). */
   next: { href: string; label: string } | null;
 }
+
+/** Gesamtzahl der Bürger-Schritte (für „Schritt n von …" und die Punktreihe). */
+const BUERGER_SCHRITTE_GESAMT = 6;
 
 /** Hands-on-Track der Verwaltungs-Perspektive; pfad relativ zum Tenant-Slug. */
 const VERWALTUNG_SCHRITTE: { label: string; ctaPfad: string; ctaLabel: string }[] = [
@@ -64,6 +67,13 @@ const VERWALTUNG_SCHRITTE: { label: string; ctaPfad: string; ctaLabel: string }[
     label: "Rollen & Vier-Augen ansehen",
     ctaPfad: "/admin/rollen",
     ctaLabel: "Rollen ansehen",
+  },
+  {
+    // Verifizierung 2.0: die Kommune pflegt Standorte + Sprechzeiten; Bürger:innen
+    // bestätigen vor Ort per Konto-QR (sie zeigen, die Stelle scannt).
+    label: "Verifizierungs-Standorte & Sprechzeiten",
+    ctaPfad: "/admin/verifizierung/standorte",
+    ctaLabel: "Standorte ansehen",
   },
   {
     label: "Für Ihre Kommune",
@@ -159,7 +169,7 @@ export function DemoGuide({
     step = {
       n: 4,
       label: "Beleg prüfen — Sie müssen uns nicht glauben",
-      next: { href: `/${slug}/fuer-kommunen`, label: "Für Ihre Kommune" },
+      next: { href: `/${slug}/verifizieren`, label: "Wie werde ich verifiziert?" },
     };
   } else if (p.startsWith("/umfragen") || p.startsWith("/umfrage/")) {
     step = {
@@ -167,9 +177,19 @@ export function DemoGuide({
       label: "Abstimmen — anonym, mit Beleg-Code",
       next: { href: belegeHref, label: "Beleg-Liste ansehen" },
     };
-  } else if (p.startsWith("/fuer-kommunen")) {
+  } else if (p.startsWith("/verifizieren")) {
     step = {
       n: 5,
+      // Reiner Erklär-/Navigations-Schritt: die /verifizieren-Seite zeigt die
+      // Stellen in der Nähe + den persönlichen Konto-QR (Bürger zeigt, Stelle
+      // scannt). In der Demo bleibt es bei der Vorschau (Fence) — die Stimme
+      // wird dadurch verbindlich, ohne dass die Anonymität aufgegeben wird.
+      label: "So werden Sie verifiziert — anonym bleiben Sie trotzdem",
+      next: { href: `/${slug}/fuer-kommunen`, label: "Für Ihre Kommune" },
+    };
+  } else if (p.startsWith("/fuer-kommunen")) {
+    step = {
+      n: 6,
       label: "Für Ihre Kommune — so geht es weiter",
       next: null,
     };
@@ -295,8 +315,8 @@ export function DemoGuide({
                 className="inline-flex items-center gap-2 text-xs sm:text-sm"
                 style={{ color: "var(--pz-body)" }}
               >
-                <FortschrittsPunkte aktuell={step.n} gesamt={5} />
-                <span className="sr-only">Schritt {step.n} von 5:</span>
+                <FortschrittsPunkte aktuell={step.n} gesamt={BUERGER_SCHRITTE_GESAMT} />
+                <span className="sr-only">Schritt {step.n} von {BUERGER_SCHRITTE_GESAMT}:</span>
                 {step.label}
               </span>
               {step.next && (

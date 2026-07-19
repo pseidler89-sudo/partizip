@@ -120,25 +120,42 @@ export default async function AdminDashboardPage({ params }: PageProps) {
   // stehen (Sackgasse, Gate-B MINOR-3).
   let ersteSchritte: { label: string; href: string; erledigt: boolean }[] | null = null;
   if (isAdmin && !isDemoTenant(tenant.slug)) {
-    const [locRows, qrRows, pollRows, digestRows] = await Promise.all([
+    const [locRows, pollRows, digestRows] = await Promise.all([
       db.select({ c: count() }).from(verificationLocations).where(eq(verificationLocations.tenantId, tenant.id)),
-      db.select({ c: count() }).from(qrCodes).where(eq(qrCodes.tenantId, tenant.id)),
       db.select({ c: count() }).from(polls).where(eq(polls.tenantId, tenant.id)),
       db.select({ c: count() }).from(digests).where(eq(digests.tenantId, tenant.id)),
     ]);
+    // QR-Codes nur zählen, wenn der Einmal-Code-Schritt überhaupt angezeigt wird
+    // (sonst überflüssiger Query bei jedem Admin-Dashboard-Load).
+    const qrCount = FEATURE_VERIFIER_EINMAL_CODE
+      ? Number(
+          (await db.select({ c: count() }).from(qrCodes).where(eq(qrCodes.tenantId, tenant.id)))[0]?.c ?? 0,
+        )
+      : 0;
     const schritte = [
       {
         label: "Verifizierungs-Standort anlegen",
         // Block K1: direkt zur Standort-/Sprechzeiten-Verwaltung (vorher gab es
         // keine UI dafür — der Link zeigte nur auf die Verifizierungs-Übersicht).
+        // Deckt das Verifizierungs-Setup jetzt allein ab (Verifizierung 2.0: der
+        // Bürger zeigt seinen Konto-QR, die Stelle scannt — es muss kein QR-Code
+        // mehr vom Amt erzeugt werden).
         href: `/${slugFromPath}/admin/verifizierung/standorte`,
         erledigt: Number(locRows[0]?.c ?? 0) > 0,
       },
-      {
-        label: "QR-Code erstellen",
-        href: `/${slugFromPath}/admin/verifizierung`,
-        erledigt: Number(qrRows[0]?.c ?? 0) > 0,
-      },
+      // „QR-Code erstellen" nur, solange der Verifizierer-Einmal-Code aktiv ist.
+      // Ist er ausgeblendet (FEATURE_VERIFIER_EINMAL_CODE=false), gibt es keine
+      // Erstell-UI mehr → der Schritt wäre nie erfüllbar (Dauer-Sackgasse). Der
+      // Standort-Schritt oben deckt das Verifizierungs-Setup dann ab.
+      ...(FEATURE_VERIFIER_EINMAL_CODE
+        ? [
+            {
+              label: "QR-Code erstellen",
+              href: `/${slugFromPath}/admin/verifizierung`,
+              erledigt: qrCount > 0,
+            },
+          ]
+        : []),
       {
         label: "Erste Umfrage stellen",
         href: `/${slugFromPath}/admin/abstimmungen`,

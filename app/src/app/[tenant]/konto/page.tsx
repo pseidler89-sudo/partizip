@@ -183,7 +183,7 @@ export default function KontoPage() {
     if (status === "verified" && stufe < 2) {
       return {
         badge: "Wohnort-Verifikation abgelaufen",
-        hint: "Ihre Wohnort-Verifizierung ist abgelaufen. Bitte verifizieren Sie sich erneut über einen QR-Code Ihrer Kommune (Stufe 2).",
+        hint: "Ihre Wohnort-Verifizierung ist abgelaufen. Bitte verifizieren Sie sich erneut über eine Verifizierungsstelle in Ihrer Nähe (Stufe 2) — dort zeigen Sie vor Ort Ihren persönlichen Konto-QR.",
       };
     }
     if (status === "verified") {
@@ -210,7 +210,7 @@ export default function KontoPage() {
     // pending (und unbekannte Werte) → ausstehend
     return {
       badge: "Wohnort-Verifikation ausstehend",
-      hint: "Sie sind mit bestätigter E-Mail dabei (Stufe 1) und können Anliegen einreichen. Die Wohnort-Verifikation (Stufe 2) erhalten Sie über einen QR-Code Ihrer Kommune.",
+      hint: "Sie sind mit bestätigter E-Mail dabei (Stufe 1) und können Anliegen einreichen. Die Wohnort-Verifikation (Stufe 2) erhalten Sie über eine Verifizierungsstelle in Ihrer Nähe — dort zeigen Sie vor Ort Ihren persönlichen Konto-QR.",
     };
   }
 
