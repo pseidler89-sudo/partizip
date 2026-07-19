@@ -30,6 +30,7 @@
     "digest:export": "tsx scripts/digest-export.ts",
     "digest:import-draft": "tsx scripts/digest-import-draft.ts",
     "grant-role": "tsx scripts/grant-role.ts",
+    "grant-residency": "tsx scripts/grant-residency.ts",
     "anliegen:match": "tsx scripts/anliegen-match.ts",
     "tenant:export": "tsx scripts/tenant-export.ts",
     "tenant:import": "tsx scripts/tenant-import.ts",

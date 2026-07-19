@@ -54,7 +54,7 @@ export const QR_VERIFICATION_MONTHS = 24;
  *   - "qr_konto"  — V3 (umgekehrte Richtung): Verifizierer bestätigt den Konto-QR,
  *                   den der Bürger vor Ort zeigt (verification_proofs).
  */
-export type ResidencyMethod = "qr" | "in_person" | "qr_konto";
+export type ResidencyMethod = "qr" | "in_person" | "qr_konto" | "remote_admin_override";
 
 /**
  * grantResidency — DER gemeinsame Stufe-2-Übergang (Privileg-Erhöhung), genutzt
