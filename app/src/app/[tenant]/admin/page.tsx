@@ -84,6 +84,7 @@ export default async function AdminDashboardPage({ params }: PageProps) {
   // Verwaltungs-Karten — Rollen/Protokoll/Verifizierung/Anliegen bleiben Admins
   // vorbehalten und sind serverseitig zusätzlich gegated).
   const isAdmin = isAdminCheck(roleTypes);
+  const isSuper = roleTypes.includes("super_admin");
   const hatBeobachterRolle = roleTypes.includes("beobachter");
 
   if (!isAdmin && !hatBeobachterRolle) redirect(`/${slugFromPath}/anmelden`);
@@ -291,6 +292,28 @@ export default async function AdminDashboardPage({ params }: PageProps) {
           </p>
           <p className="mt-3 text-sm font-medium text-[var(--tenant-primary,var(--pz-brand))] group-hover:underline">
             Anliegen öffnen →
+          </p>
+        </Link>
+        )}
+
+        {/* Karte: Interessenten (Block N) — NUR Betreiber (super_admin).
+            Tenant-freie Lead-Tabelle des „Mitmachen"-Trichters. */}
+        {isSuper && (
+        <Link
+          href={`/${slugFromPath}/admin/interessenten`}
+          className="group rounded-lg border border-pz-line p-6 hover:border-pz-line hover:bg-pz-brand-soft transition-colors"
+        >
+          <div className="flex items-start justify-between mb-3">
+            <h2 className="text-lg font-medium text-pz-ink group-hover:text-pz-body">
+              Interessenten
+            </h2>
+          </div>
+          <p className="text-sm text-pz-muted">
+            Leads aus dem &bdquo;Mitmachen&ldquo;-Trichter und aus Terminbuchungen (nur für den
+            Plattform-Betreiber).
+          </p>
+          <p className="mt-3 text-sm font-medium text-[var(--tenant-primary,var(--pz-brand))] group-hover:underline">
+            Interessenten öffnen →
           </p>
         </Link>
         )}
