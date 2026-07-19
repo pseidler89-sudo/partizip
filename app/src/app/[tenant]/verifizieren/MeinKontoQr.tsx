@@ -116,10 +116,20 @@ export default function MeinKontoQr({ tenantSlug }: { tenantSlug: string }) {
     };
   }, [proof, verifiziert]);
 
+  // Persistente Live-Region: eine IMMER gerenderte aria-live-Region, deren Inhalt
+  // beim Verifizieren wechselt — wird von Screenreadern zuverlässiger angesagt als
+  // ein beim Erfolg frisch eingefügter role="status"-Teilbaum (Gate-B O1 MINOR).
+  const liveRegion = (
+    <p className="sr-only" role="status" aria-live="polite">
+      {verifiziert ? "Geschafft — Ihr Wohnsitz ist jetzt bestätigt (Stufe 2)." : ""}
+    </p>
+  );
+
   // Erfolgs-Screen (Vor-Ort-Befund C): löst den QR ab, sobald bestätigt.
   if (verifiziert) {
     return (
-      <div className="pz-card relative overflow-hidden p-6 text-center" role="status">
+      <div className="pz-card relative overflow-hidden p-6 text-center">
+        {liveRegion}
         <Konfetti />
         <div className="relative">
           <PartyPopper
@@ -218,9 +228,10 @@ export default function MeinKontoQr({ tenantSlug }: { tenantSlug: string }) {
         </p>
       )}
 
-      {/* Live-Hinweis: der QR bleibt stehen, bis der Verifizierer bestätigt —
-          dann wechselt diese Ansicht automatisch zum Erfolgs-Screen. */}
-      <p aria-live="polite" className="mt-3 text-center text-xs" style={{ color: "var(--pz-muted)" }}>
+      {/* Hinweis auf den automatischen Wechsel. Kein aria-live (statischer Text
+          kündigt nichts an) — die Erfolgs-Ansage läuft über die role="status"-
+          Region im Erfolgs-Screen. */}
+      <p className="mt-3 text-center text-xs" style={{ color: "var(--pz-muted)" }}>
         Sobald bestätigt wurde, geht es hier automatisch weiter …
       </p>
 
