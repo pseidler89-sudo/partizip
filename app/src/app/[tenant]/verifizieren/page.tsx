@@ -419,7 +419,7 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
             das bestätigt Ihren Wohnsitz (Stufe 2).
           </p>
           <div className="mt-3">
-            <MeinKontoQr />
+            <MeinKontoQr tenantSlug={slugFromPath} />
           </div>
         </section>
       )}

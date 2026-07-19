@@ -12,7 +12,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 type ConfirmState =
@@ -37,7 +36,6 @@ export default function VerifyConfirm({
   nextPath: string;
   anmeldenHref: string;
 }) {
-  const router = useRouter();
   const [state, setState] = useState<ConfirmState>({ status: "idle" });
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -54,9 +52,12 @@ export default function VerifyConfirm({
 
       if (res.ok) {
         setState({ status: "success" });
-        // Layout-Anmeldestatus aktualisieren, dann zum (validierten) Ziel
-        router.refresh();
-        router.push(nextPath);
+        // Voller Dokument-Load zum (bereits serverseitig validierten) Ziel: nur so
+        // liest das Server-Layout den frischen Session-Cookie und rendert die Nav
+        // neu. Ein Client-router.push auf eine Schwester-Route unter demselben
+        // [tenant]-Layout ließ die „Anmelden"-Nav stale (Vor-Ort-Befund B).
+        // nextPath ist same-origin-relativ (safeRedirectPath, serverseitig).
+        window.location.assign(nextPath);
       } else {
         const data = (await res.json()) as {
           error?: { code?: string; message?: string };
