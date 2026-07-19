@@ -18,6 +18,9 @@
  *     → Anker = Gemeinde-Knoten des Tenants (Standard).
  *   npm run grant-residency -- --tenant taunusstein --email p@x.de --ars 064390015015
  *     → Anker = Region mit dieser ARS (Gemeinde ODER Ortsteil).
+ *   npm run grant-residency -- --tenant taunusstein --email p@x.de --ortsteil Hahn
+ *     → Anker = Ortsteil mit diesem Namen (Ortsteile haben oft keine ARS).
+ *   Priorität, falls mehrere gesetzt: --ars vor --ortsteil vor Gemeinde-Default.
  *
  * Env: DATABASE_URL (default: postgres://partizip:partizip@127.0.0.1:5433/partizip)
  */
@@ -44,11 +47,12 @@ function getArg(flag: string): string | null {
 
 const tenantSlug = getArg("--tenant");
 const email = getArg("--email");
-const ars = getArg("--ars"); // optional: konkrete Region (Gemeinde/Ortsteil)
+const ars = getArg("--ars"); // optional: konkrete Region per ARS (Gemeinde/Ortsteil)
+const ortsteilName = getArg("--ortsteil"); // optional: Ortsteil per Name (ohne ARS)
 
 if (!tenantSlug || !email) {
   console.error("Fehler: --tenant und --email sind erforderlich.");
-  console.error("Optional: --ars <ARS> (Standard: Gemeinde-Knoten des Tenants).");
+  console.error("Optional: --ars <ARS> oder --ortsteil <Name> (Standard: Gemeinde-Knoten).");
   process.exit(1);
 }
 
@@ -94,23 +98,31 @@ async function main() {
   }
   const userId = userRows[0].id;
 
-  // Ziel-Region auflösen: per --ars ODER Standard = Gemeinde-Knoten des Tenants.
-  const regionRows = ars
-    ? await db
-        .select({ id: regions.id, typ: regions.typ, name: regions.name, pathLabel: regions.pathLabel })
-        .from(regions)
-        .where(and(eq(regions.tenantId, tenant.id), eq(regions.ars, ars)))
-        .limit(1)
-    : await db
-        .select({ id: regions.id, typ: regions.typ, name: regions.name, pathLabel: regions.pathLabel })
-        .from(regions)
-        .where(and(eq(regions.tenantId, tenant.id), eq(regions.typ, "gemeinde")))
-        .limit(1);
+  // Ziel-Region auflösen. Priorität: --ars > --ortsteil (per Name, tenant-scoped)
+  // > Standard = Gemeinde-Knoten des Tenants (partieller Unique → deterministisch).
+  const regionSelect = {
+    id: regions.id,
+    typ: regions.typ,
+    name: regions.name,
+    pathLabel: regions.pathLabel,
+  };
+  const regionWhere = ars
+    ? and(eq(regions.tenantId, tenant.id), eq(regions.ars, ars))
+    : ortsteilName
+      ? and(
+          eq(regions.tenantId, tenant.id),
+          eq(regions.typ, "ortsteil"),
+          eq(regions.name, ortsteilName),
+        )
+      : and(eq(regions.tenantId, tenant.id), eq(regions.typ, "gemeinde"));
+  const regionRows = await db.select(regionSelect).from(regions).where(regionWhere).limit(1);
   if (regionRows.length === 0) {
     console.error(
       ars
         ? `Fehler: Keine Region mit ARS "${ars}" im Tenant "${tenantSlug}".`
-        : `Fehler: Kein Gemeinde-Knoten im Tenant "${tenantSlug}" gefunden.`,
+        : ortsteilName
+          ? `Fehler: Kein Ortsteil "${ortsteilName}" im Tenant "${tenantSlug}".`
+          : `Fehler: Kein Gemeinde-Knoten im Tenant "${tenantSlug}" gefunden.`,
     );
     await pg.end();
     process.exit(1);
