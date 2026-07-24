@@ -146,7 +146,12 @@ export default async function VerifyPage({ params, searchParams }: PageProps) {
   }
 
   // --- Gültig: Bestätigungsseite. Eingelöst wird erst per Klick (POST). ---
+  // nextPath = validierter Fallback fürs Client-Redirect; nextParam = ROHER
+  // ?next=-Wert (oder null), den VerifyConfirm an POST /api/auth/verify
+  // durchreicht — der Server entscheidet das Ziel (WP2 Auto-Perspektive;
+  // explizites next schlägt sie, validiert dort via safeRedirectPath).
   const nextPath = safeRedirectPath(next);
+  const nextParam = typeof next === "string" && next.length > 0 ? next : null;
 
   return (
     <Schale>
@@ -157,7 +162,12 @@ export default async function VerifyPage({ params, searchParams }: PageProps) {
         Sie haben einen Anmeldelink für {PLATFORM_NAME} angefordert. Klicken Sie
         auf den Knopf, um die Anmeldung abzuschließen.
       </p>
-      <VerifyConfirm token={token} nextPath={nextPath} anmeldenHref={anmeldenHref} />
+      <VerifyConfirm
+        token={token}
+        nextPath={nextPath}
+        nextParam={nextParam}
+        anmeldenHref={anmeldenHref}
+      />
       <p className="mt-4 text-xs" style={{ color: "var(--pz-muted)" }}>
         Falls Sie diesen Link nicht angefordert haben, schließen Sie diese Seite
         einfach — es passiert nichts ohne Ihre Bestätigung.

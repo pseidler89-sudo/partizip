@@ -5,7 +5,9 @@
  * „Aufgaben"). Rendert große Aktions-Kacheln je Fähigkeit.
  *
  * GUARD: irgendeine Aufgaben-Fähigkeit (hatAufgaben = canVerify || canRedaktion
- * || isAdmin || canBeobachten). Nicht eingeloggt → /anmelden; eingeloggt, aber
+ * || isAdmin || literale Rolle 'beobachter' — bewusst NICHT canBeobachten, das
+ * schlösse auch `redakteur` ein; siehe lib/aufgaben/kacheln.ts). Nicht
+ * eingeloggt → /anmelden; eingeloggt, aber
  * Nicht-Rollenträger → /umfragen (Bürger-Sicht). Rollen werden über den
  * account_status-filternden Weg (getUserRoleTypes) geladen — ein gesperrtes
  * Konto erhält [] und wird weg-redirectet.

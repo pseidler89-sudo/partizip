@@ -17,6 +17,14 @@
  * H1: Origin-Check als Defense-in-Depth.
  * H2: force-dynamic.
  * H3: Nach erfolgreichem Verify alle übrigen unverbrauchten Tokens invalidieren.
+ *
+ * WP2 — Auto-Perspektive: die Antwort enthält zusätzlich `redirectTo` (server-
+ * seitig via bestimmeLoginZiel entschieden, IMMER safeRedirectPath-validiert).
+ * Explizites `next` aus dem Body (roher ?next=-Parameter der Verify-Seite)
+ * schlägt die Auto-Perspektive; sonst landen Rollenträger (hatAufgaben,
+ * account_status-gefiltert) auf /aufgaben — außer bewusste Bürger-Wahl
+ * (Cookie pz_perspektive === 'buerger'). Das Cookie verleiht NIE ein Recht
+ * und wird NUR nach positiver Rollen-Prüfung überhaupt ausgewertet.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -29,6 +37,10 @@ import { getTenantFromHost } from "@/lib/tenant";
 import { generateRawToken, sha256Hex } from "@/lib/auth/crypto";
 import { buildSessionCookieHeader } from "@/lib/auth/session";
 import { apiError } from "@/lib/api-error";
+import { getUserRoleTypes } from "@/lib/auth/roles";
+import { bestimmeLoginZiel } from "@/lib/auth/login-ziel";
+import { PERSPEKTIVE_COOKIE } from "@/lib/perspektive/constants";
+import { isDemoTenant } from "@/lib/demo/config";
 
 // H2: Nicht cachen — Auth-Routen immer dynamisch
 export const dynamic = "force-dynamic";
@@ -37,6 +49,9 @@ const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS ?? "30");
 
 const VerifySchema = z.object({
   token: z.string().min(1),
+  // WP2: roher ?next=-Parameter der Verify-Seite (null/fehlend = keiner in der
+  // URL). Wird NIE roh verwendet — nur durch safeRedirectPath (login-ziel.ts).
+  next: z.string().nullable().optional(),
 });
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -171,11 +186,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     metadata: { tenant: tenant.slug },
   });
 
-  // --- 9. Session-Cookie setzen ---
+  // --- 9. Redirect-Ziel serverseitig bestimmen (WP2 Auto-Perspektive) ---
+  // Explizites next schlägt die Auto-Perspektive → Rollen-Query nur nötig,
+  // wenn KEIN next mitkam (+1 Query, exakt das Layout-Muster). bestimmeLoginZiel
+  // kurzschließt bei explicitNext, die leeren roleTypes sind dann irrelevant.
+  const explicitNext =
+    typeof parsed.data.next === "string" && parsed.data.next.length > 0
+      ? parsed.data.next
+      : null;
+  const roleTypes =
+    explicitNext === null ? await getUserRoleTypes(db, tenant.id, user.id) : [];
+  // Cookie-Wert ist nicht vertrauenswürdige UI-Präferenz: bestimmeLoginZiel
+  // zählt nur die exakten Strings 'aufgaben'/'buerger', alles andere = nicht
+  // gesetzt — und wertet ihn NUR aus, wenn hatAufgaben bereits true ist.
+  const redirectTo = bestimmeLoginZiel({
+    roleTypes,
+    cookieWert: request.cookies.get(PERSPEKTIVE_COOKIE)?.value ?? null,
+    explicitNext,
+    istDemo: isDemoTenant(tenant.slug),
+  });
+
+  // --- 10. Session-Cookie setzen ---
   const isSecure = isSecureRequest(request);
   const cookieHeader = buildSessionCookieHeader(rawSessionToken, expiresAt, isSecure);
 
-  const response = NextResponse.json({ ok: true }, { status: 200 });
+  const response = NextResponse.json({ ok: true, redirectTo }, { status: 200 });
   response.headers.set("Set-Cookie", cookieHeader);
   return response;
 }

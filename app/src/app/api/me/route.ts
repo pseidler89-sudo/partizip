@@ -25,6 +25,7 @@ import {
   canBeobachten,
 } from "@/lib/auth/roles";
 import { istRollentraeger } from "@/lib/identity/anzeige";
+import { hatAufgaben } from "@/lib/aufgaben/kacheln";
 import { getEinrichtungsStatus } from "@/lib/konto/einrichtung";
 import { isDemoTenant } from "@/lib/demo/config";
 import { regionPfad } from "@/lib/region/tree";
@@ -127,6 +128,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       canVerify: canVerify(roleTypes),
       canRedaktion: canRedaktion(roleTypes),
       canBeobachten: canBeobachten(roleTypes),
+      // WP2: DAS Prädikat des /aufgaben-Einstiegs, serverseitig aus denselben
+      // account_status-gefilterten roleTypes. Die Konto-Seite nutzt dieses Feld
+      // statt einer clientseitigen Flag-Rekonstruktion — kein Drift zum
+      // /aufgaben-Guard möglich. Nur Anzeige, schaltet kein Recht frei.
+      hatAufgaben: hatAufgaben(roleTypes),
       // Block J1: Rollenträger-Identität. Die Klarname-/Funktion-Sektion (und der
       // Nudge) erscheinen im Konto NUR für Rollenträger — Bürger bleiben pseudonym.
       istRollentraeger: istRollentraeger(roleTypes),

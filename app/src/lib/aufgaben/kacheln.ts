@@ -48,7 +48,11 @@ export function hatAufgaben(roleTypes: string[]): boolean {
     isAdmin(roleTypes) ||
     // Literale `beobachter`-Rolle: der einzige canBeobachten-Fall, der nicht
     // schon von canRedaktion/isAdmin abgedeckt ist. Deckungsgleich mit
-    // „aufgabenKacheln(...).length > 0".
+    // „aufgabenKacheln(...).length > 0" — das gilt auch nach WP2: die neue
+    // Kachel `abstimmungen-lese` hängt an genau dieser Bedingung (beobachter &&
+    // !isAdmin) und erweitert damit nur eine Rollen-Kombination, die hier
+    // ohnehin schon true liefert. Die Invariante wird in kacheln.test.ts über
+    // alle Rollen-Kombinationen abgesichert.
     roleTypes.includes("beobachter")
   );
 }
@@ -121,6 +125,10 @@ export function aufgabenKacheln(roleTypes: string[]): AufgabenKachel[] {
   }
 
   // --- Lese-Sicht auf /admin: GENAU eine Kachel -----------------------------
+  // Bewusst KEINE Digest-Kachel für `beobachter`: /admin/digests lässt zwar
+  // canBeobachten lesend zu, zeigt aber nur tenant-weite Digest-Entwürfe — für
+  // einen Ortsteil-gescopten beobachter wäre das regelmäßig eine leere
+  // Sackgasse. Digests bleiben an canRedaktion (oben) gebunden.
   if (admin) {
     kacheln.push({
       key: "verwaltung",
@@ -132,12 +140,30 @@ export function aufgabenKacheln(roleTypes: string[]): AufgabenKachel[] {
       cta: "Verwaltung öffnen",
     });
   } else if (roleTypes.includes("beobachter")) {
+    // Beobachter-Lese-Sicht auf die Abstimmungen: der Guard von
+    // /admin/abstimmungen lässt das LITERAL `beobachter` bereits zu (read-only,
+    // serverseitig scope-gefiltert). Die Kachel-Bedingung ist wie der Guard
+    // scope-blind — auch ein Ortsteil-beobachter landet dort auf einer für
+    // seinen Scope gefilterten Liste, keine Sackgasse. Admins bekommen KEINE
+    // Doppel-Kachel (ihre `umfrage`-Kachel führt bereits auf /admin/abstimmungen).
+    kacheln.push({
+      key: "abstimmungen-lese",
+      icon: "🗳️",
+      titel: "Abstimmungen (Lese-Sicht)",
+      beschreibung:
+        "Laufende und beendete Abstimmungen in Ihrem Bereich einsehen.",
+      href: "/admin/abstimmungen",
+      cta: "Abstimmungen einsehen",
+    });
     kacheln.push({
       key: "uebersicht",
       icon: "👁️",
       titel: "Übersicht",
+      // WP2: bewusst KEINE „Digest-Entwürfe" mehr versprechen — ein Ortsteil-
+      // beobachter sieht auf /admin keine Digest-Karte (admin/page.tsx zeigt
+      // sie nur Redaktion/Admin). Ehrlich bleiben, was die Seite wirklich zeigt.
       beschreibung:
-        "Lesende Übersicht über Ergebnisse und Digest-Entwürfe in Ihrem Bereich.",
+        "Lesende Übersicht über Kennzahlen und Ergebnisse in Ihrem Bereich.",
       href: "/admin",
       cta: "Übersicht öffnen",
     });

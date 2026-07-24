@@ -244,11 +244,13 @@ export default async function DatenschutzPage() {
           <li>
             <strong>Ansichts-Cookie <code>pz_perspektive</code></strong>: wird nur
             gesetzt, wenn Sie als Rollenträger:in zwischen „Bürger-Ansicht“ und
-            „Aufgaben“ wechseln; Laufzeit 30 Tage, fester Inhalt „aufgaben“ ohne
-            jeden Personenbezug — merkt sich ausschließlich diese Anzeige-Auswahl
-            und schaltet keinerlei Rechte frei (Ihre Funktionen ergeben sich allein
-            aus Ihren Rollen). Rechtsgrundlage: § 25 Abs. 2 Nr. 2 TDDDG (von Ihnen
-            ausdrücklich angefordert).
+            „Aufgaben“ wechseln; Laufzeit 30 Tage, zwei mögliche feste Inhalte
+            („aufgaben“ oder „buerger“) ohne jeden Personenbezug — merkt sich
+            ausschließlich Ihre zuletzt gewählte Ansicht. Das Cookie wird beim
+            Anmelden gelesen, um Ihre zuletzt gewählte Start-Ansicht zu öffnen;
+            es schaltet weiterhin keinerlei Rechte frei (Ihre Funktionen ergeben
+            sich allein aus Ihren Rollen). Rechtsgrundlage: § 25 Abs. 2 Nr. 2
+            TDDDG (von Ihnen ausdrücklich angefordert).
           </li>
         </ul>
       </Abschnitt>
