@@ -48,6 +48,10 @@ type MeData = {
     canVerify?: boolean;
     canRedaktion?: boolean;
     canBeobachten?: boolean;
+    // WP2: serverseitig berechnetes /aufgaben-Prädikat (lib/aufgaben/kacheln).
+    // Die „Ihre Aufgaben"-Karte nutzt NUR dieses Feld — keine Rekonstruktion
+    // aus den Einzel-Flags mehr (Drift-Risiko zum echten Guard).
+    hatAufgaben?: boolean;
     // Block J1: Rollenträger-Identität. Nur Rollenträger sehen die Klarname-
     // Sektion + den Nudge; Bürger bleiben pseudonym.
     istRollentraeger?: boolean;
@@ -318,15 +322,12 @@ export default function KontoPage() {
       )}
 
       {/* Ihre Aufgaben — für JEDEN Rollenträger mit einer Fähigkeit (verifier/
-          redakteur/beobachter/Admin). Discoverability: der Einstieg spiegelt exakt
-          den /aufgaben-Guard (hatAufgaben) — die Zielseiten gaten weiterhin selbst.
-          Bewusst über die Fähigkeits-Flags, NICHT istRollentraeger: ein reiner
-          Reserve-Rollenträger ohne Aufgabe würde sonst ins Leere geführt. */}
-      {!data.tenant.istDemo &&
-        (data.user.canVerify ||
-          data.user.canRedaktion ||
-          data.user.canBeobachten ||
-          data.user.isAdmin) && (
+          redakteur/beobachter/Admin). Discoverability: der Einstieg nutzt das
+          SERVERSEITIG berechnete hatAufgaben aus /api/me (exakt der /aufgaben-
+          Guard, keine Flag-Rekonstruktion = kein Drift) — die Zielseiten gaten
+          weiterhin selbst. Bewusst NICHT istRollentraeger: ein reiner Reserve-
+          Rollenträger ohne Aufgabe würde sonst ins Leere geführt. */}
+      {!data.tenant.istDemo && data.user.hatAufgaben && (
         <Link
           href={`/${data.tenant.slug}/aufgaben`}
           className="pz-card pz-card-hover mb-6 flex items-center justify-between gap-3 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"

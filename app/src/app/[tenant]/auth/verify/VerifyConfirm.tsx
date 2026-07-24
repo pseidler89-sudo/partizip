@@ -6,7 +6,11 @@
  * selbst (GET) verbraucht nichts — siehe page.tsx.
  *
  * nextPath kommt bereits serverseitig validiert aus safeRedirectPath
- * (nur same-origin-relative Pfade).
+ * (nur same-origin-relative Pfade) und bleibt der FALLBACK. Primär gilt seit
+ * WP2 das `redirectTo` aus der POST-Antwort: der Server entscheidet das Ziel
+ * (Auto-Perspektive für Rollenträger, explizites next schlägt sie). nextParam
+ * ist der ROHE ?next=-Wert (oder null) und wird nur an den Server durchgereicht
+ * — validiert wird ausschließlich serverseitig (safeRedirectPath).
  */
 
 "use client";
@@ -27,13 +31,27 @@ const FEHLER_TITEL: Record<string, string> = {
   FORBIDDEN: "Anmeldung nicht möglich",
 };
 
+/**
+ * Minimale CLIENTSEITIGE Plausibilitätsprüfung des Server-`redirectTo` (Defense-
+ * in-Depth — die echte Validierung ist serverseitig safeRedirectPath): string,
+ * beginnt mit GENAU einem "/" (kein protokoll-relatives "//host").
+ */
+function istPlausiblesRedirect(wert: unknown): wert is string {
+  return (
+    typeof wert === "string" && wert.startsWith("/") && !wert.startsWith("//")
+  );
+}
+
 export default function VerifyConfirm({
   token,
   nextPath,
+  nextParam,
   anmeldenHref,
 }: {
   token: string;
   nextPath: string;
+  /** Roher ?next=-Parameter der URL (null wenn keiner da war) — geht an den Server. */
+  nextParam: string | null;
   anmeldenHref: string;
 }) {
   const [state, setState] = useState<ConfirmState>({ status: "idle" });
@@ -47,17 +65,24 @@ export default function VerifyConfirm({
       const res = await fetch("/api/auth/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, next: nextParam }),
       });
 
       if (res.ok) {
         setState({ status: "success" });
-        // Voller Dokument-Load zum (bereits serverseitig validierten) Ziel: nur so
-        // liest das Server-Layout den frischen Session-Cookie und rendert die Nav
-        // neu. Ein Client-router.push auf eine Schwester-Route unter demselben
-        // [tenant]-Layout ließ die „Anmelden"-Nav stale (Vor-Ort-Befund B).
-        // nextPath ist same-origin-relativ (safeRedirectPath, serverseitig).
-        window.location.assign(nextPath);
+        // Voller Dokument-Load zum Ziel: nur so liest das Server-Layout den
+        // frischen Session-Cookie und rendert die Nav neu. Ein Client-
+        // router.push auf eine Schwester-Route unter demselben [tenant]-Layout
+        // ließ die „Anmelden"-Nav stale (Vor-Ort-Befund B).
+        // WP2: primär das serverseitig entschiedene redirectTo (safeRedirect-
+        // validiert, Auto-Perspektive); fehlt/unplausibel → Fallback nextPath
+        // (serverseitig via safeRedirectPath validiert wie bisher).
+        const data = (await res.json().catch(() => null)) as
+          | { redirectTo?: unknown }
+          | null;
+        const redirectTo = data?.redirectTo;
+        const ziel = istPlausiblesRedirect(redirectTo) ? redirectTo : nextPath;
+        window.location.assign(ziel);
       } else {
         const data = (await res.json()) as {
           error?: { code?: string; message?: string };

@@ -24,9 +24,22 @@ describe("aufgabenKacheln — Discoverability spiegelt Server-Enforcement", () =
     expect(hatAufgaben(["redakteur"])).toBe(true);
   });
 
-  it("beobachter → nur die Lese-Übersicht", () => {
-    expect(keys(["beobachter"])).toEqual(["uebersicht"]);
+  it("beobachter → Abstimmungs-Lese-Sicht + Lese-Übersicht (WP2)", () => {
+    expect(keys(["beobachter"])).toEqual(["abstimmungen-lese", "uebersicht"]);
     expect(hatAufgaben(["beobachter"])).toBe(true);
+  });
+
+  it("WP2: uebersicht-Kachel verspricht weder Digest-Entwürfe noch Kennzahlen (beide für beobachter unsichtbar)", () => {
+    const uebersicht = aufgabenKacheln(["beobachter"]).find((k) => k.key === "uebersicht");
+    expect(uebersicht?.beschreibung).not.toMatch(/Digest/i);
+    // Kennzahlen sind auf /admin admin-only (isAdmin ? getAdminKennzahlen : null)
+    // — der Kachel-Text darf sie einem beobachter nicht versprechen.
+    expect(uebersicht?.beschreibung).not.toMatch(/Kennzahlen/i);
+  });
+
+  it("WP2: abstimmungen-lese führt auf /admin/abstimmungen (Guard lässt beobachter zu)", () => {
+    const lese = aufgabenKacheln(["beobachter"]).find((k) => k.key === "abstimmungen-lese");
+    expect(lese?.href).toBe("/admin/abstimmungen");
   });
 
   it("kommune_admin → alle Kacheln, /admin genau EINMAL (Verwaltung, keine Übersicht)", () => {
@@ -75,6 +88,36 @@ describe("aufgabenKacheln — Discoverability spiegelt Server-Enforcement", () =
     for (const k of aufgabenKacheln(["kommune_admin"])) {
       expect(k.href.startsWith("/")).toBe(true);
       expect(k.href.startsWith("/admin") || k.href.startsWith("/verifizieren")).toBe(true);
+    }
+  });
+
+  it("WP2: Admin (auch Admin+beobachter) bekommt KEINE abstimmungen-lese-Doppel-Kachel", () => {
+    expect(keys(["kommune_admin"])).not.toContain("abstimmungen-lese");
+    expect(keys(["super_admin"])).not.toContain("abstimmungen-lese");
+    // Selbst mit zusätzlicher beobachter-Rolle: /admin/abstimmungen erscheint
+    // nur einmal (als Admin-Kachel „umfrage"), kein Duplikat auf denselben href.
+    const kombi = aufgabenKacheln(["kommune_admin", "beobachter"]);
+    expect(kombi.map((k) => k.key)).not.toContain("abstimmungen-lese");
+    const hrefs = kombi.map((k) => k.href);
+    expect(new Set(hrefs).size).toBe(hrefs.length);
+  });
+
+  it("Invariante: hatAufgaben ⟺ aufgabenKacheln(...).length > 0 (alle Rollen-Kombinationen)", () => {
+    // Alle 2^6 Teilmengen der real vergebbaren Rollen-Typen + Füll-Rolle "user".
+    const alleRollen = [
+      "verifier",
+      "redakteur",
+      "beobachter",
+      "kommune_admin",
+      "super_admin",
+      "user",
+    ];
+    for (let mask = 0; mask < 1 << alleRollen.length; mask++) {
+      const kombi = alleRollen.filter((_, i) => (mask & (1 << i)) !== 0);
+      expect(
+        hatAufgaben(kombi),
+        `Kombination [${kombi.join(", ")}] verletzt die Invariante`,
+      ).toBe(aufgabenKacheln(kombi).length > 0);
     }
   });
 });

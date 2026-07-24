@@ -1,0 +1,98 @@
+/**
+ * login-ziel.test.ts — Redirect-Ziel nach Login (WP2 Auto-Perspektive).
+ *
+ * Testet die ECHTE Entscheidungsfunktion bestimmeLoginZiel (kein Spiegeln):
+ * sie nutzt intern die echten hatAufgaben-/safeRedirectPath-Funktionen. Harte
+ * Invariante: das Cookie pz_perspektive verleiht NIE ein Recht — ohne
+ * hatAufgaben wird es nicht einmal ausgewertet.
+ */
+
+import { describe, it, expect } from "vitest";
+import { bestimmeLoginZiel } from "../login-ziel";
+import { DEFAULT_LOGIN_REDIRECT } from "../safe-redirect";
+
+/** Bequemer Aufruf mit Defaults (Rollenträger = verifier, kein Demo). */
+function ziel(overrides: Partial<Parameters<typeof bestimmeLoginZiel>[0]> = {}) {
+  return bestimmeLoginZiel({
+    roleTypes: [],
+    cookieWert: null,
+    explicitNext: null,
+    istDemo: false,
+    ...overrides,
+  });
+}
+
+describe("bestimmeLoginZiel — WP2 Auto-Perspektive", () => {
+  it("(a) Rollenträger ohne Cookie → /aufgaben", () => {
+    expect(ziel({ roleTypes: ["verifier"] })).toBe("/aufgaben");
+    expect(ziel({ roleTypes: ["beobachter"] })).toBe("/aufgaben");
+    expect(ziel({ roleTypes: ["kommune_admin"] })).toBe("/aufgaben");
+  });
+
+  it("(b) Rollenträger mit bewusster Bürger-Wahl (Cookie 'buerger') → /umfragen", () => {
+    expect(ziel({ roleTypes: ["verifier"], cookieWert: "buerger" })).toBe(
+      DEFAULT_LOGIN_REDIRECT,
+    );
+  });
+
+  it("(c) Rollenträger mit Cookie 'aufgaben' → /aufgaben", () => {
+    expect(ziel({ roleTypes: ["verifier"], cookieWert: "aufgaben" })).toBe("/aufgaben");
+  });
+
+  it("(d) INVARIANTE: Bürger ohne Rollen mit manipuliertem Cookie 'aufgaben' → /umfragen", () => {
+    // Das Cookie verleiht kein Recht: ohne hatAufgaben wird es nie ausgewertet.
+    expect(ziel({ roleTypes: [], cookieWert: "aufgaben" })).toBe(DEFAULT_LOGIN_REDIRECT);
+    expect(ziel({ roleTypes: ["user"], cookieWert: "aufgaben" })).toBe(
+      DEFAULT_LOGIN_REDIRECT,
+    );
+  });
+
+  it("(e) explizites next '/konto' schlägt die Auto-Perspektive", () => {
+    expect(ziel({ roleTypes: ["verifier"], explicitNext: "/konto" })).toBe("/konto");
+  });
+
+  it("(f) explizites next '//evil.com' → safe-Fallback (/umfragen), KEIN /aufgaben", () => {
+    expect(ziel({ roleTypes: ["verifier"], explicitNext: "//evil.com" })).toBe(
+      DEFAULT_LOGIN_REDIRECT,
+    );
+    expect(ziel({ roleTypes: ["verifier"], explicitNext: "https://evil.com" })).toBe(
+      DEFAULT_LOGIN_REDIRECT,
+    );
+    expect(ziel({ roleTypes: ["verifier"], explicitNext: "/\\evil.tld" })).toBe(
+      DEFAULT_LOGIN_REDIRECT,
+    );
+  });
+
+  it("(g) Demo-Tenant: keine Auto-Perspektive → /umfragen", () => {
+    expect(ziel({ roleTypes: ["kommune_admin"], istDemo: true })).toBe(
+      DEFAULT_LOGIN_REDIRECT,
+    );
+  });
+
+  it("(h) Cookie-Müll zählt wie nicht gesetzt (defensives Parsen)", () => {
+    // Rollenträger: Müll ≠ 'buerger' → Auto-Perspektive greift wie ohne Cookie.
+    for (const muell of ["<script>", "AUFGABEN", " aufgaben", "buerger ", "1", ""]) {
+      expect(ziel({ roleTypes: ["verifier"], cookieWert: muell })).toBe("/aufgaben");
+      // Bürger: Müll schaltet erst recht nichts frei.
+      expect(ziel({ roleTypes: [], cookieWert: muell })).toBe(DEFAULT_LOGIN_REDIRECT);
+    }
+    expect(ziel({ roleTypes: ["verifier"], cookieWert: undefined })).toBe("/aufgaben");
+  });
+
+  it("leeres explizites next ('') zählt als kein next → Auto-Perspektive greift", () => {
+    expect(ziel({ roleTypes: ["verifier"], explicitNext: "" })).toBe("/aufgaben");
+  });
+
+  it("Rückgabe ist immer ein same-origin-relativer Pfad", () => {
+    const faelle = [
+      ziel({ roleTypes: ["verifier"] }),
+      ziel({ roleTypes: [] }),
+      ziel({ roleTypes: ["verifier"], explicitNext: "\0" }),
+      ziel({ roleTypes: ["verifier"], explicitNext: "/konto" }),
+    ];
+    for (const f of faelle) {
+      expect(f.startsWith("/")).toBe(true);
+      expect(f.startsWith("//")).toBe(false);
+    }
+  });
+});

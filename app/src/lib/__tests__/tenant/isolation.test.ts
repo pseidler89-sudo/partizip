@@ -24,6 +24,8 @@ import { slugFromHost, getTenantFromHost } from "@/lib/tenant.js";
 import { scopedDb } from "@/lib/db/tenant-scope.js";
 import { normalizeHost, slugFromNormalizedHost } from "@/lib/host.js";
 import { getEffectiveHost } from "@/middleware.js";
+import { resolveRegionIdForScope } from "@/lib/region/scope.js";
+import type { Db } from "@/db/client.js";
 
 import { GET as meHandler } from "@/app/api/me/route.js";
 import { POST as requestHandler } from "@/app/api/auth/request/route.js";
@@ -189,9 +191,62 @@ describe("Tenant-Isolation Integration", () => {
     const res = await meHandler(req);
     expect(res.status).toBe(200);
 
-    const body = await res.json() as { tenant?: { slug?: string }; user?: { email?: string } };
+    const body = await res.json() as {
+      tenant?: { slug?: string };
+      user?: { email?: string; hatAufgaben?: boolean };
+    };
     expect(body.tenant?.slug).toBe("isolation-a");
     expect(body.user?.email).toBe("user-a@isolation.test");
+    // WP2: serverseitiges /aufgaben-Prädikat im Response — User ohne Rollen → false.
+    expect(body.user?.hatAufgaben).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 2b (WP2): /api/me liefert hatAufgaben=true für einen Rollenträger
+  // -------------------------------------------------------------------------
+  it("/api/me: hatAufgaben=true für beobachter-Rollenträger (WP2)", async () => {
+    if (SKIP) return console.log(`SKIP: ${skipMsg}`);
+
+    // Rollenträger in Tenant A mit beobachter-Rolle (roles.region_id NOT NULL →
+    // Stadt-Knoten über den echten Auflösungsweg; GUC app.region_provision ist
+    // im Test-Setup gesetzt).
+    const [uRolle] = await db!
+      .insert(schema.users)
+      .values({
+        tenantId: tenantAId,
+        email: "beobachter@isolation.test",
+        minAgeConfirmedAt: new Date(),
+      })
+      .returning({ id: schema.users.id });
+    const regionId = await resolveRegionIdForScope(
+      db! as unknown as Db,
+      tenantAId,
+      "stadt",
+      null,
+    );
+    await db!.insert(schema.roles).values({
+      tenantId: tenantAId,
+      userId: uRolle.id,
+      roleType: "beobachter",
+      regionId,
+    });
+
+    const rawSessionToken = generateRawToken();
+    await db!.insert(schema.sessions).values({
+      tenantId: tenantAId,
+      userId: uRolle.id,
+      tokenHash: sha256Hex(rawSessionToken),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+
+    const req = makeGetRequest("http://isolation-a.localhost/api/me", {
+      testHost: "isolation-a.localhost",
+      cookie: `partizip_session=${rawSessionToken}`,
+    });
+    const res = await meHandler(req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { user?: { hatAufgaben?: boolean } };
+    expect(body.user?.hatAufgaben).toBe(true);
   });
 
   // -------------------------------------------------------------------------

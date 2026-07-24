@@ -47,7 +47,10 @@ export const metadata: Metadata = {
 
 interface PageProps {
   params: Promise<{ tenant: string }>;
-  searchParams: Promise<{ token?: string; next?: string }>;
+  // Next liefert bei wiederholten Query-Parametern (?next=a&next=b) ein
+  // string[] — der Typ muss das abbilden, sonst fällt ein Array still durch
+  // typeof-Checks und ein vorhandenes next würde ignoriert.
+  searchParams: Promise<{ token?: string; next?: string | string[] }>;
 }
 
 function databaseUrl(): string {
@@ -146,7 +149,16 @@ export default async function VerifyPage({ params, searchParams }: PageProps) {
   }
 
   // --- Gültig: Bestätigungsseite. Eingelöst wird erst per Klick (POST). ---
-  const nextPath = safeRedirectPath(next);
+  // nextPath = validierter Fallback fürs Client-Redirect; nextParam = ROHER
+  // ?next=-Wert (oder null), den VerifyConfirm an POST /api/auth/verify
+  // durchreicht — der Server entscheidet das Ziel (WP2 Auto-Perspektive;
+  // explizites next schlägt sie, validiert dort via safeRedirectPath).
+  // Degenerierter Query-String ?next=a&next=b → string[]: der ERSTE Wert
+  // zählt (wie vor WP2 „es stand ein next in der URL"), statt das next still
+  // zu verwerfen und die Auto-Perspektive greifen zu lassen.
+  const rohNext = Array.isArray(next) ? next[0] : next;
+  const nextPath = safeRedirectPath(rohNext);
+  const nextParam = typeof rohNext === "string" && rohNext.length > 0 ? rohNext : null;
 
   return (
     <Schale>
@@ -157,7 +169,12 @@ export default async function VerifyPage({ params, searchParams }: PageProps) {
         Sie haben einen Anmeldelink für {PLATFORM_NAME} angefordert. Klicken Sie
         auf den Knopf, um die Anmeldung abzuschließen.
       </p>
-      <VerifyConfirm token={token} nextPath={nextPath} anmeldenHref={anmeldenHref} />
+      <VerifyConfirm
+        token={token}
+        nextPath={nextPath}
+        nextParam={nextParam}
+        anmeldenHref={anmeldenHref}
+      />
       <p className="mt-4 text-xs" style={{ color: "var(--pz-muted)" }}>
         Falls Sie diesen Link nicht angefordert haben, schließen Sie diese Seite
         einfach — es passiert nichts ohne Ihre Bestätigung.
