@@ -11,11 +11,13 @@
  *
  * WP2 — in-place/optimistisch: beim Klick flippt die weiße Pille SOFORT
  * (lokaler optimistischer State), die Navigation läuft in einer useTransition
- * hinterher (dezente Pending-Optik, keine Doppel-Auslösung). Sobald sich die
- * ROUTE ändert (usePathname), gewinnt die Route: der optimistische Zustand ist
- * an den Klick-Pfad gebunden und verfällt beim Routenwechsel von selbst
- * (abgeleitet, kein Effekt) — Wahrheit bleibt die Route, kein Hydration-
- * Mismatch, keine Abhängigkeit vom Cookie.
+ * hinterher (dezente Pending-Optik, keine Doppel-Auslösung). Die Route
+ * gewinnt: der optimistische Wunsch zählt NUR solange die eigene Transition
+ * läuft (isPending) — endet sie (auch wenn die Navigation auf demselben Pfad
+ * endet, z. B. Guard-Redirect zurück) oder wechselt die Route extern
+ * (Browser-Zurück, Nav-Link), entscheidet wieder allein die Route. Ein
+ * abgelaufener Wunsch kann so nie reaktiviert werden. Wahrheit bleibt die
+ * Route, kein Hydration-Mismatch, keine Abhängigkeit vom Cookie.
  *
  * Das Cookie ist reine UI-Präferenz (am Cookie hängt KEIN Recht — die echten
  * Fähigkeiten kommen aus den Rollen). Seit WP2 wird BEIDES gesetzt
@@ -23,7 +25,7 @@
  * Bürger-Wahl von „nie gewechselt" unterscheiden kann.
  */
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   PERSPEKTIVE_AUFGABEN,
@@ -66,15 +68,20 @@ export function PerspektivUmschalter({ slug }: { slug: string }) {
   const pathname = usePathname() ?? "";
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  // Optimistischer Zustand als ABGELEITETER Wert (kein Effekt nötig, die Route
-  // gewinnt automatisch): beim Klick merken wir uns Wunsch-Ansicht + den Pfad,
-  // AUF dem geklickt wurde. Solange der Pfad unverändert ist, zeigt die Pille
-  // sofort den Wunsch; sobald sich die Route ändert (unsere Navigation ODER
-  // ein externer Wechsel), verfällt der Optimismus und die Route entscheidet.
-  const [optimistisch, setOptimistisch] = useState<{
-    aufgaben: boolean;
-    beiPfad: string;
-  } | null>(null);
+  // Optimistischer Zustand: beim Klick merken wir uns nur die Wunsch-Ansicht;
+  // die Pille zeigt sie sofort. Der Wunsch zählt AUSSCHLIESSLICH solange
+  // unsere eigene Transition läuft (isPending) — endet sie, gewinnt sofort
+  // wieder die Route. Bewusst NICHT über „Pfad noch gleich Klick-Pfad"
+  // abgeleitet: diese Konstruktion würde den alten Wunsch reaktivieren, wenn
+  // man später (Browser-Zurück, Nav-Link) exakt auf den Klick-Pfad
+  // zurückkehrt (Gate-B MAJOR). Und sie deckt auch den Randfall ab, dass die
+  // Navigation auf demselben Pfad endet (serverseitiger Guard-Redirect
+  // zurück): isPending wird false → Route entscheidet, nichts bleibt hängen.
+  const [optimistisch, setOptimistisch] = useState<boolean | null>(null);
+  // Synchroner Doppelklick-Schutz: isPending wird erst beim nächsten Render
+  // true — zwei sehr schnelle Klicks davor würden den State-Guard beide
+  // passieren. Der Ref sperrt sofort und wird im Effekt unten wieder gelöst.
+  const klickGesperrt = useRef(false);
 
   // startsWith statt new RegExp(`^/${slug}`): kein Regex über einen dynamischen
   // Wert (Metazeichen-Falle), gleiche Semantik fürs Tenant-Präfix.
@@ -84,24 +91,38 @@ export function PerspektivUmschalter({ slug }: { slug: string }) {
     : pathname || "/";
   const routeAufgabenAktiv = p.startsWith("/aufgaben");
 
+  // Klick-Sperre lösen, sobald die Navigation abgeschlossen ist (reiner
+  // Ref-Reset, kein setState im Effekt).
+  useEffect(() => {
+    if (!isPending) klickGesperrt.current = false;
+  }, [isPending]);
+
+  // Route gewinnt: der optimistische Wunsch zählt NUR während unserer eigenen
+  // Transition. Direkt nach dem Klick sind setOptimistisch und startTransition
+  // im selben Render-Batch wirksam (isPending schon true) — die Pille flippt
+  // also sofort; mit dem Commit der Navigation (neuer pathname + isPending
+  // false im selben Render) übernimmt nahtlos die Route. Ein abgeschlossener
+  // (stale) Wunsch kann so weder nach Browser-Zurück noch nach einem
+  // Guard-Redirect auf denselben Pfad je wieder aktiv werden.
   const aufgabenAktiv =
-    optimistisch !== null && optimistisch.beiPfad === pathname
-      ? optimistisch.aufgaben
-      : routeAufgabenAktiv;
+    isPending && optimistisch !== null ? optimistisch : routeAufgabenAktiv;
 
   function zuBuerger() {
-    if (isPending) return; // keine Doppel-Auslösung während der Navigation
+    // Keine Doppel-Auslösung: Ref sperrt synchron (isPending erst nach Render).
+    if (isPending || klickGesperrt.current) return;
+    klickGesperrt.current = true;
     setzeBuerger();
-    setOptimistisch({ aufgaben: false, beiPfad: pathname });
+    setOptimistisch(false);
     startTransition(() => {
       router.push(`/${slug}/umfragen`);
     });
   }
 
   function zuAufgaben() {
-    if (isPending) return;
+    if (isPending || klickGesperrt.current) return;
+    klickGesperrt.current = true;
     setzeAufgaben();
-    setOptimistisch({ aufgaben: true, beiPfad: pathname });
+    setOptimistisch(true);
     startTransition(() => {
       router.push(`/${slug}/aufgaben`);
     });

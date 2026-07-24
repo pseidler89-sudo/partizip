@@ -29,9 +29,12 @@ describe("aufgabenKacheln — Discoverability spiegelt Server-Enforcement", () =
     expect(hatAufgaben(["beobachter"])).toBe(true);
   });
 
-  it("WP2: uebersicht-Kachel verspricht keine Digest-Entwürfe mehr (Ortsteil-Sackgasse)", () => {
+  it("WP2: uebersicht-Kachel verspricht weder Digest-Entwürfe noch Kennzahlen (beide für beobachter unsichtbar)", () => {
     const uebersicht = aufgabenKacheln(["beobachter"]).find((k) => k.key === "uebersicht");
     expect(uebersicht?.beschreibung).not.toMatch(/Digest/i);
+    // Kennzahlen sind auf /admin admin-only (isAdmin ? getAdminKennzahlen : null)
+    // — der Kachel-Text darf sie einem beobachter nicht versprechen.
+    expect(uebersicht?.beschreibung).not.toMatch(/Kennzahlen/i);
   });
 
   it("WP2: abstimmungen-lese führt auf /admin/abstimmungen (Guard lässt beobachter zu)", () => {

@@ -47,7 +47,10 @@ export const metadata: Metadata = {
 
 interface PageProps {
   params: Promise<{ tenant: string }>;
-  searchParams: Promise<{ token?: string; next?: string }>;
+  // Next liefert bei wiederholten Query-Parametern (?next=a&next=b) ein
+  // string[] — der Typ muss das abbilden, sonst fällt ein Array still durch
+  // typeof-Checks und ein vorhandenes next würde ignoriert.
+  searchParams: Promise<{ token?: string; next?: string | string[] }>;
 }
 
 function databaseUrl(): string {
@@ -150,8 +153,12 @@ export default async function VerifyPage({ params, searchParams }: PageProps) {
   // ?next=-Wert (oder null), den VerifyConfirm an POST /api/auth/verify
   // durchreicht — der Server entscheidet das Ziel (WP2 Auto-Perspektive;
   // explizites next schlägt sie, validiert dort via safeRedirectPath).
-  const nextPath = safeRedirectPath(next);
-  const nextParam = typeof next === "string" && next.length > 0 ? next : null;
+  // Degenerierter Query-String ?next=a&next=b → string[]: der ERSTE Wert
+  // zählt (wie vor WP2 „es stand ein next in der URL"), statt das next still
+  // zu verwerfen und die Auto-Perspektive greifen zu lassen.
+  const rohNext = Array.isArray(next) ? next[0] : next;
+  const nextPath = safeRedirectPath(rohNext);
+  const nextParam = typeof rohNext === "string" && rohNext.length > 0 ? rohNext : null;
 
   return (
     <Schale>

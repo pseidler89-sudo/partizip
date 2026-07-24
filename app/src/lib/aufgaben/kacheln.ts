@@ -159,11 +159,14 @@ export function aufgabenKacheln(roleTypes: string[]): AufgabenKachel[] {
       key: "uebersicht",
       icon: "👁️",
       titel: "Übersicht",
-      // WP2: bewusst KEINE „Digest-Entwürfe" mehr versprechen — ein Ortsteil-
-      // beobachter sieht auf /admin keine Digest-Karte (admin/page.tsx zeigt
-      // sie nur Redaktion/Admin). Ehrlich bleiben, was die Seite wirklich zeigt.
+      // WP2: bewusst weder „Digest-Entwürfe" noch „Kennzahlen" versprechen —
+      // ein Ortsteil-beobachter sieht auf /admin keine Digest-Karte UND die
+      // Kennzahlen sind admin-only (admin/page.tsx: `isAdmin ? getAdminKennzahlen
+      // : null`). Ehrlich bleiben, was die Seite einem beobachter wirklich
+      // zeigt: die Abstimmungs-Karte (und ggf. die Digest-Karte bei stadtweitem
+      // Scope), read-only.
       beschreibung:
-        "Lesende Übersicht über Kennzahlen und Ergebnisse in Ihrem Bereich.",
+        "Lesende Übersicht über Abstimmungen und Ergebnisse in Ihrem Bereich.",
       href: "/admin",
       cta: "Übersicht öffnen",
     });
