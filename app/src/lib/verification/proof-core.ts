@@ -37,7 +37,11 @@ import {
   auditEvents,
 } from "@/db/schema";
 import { generateRawToken, sha256Hex } from "@/lib/auth/crypto";
-import { grantResidency } from "@/lib/verification/qr-core";
+import {
+  grantResidency,
+  ResidencyTargetInactiveError,
+  RESIDENCY_TARGET_INACTIVE_MESSAGE,
+} from "@/lib/verification/qr-core";
 import { pfadDecktAb, type RoleScopeRow } from "@/lib/auth/roles";
 import { resolveGemeindeRegionId } from "@/lib/region/scope";
 import { getRegion } from "@/lib/region/tree";
@@ -464,6 +468,11 @@ export async function verifizierungPerProofBestaetigenCore(
     }
     if (err instanceof ProofSelfError) {
       return { ok: false, error: "Sie können Ihren eigenen Beleg nicht bestätigen." };
+    }
+    // Ziel-Konto zwischen Beleg-Erzeugung und -Bestätigung gesperrt/gelöscht →
+    // neutrale Meldung; der Beleg bleibt atomar UNKONSUMIERT (kein Grant).
+    if (err instanceof ResidencyTargetInactiveError) {
+      return { ok: false, error: RESIDENCY_TARGET_INACTIVE_MESSAGE };
     }
     throw err;
   }

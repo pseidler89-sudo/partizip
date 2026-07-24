@@ -155,6 +155,12 @@ export default function QrScanner({ tenantSlug }: { tenantSlug: string }) {
   }, [handleErkannt]);
 
   const starteKamera = useCallback(async () => {
+    // Re-Entrancy-Sperre (O2-a): Auto-Start (permissions.query) + Nutzer-Klick oder
+    // ein schneller Doppelklick dürfen getUserMedia NICHT parallel starten — sonst
+    // überschreibt der zweite Stream streamRef.current und der erste Track läuft
+    // ungestoppt weiter (Kamera-Leuchte bleibt an). Idempotenter No-Op, solange ein
+    // Start läuft/aktiv ist; stoppeKamera setzt beide Refs zurück (regulärer Neustart ok).
+    if (aktivRef.current || streamRef.current) return;
     setFehler(null);
     if (!navigator.mediaDevices?.getUserMedia) {
       setFehler(

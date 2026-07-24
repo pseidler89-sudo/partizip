@@ -44,7 +44,11 @@ import {
   ProofGebietError,
   type VerifierKontext,
 } from "@/lib/verification/proof-core";
-import { qrErstellenCore } from "@/lib/verification/qr-core";
+import {
+  qrErstellenCore,
+  grantResidency,
+  ResidencyTargetInactiveError,
+} from "@/lib/verification/qr-core";
 import { getUserRolesMitScope } from "@/lib/auth/roles";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
 
@@ -367,5 +371,74 @@ describe("verification/proof (Integration, V3 Konto-QR)", () => {
     );
     const [row] = await db.select().from(qrCodes).where(eq(qrCodes.id, r.qrId));
     expect(row.maxRedemptions).toBe(1);
+  });
+
+  // --- WP1/B1: grantResidency prüft account_status des Ziel-Kontos ----------
+  it.skipIf(SKIP)("grantResidency: aktives Konto → 1 Grant, Verifizierungs-Stempel gesetzt", async () => {
+    const u = await makeUser(tenantId);
+    const until = await grantResidency(db as never, tenantId, u.id, "qr_konto", {
+      regionId: gemeindeId,
+      regionTyp: "gemeinde",
+    });
+    expect(until).toBeInstanceOf(Date);
+
+    const [after] = await db.select().from(users).where(eq(users.id, u.id));
+    expect(after.verificationStatus).toBe("verified");
+    expect(after.verificationMethod).toBe("qr_konto");
+    expect(after.residencyVerifiedAt).not.toBeNull();
+    expect(after.residencyVerifiedUntil).not.toBeNull();
+    expect(after.residencyRegionId).toBe(gemeindeId);
+    expect(getStufe(after)).toBe(2);
+  });
+
+  it.skipIf(SKIP)("grantResidency: gesperrtes Konto → ResidencyTargetInactiveError, Stempel UNVERÄNDERT", async () => {
+    const u = await makeUser(tenantId);
+    // Konto zwischen (hypothetischer) Erzeugung und Grant sperren.
+    await db.update(users).set({ accountStatus: "locked" }).where(eq(users.id, u.id));
+
+    await expect(
+      grantResidency(db as never, tenantId, u.id, "qr_konto", {
+        regionId: gemeindeId,
+        regionTyp: "gemeinde",
+      }),
+    ).rejects.toThrow(ResidencyTargetInactiveError);
+
+    // KEIN Stempel — das gesperrte Konto bleibt exakt wie zuvor (kein frischer Anker).
+    const [after] = await db.select().from(users).where(eq(users.id, u.id));
+    expect(after.verificationStatus).toBe("pending");
+    expect(after.verificationMethod).toBeNull();
+    expect(after.residencyVerifiedAt).toBeNull();
+    expect(after.residencyVerifiedUntil).toBeNull();
+    expect(after.residencyRegionId).toBeNull();
+  });
+
+  it.skipIf(SKIP)("End-to-End (Proof): Konto nach Erzeugung gesperrt → Bestätigung schlägt fehl, Beleg UNKONSUMIERT", async () => {
+    const u = await makeUser(tenantId);
+    const p = await meinProofErzeugenCore(db as never, tenantId, u.id);
+
+    // Sperre nach Beleg-Erzeugung, vor der Bestätigung durch den Verifizierer.
+    await db.update(users).set({ accountStatus: "locked" }).where(eq(users.id, u.id));
+
+    const res = await verifizierungPerProofBestaetigenCore(
+      db as never,
+      tenantId,
+      otAVerifierId, // ≠ u
+      p.rawToken,
+      gemeindeId,
+      ADMIN,
+    );
+    // Neutrale Meldung (kein Konten-Existenz-/Status-Orakel) statt 500.
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/nicht.*verifiziert werden/i);
+
+    // Atomarität: der Beleg bleibt UNKONSUMIERT (die Tx ist zurückgerollt).
+    const [prow] = await db.select().from(verificationProofs).where(eq(verificationProofs.id, p.proofId));
+    expect(prow.consumedAt).toBeNull();
+    expect(prow.consumedBy).toBeNull();
+
+    // Kein Stempel auf dem gesperrten Konto.
+    const [after] = await db.select().from(users).where(eq(users.id, u.id));
+    expect(after.verificationStatus).toBe("pending");
+    expect(after.residencyVerifiedAt).toBeNull();
   });
 });
