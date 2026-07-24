@@ -31,16 +31,29 @@ import { regionPfad } from "@/lib/region/tree";
 import { getOrtsteileForTenant } from "@/lib/region/queries";
 import { resolveOrtsteilCodeForRegionId } from "@/lib/region/scope";
 
+/**
+ * Defense-in-Depth gegen zwischengeschaltete Caches: /api/me trägt PII (E-Mail,
+ * Region, Rollen) — die Antwort darf NIRGENDS zwischengespeichert werden. `Cache-
+ * Control: no-store` auf JEDER Rückgabe (Erfolg wie Fehler), zusätzlich zum bereits
+ * gesetzten force-dynamic (das nur Next.js' eigenes Route-Caching adressiert).
+ */
+function noStore(res: NextResponse): NextResponse {
+  res.headers.set("Cache-Control", "no-store");
+  return res;
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const host = getEffectiveHost(request);
   const tenant = await getTenantFromHost(host);
   if (!tenant) {
-    return apiError(404, "TENANT_NOT_FOUND", "Diese Kommune ist auf Partizip nicht registriert.");
+    return noStore(
+      apiError(404, "TENANT_NOT_FOUND", "Diese Kommune ist auf Partizip nicht registriert."),
+    );
   }
 
   const session = await validateSession(request, tenant);
   if (!session) {
-    return apiError(401, "UNAUTHENTICATED", "Keine gültige Sitzung.");
+    return noStore(apiError(401, "UNAUTHENTICATED", "Keine gültige Sitzung."));
   }
 
   const DATABASE_URL =
@@ -51,7 +64,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const user = await scoped.users.findById(session.userId);
 
   if (!user) {
-    return apiError(401, "UNAUTHENTICATED", "Benutzer nicht gefunden.");
+    return noStore(apiError(401, "UNAUTHENTICATED", "Benutzer nicht gefunden."));
   }
 
   // Rollen für die Admin-Sichtbarkeit (Verwaltung-Karte im Konto). Nur Anzeige —
@@ -82,7 +95,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ? await resolveOrtsteilCodeForRegionId(db, tenant.id, user.homeRegionId)
     : null;
 
-  return NextResponse.json({
+  return noStore(NextResponse.json({
     user: {
       id: user.id,
       email: user.email,
@@ -129,7 +142,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // erfüllen die Schritte nie (RegionEinstieg-Gate-B-Lehre).
       istDemo,
     },
-  });
+  }));
 }
 
 function getEffectiveHost(request: NextRequest): string {

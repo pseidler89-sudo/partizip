@@ -57,6 +57,28 @@ export const QR_VERIFICATION_MONTHS = 24;
 export type ResidencyMethod = "qr" | "in_person" | "qr_konto" | "remote_admin_override";
 
 /**
+ * Ziel-Konto der Stufe-2-Vergabe existiert nicht (mehr) ODER ist nicht `active`
+ * (locked/deleted). Wird von grantResidency geworfen, wenn das bedingte UPDATE
+ * (…AND account_status='active') 0 Zeilen trifft. Da grantResidency IMMER in der
+ * Transaktion des jeweiligen Einlöse-/Bestätigungs-Schritts läuft, rollt der
+ * Throw diese Transaktion atomar zurück (Proof/Booking/Redemption bleibt
+ * UNKONSUMIERT — fail-closed). Die Aufrufer (qrEinloesenCore /
+ * bookingWahrnehmenCore / verifizierungPerProofBestaetigenCore) fangen den Marker
+ * und mappen ihn auf eine NEUTRALE „Konto nicht verifizierbar"-Meldung — bewusst
+ * generisch, KEIN Existenz-/Status-Orakel über fremde Konten (Muster QrCapError).
+ */
+export class ResidencyTargetInactiveError extends Error {
+  constructor() {
+    super("residency-target-inactive");
+    this.name = "ResidencyTargetInactiveError";
+  }
+}
+
+/** Neutrale Nutzer-Meldung für ResidencyTargetInactiveError (kein Konten-Orakel). */
+export const RESIDENCY_TARGET_INACTIVE_MESSAGE =
+  "Dieses Konto kann derzeit nicht verifiziert werden.";
+
+/**
  * grantResidency — DER gemeinsame Stufe-2-Übergang (Privileg-Erhöhung), genutzt
  * von der QR-Einlösung UND der Termin-Bestätigung vor Ort. EINMAL definiert, damit
  * beide Wege identisch (und konservativ) verifizieren.
@@ -68,6 +90,11 @@ export type ResidencyMethod = "qr" | "in_person" | "qr_konto" | "remote_admin_ov
  *
  * SICHERHEIT (nicht verhandelbar):
  *   - Tenant-scoped: WHERE id=userId AND tenant_id=tenantId (kein Cross-Tenant-Grant).
+ *   - NUR aktive Konten: WHERE …AND account_status='active'. Ein zwischen Proof-/
+ *     QR-Erzeugung und -Konsum gesperrtes/gelöschtes Ziel-Konto darf KEINEN
+ *     frischen 24-Monats-Anker erhalten (sonst wäre es nach späterer Entsperrung
+ *     sofort wieder Stufe 2 ohne Neu-Verifizierung). 0 getroffene Zeilen ⇒
+ *     ResidencyTargetInactiveError ⇒ Rollback der Aufrufer-Transaktion (fail-closed).
  *   - MUSS in der Transaktion des jeweiligen atomaren Einlöse-/Bestätigungs-Schritts
  *     laufen (Aufrufer übergibt tx) — kein eigenständiger Endpoint.
  *   - Kein Selbst-Hochstufen: Aufrufer haben den Token (QR) bzw. canVerify (Termin)
@@ -89,7 +116,7 @@ export async function grantResidency(
   // harte Anker) bildet dagegen exakt ab, was verifiziert wurde — auch grob.
   const homeGeeignet =
     opts?.regionTyp === "gemeinde" || opts?.regionTyp === "ortsteil";
-  await tx
+  const granted = await tx
     .update(users)
     .set({
       verificationStatus: "verified",
@@ -113,7 +140,18 @@ export async function grantResidency(
           }
         : {}),
     })
-    .where(and(eq(users.id, userId), eq(users.tenantId, tenantId)));
+    // Nur AKTIVE Ziel-Konten: ein gesperrtes/gelöschtes Konto erhält keinen Stempel.
+    .where(
+      and(
+        eq(users.id, userId),
+        eq(users.tenantId, tenantId),
+        eq(users.accountStatus, "active"),
+      ),
+    )
+    .returning({ id: users.id });
+  // 0 Zeilen ⇒ Ziel existiert nicht (mehr) oder ist nicht aktiv ⇒ fail-closed:
+  // Throw bricht die Aufrufer-Transaktion ab (kein Proof/Booking wird konsumiert).
+  if (granted.length === 0) throw new ResidencyTargetInactiveError();
   return verifiedUntil;
 }
 
@@ -486,6 +524,11 @@ export async function qrEinloesenCore(
   } catch (err) {
     if (err instanceof QrCapError) {
       return { ok: false, error: "Dieser Code ist aufgebraucht oder abgelaufen." };
+    }
+    // Ziel-Konto zwischen Erzeugung und Einlösung gesperrt/gelöscht → neutrale
+    // Meldung; die Redemption ist bereits atomar zurückgerollt (kein Cap-Verbrauch).
+    if (err instanceof ResidencyTargetInactiveError) {
+      return { ok: false, error: RESIDENCY_TARGET_INACTIVE_MESSAGE };
     }
     throw err;
   }

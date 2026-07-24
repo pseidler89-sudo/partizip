@@ -320,6 +320,39 @@ describe("verification/qr (Integration)", () => {
     expect(reds.length).toBe(1);
   });
 
+  // --- Gesperrtes Ziel-Konto (WP1/B1) --------------------------------------
+  it.skipIf(SKIP)("End-to-End (QR): Ziel-Konto gesperrt → Einlösung schlägt fehl, KEINE Redemption, Cap unverändert", async () => {
+    const u = await makeUser(tenantId);
+    const r = await qrErstellenCore(db as never, tenantId, verifierId, {
+      scopeLevel: "stadt",
+      maxRedemptions: 5,
+      gueltigkeitStunden: 24,
+    }, ADMIN);
+
+    // Konto zwischen Erzeugung und Einlösung sperren.
+    await db.update(users).set({ accountStatus: "locked" }).where(eq(users.id, u.id));
+
+    const res = await qrEinloesenCore(db as never, tenantId, u.id, r.rawToken);
+    // Neutrale Meldung (kein Konten-Status-Orakel) statt 500.
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/nicht.*verifiziert werden/i);
+
+    // Atomarität: KEINE Redemption-Zeile, Cap NICHT hochgezählt (Tx zurückgerollt).
+    const reds = await db
+      .select()
+      .from(qrRedemptions)
+      .where(and(eq(qrRedemptions.qrCodeId, r.qrId), eq(qrRedemptions.userId, u.id)));
+    expect(reds.length).toBe(0);
+    const [qr] = await db.select().from(qrCodes).where(eq(qrCodes.id, r.qrId));
+    expect(qr.redemptionCount).toBe(0);
+
+    // Kein Stempel auf dem gesperrten Konto (Stufe 2 nie vergeben; gesperrt = Stufe 0).
+    const [after] = await db.select().from(users).where(eq(users.id, u.id));
+    expect(after.verificationStatus).toBe("pending");
+    expect(after.residencyVerifiedAt).toBeNull();
+    expect(getStufe(after)).not.toBe(2);
+  });
+
   // --- Tenant-Isolation ----------------------------------------------------
   it.skipIf(SKIP)("Tenant-Isolation: Fremd-Tenant findet den Token nicht", async () => {
     const r = await qrErstellenCore(db as never, tenantId, verifierId, {

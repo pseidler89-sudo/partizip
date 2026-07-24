@@ -26,7 +26,11 @@ import {
   regions,
   auditEvents,
 } from "@/db/schema";
-import { grantResidency } from "@/lib/verification/qr-core";
+import {
+  grantResidency,
+  ResidencyTargetInactiveError,
+  RESIDENCY_TARGET_INACTIVE_MESSAGE,
+} from "@/lib/verification/qr-core";
 import { generateReadableCode, readableCodePattern } from "@/lib/readable-code";
 import {
   istPgFehler,
@@ -340,68 +344,77 @@ export async function bookingWahrnehmenCore(
   verifierUserId: string,
   bookingId: string,
 ): Promise<BookingWahrnehmenResult> {
-  return db.transaction(async (tx: Db) => {
-    const done = await tx
-      .update(verificationBookings)
-      .set({ status: "wahrgenommen" })
-      .where(
-        and(
-          eq(verificationBookings.id, bookingId),
-          eq(verificationBookings.tenantId, tenantId),
-          eq(verificationBookings.status, "gebucht"),
-          // Nur kürzlich fällige Termine bestätigbar (Vor-Ort + verspätetes
-          // Erscheinen am selben Tag) — ein wochenalter No-Show ist nicht mehr
-          // „wahrnehmbar"; die Person bucht neu. Deckungsgleich mit der Verifier-Liste.
-          // Tenant-scoped (Defense-in-Depth) über den Location-Join.
-          sql`${verificationBookings.slotId} IN (SELECT s.id FROM verification_slots s JOIN verification_locations l ON l.id = s.location_id WHERE l.tenant_id = ${tenantId} AND s.starts_at > now() - interval '1 day')`,
-        ),
-      )
-      .returning({
-        userId: verificationBookings.userId,
-        slotId: verificationBookings.slotId,
+  try {
+    return await db.transaction(async (tx: Db) => {
+      const done = await tx
+        .update(verificationBookings)
+        .set({ status: "wahrgenommen" })
+        .where(
+          and(
+            eq(verificationBookings.id, bookingId),
+            eq(verificationBookings.tenantId, tenantId),
+            eq(verificationBookings.status, "gebucht"),
+            // Nur kürzlich fällige Termine bestätigbar (Vor-Ort + verspätetes
+            // Erscheinen am selben Tag) — ein wochenalter No-Show ist nicht mehr
+            // „wahrnehmbar"; die Person bucht neu. Deckungsgleich mit der Verifier-Liste.
+            // Tenant-scoped (Defense-in-Depth) über den Location-Join.
+            sql`${verificationBookings.slotId} IN (SELECT s.id FROM verification_slots s JOIN verification_locations l ON l.id = s.location_id WHERE l.tenant_id = ${tenantId} AND s.starts_at > now() - interval '1 day')`,
+          ),
+        )
+        .returning({
+          userId: verificationBookings.userId,
+          slotId: verificationBookings.slotId,
+        });
+
+      if (done.length === 0) {
+        return { ok: false, error: "Termin nicht gefunden oder nicht (mehr) offen." };
+      }
+
+      // Verifizierter Wohnsitz-Knoten = Region des Verifizierungs-Standorts (Audit M3).
+      // location.region_id ist nullable → dann kein Anker (regionId bleibt undefined).
+      // regionTyp mitladen, damit grantResidency den weichen Wohnort nur an feine
+      // Knoten (Gemeinde/Ortsteil) koppelt.
+      const locRegion = await tx
+        .select({ regionId: verificationLocations.regionId, regionTyp: regions.typ })
+        .from(verificationSlots)
+        .innerJoin(
+          verificationLocations,
+          eq(verificationLocations.id, verificationSlots.locationId),
+        )
+        .leftJoin(regions, eq(regions.id, verificationLocations.regionId))
+        .where(eq(verificationSlots.id, done[0].slotId))
+        .limit(1);
+
+      // Stufe-2 vergeben über den gemeinsamen, tenant-scoped Grant (wie QR-Einlösung).
+      const verifiedUntil = await grantResidency(
+        tx,
+        tenantId,
+        done[0].userId,
+        "in_person",
+        {
+          regionId: locRegion[0]?.regionId ?? null,
+          regionTyp: locRegion[0]?.regionTyp ?? null,
+        },
+      );
+
+      await tx.insert(auditEvents).values({
+        tenantId,
+        actorType: "user",
+        actorRef: verifierUserId, // der bestätigende Verifier (UUID, PII-frei)
+        action: "verification.booking_fulfilled",
+        targetType: "verification_booking",
+        targetId: bookingId,
+        metadata: { bookingId },
       });
 
-    if (done.length === 0) {
-      return { ok: false, error: "Termin nicht gefunden oder nicht (mehr) offen." };
-    }
-
-    // Verifizierter Wohnsitz-Knoten = Region des Verifizierungs-Standorts (Audit M3).
-    // location.region_id ist nullable → dann kein Anker (regionId bleibt undefined).
-    // regionTyp mitladen, damit grantResidency den weichen Wohnort nur an feine
-    // Knoten (Gemeinde/Ortsteil) koppelt.
-    const locRegion = await tx
-      .select({ regionId: verificationLocations.regionId, regionTyp: regions.typ })
-      .from(verificationSlots)
-      .innerJoin(
-        verificationLocations,
-        eq(verificationLocations.id, verificationSlots.locationId),
-      )
-      .leftJoin(regions, eq(regions.id, verificationLocations.regionId))
-      .where(eq(verificationSlots.id, done[0].slotId))
-      .limit(1);
-
-    // Stufe-2 vergeben über den gemeinsamen, tenant-scoped Grant (wie QR-Einlösung).
-    const verifiedUntil = await grantResidency(
-      tx,
-      tenantId,
-      done[0].userId,
-      "in_person",
-      {
-        regionId: locRegion[0]?.regionId ?? null,
-        regionTyp: locRegion[0]?.regionTyp ?? null,
-      },
-    );
-
-    await tx.insert(auditEvents).values({
-      tenantId,
-      actorType: "user",
-      actorRef: verifierUserId, // der bestätigende Verifier (UUID, PII-frei)
-      action: "verification.booking_fulfilled",
-      targetType: "verification_booking",
-      targetId: bookingId,
-      metadata: { bookingId },
+      return { ok: true, verifiedUntil };
     });
-
-    return { ok: true, verifiedUntil };
-  });
+  } catch (err) {
+    // Ziel-Konto zwischen Buchung und Bestätigung gesperrt/gelöscht → neutrale
+    // Meldung; der Termin bleibt atomar unverändert (nicht als wahrgenommen markiert).
+    if (err instanceof ResidencyTargetInactiveError) {
+      return { ok: false, error: RESIDENCY_TARGET_INACTIVE_MESSAGE };
+    }
+    throw err;
+  }
 }

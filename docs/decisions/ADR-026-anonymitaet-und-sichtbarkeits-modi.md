@@ -48,6 +48,39 @@ anonym ist und warum**, von dem, **was optional offener sein darf**.
 - „X Stimmen, davon Y verifiziert" macht Datenqualität transparent, ohne die
   k-Anonymität zu berühren — Y ist eine Zahl, kein Namensverzeichnis.
 
+## Bekanntes Restrisiko: `voter_ref`
+
+Ehrlichkeit gehört zur Vertrauensgrundlage: Unser Wahlgeheimnis ist **stark, aber
+nicht mathematisch perfekt**. Eine Stimme wird nicht anonym gespeichert, sondern
+unter einem Pseudonym `voter_ref` = HMAC-SHA256(SALT, „vote:user:" + userId) —
+salt-geschützt, deterministisch (für Dedup via UNIQUE), PII-frei im Audit. Die
+**gewählte Option (`choice`) erscheint nie im Audit**, und Ergebnisse werden erst
+nach serverseitiger **k-Anonymität** freigegeben.
+
+Das Restrisiko: Ein **DB-Insider mit gleichzeitigem Zugriff auf den Salt**
+(`VOTE_REF_SALT`, ersatzweise `ANLIEGEN_REF_SALT`) könnte `voter_ref` für eine
+bekannte `userId` selbst nachrechnen und so pseudonyme Zeilen einer Person
+zuordnen — **solange der Salt geheim bleibt, ist das ausgeschlossen**.
+
+**Mitigation (mehrschichtig):**
+
+- **Salt getrennt vom DB-Zugriff** halten (nicht in derselben Vertrauenszone wie
+  die Datenbank; kein Salt in DB-Backups). Wer die DB liest, hat damit noch nicht
+  den Salt.
+- **`choice` nie im Audit** — selbst bei Deanonymisierung des Pseudonyms ist das
+  konkrete Stimmverhalten nicht aus dem Audit-Log rekonstruierbar.
+- **k-Anonymität serverseitig** vor jeder Ergebnisanzeige (kein Klein-n-Leak).
+- Salt-**Rotation** deanonymisiert bestehende Stimmen nicht rückwirkend, bricht
+  aber die Dedup-Kette — daher NIE auf einem Deployment mit bestehenden Stimmen
+  nachträglich ändern (siehe `voter-ref.ts`).
+
+**Bewusst akzeptiertes Restrisiko im Pilot.** Ein mathematisch perfektes,
+insider-sicheres Wahlgeheimnis (z. B. rein anonyme Erfassung ohne jede Person-↔-
+Wahl-Verknüpfung) würde Dedup/Doppelabgabe-Schutz und die verifizierte
+Ergebnis-Qualität erschweren. Für den Pilot ist die salt-getrennte HMAC-Lösung der
+tragbare Kompromiss — nicht in Stein: bewährt sich ein stärkeres Verfahren, wird es
+übernommen, solange das Wahlgeheimnis nicht schwächer wird.
+
 ## Konsequenzen
 
 - **Datenmodell/UI:** Beiträge (ADR-010) erhalten einen Sichtbarkeits-Modus
