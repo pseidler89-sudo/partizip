@@ -63,6 +63,11 @@ export default function QrScanner({ tenantSlug }: { tenantSlug: string }) {
   // Aktiv-Flag: verhindert Doppel-Handling nach dem ersten Treffer und stoppt die
   // rAF-Schleife. Als Ref, damit Callbacks es ohne Neu-Binden lesen können.
   const aktivRef = useRef(false);
+  // In-Flight-Sperre: wird SYNCHRON gesetzt, sobald ein starteKamera-Lauf beginnt,
+  // und erst freigegeben, wenn getUserMedia aufgelöst ist (Erfolg/Fehler/Unmount).
+  // Schließt das Re-Entrancy-Fenster VOR dem ersten await, in dem aktivRef/streamRef
+  // noch nicht gesetzt sind (siehe starteKamera-Kopf).
+  const startendRef = useRef(false);
   // Mounted-Flag: schützt gegen den Unmount-während-Kamera-Start-Race — wird die
   // Seite verlassen, WÄHREND getUserMedia/import/decodeFromStream noch laufen,
   // darf der danach erlangte Stream nicht ungestoppt bleiben (Kamera-Licht!).
@@ -77,6 +82,8 @@ export default function QrScanner({ tenantSlug }: { tenantSlug: string }) {
   // --- Kamera-Lifecycle: ALLES stoppen (kein weiterlaufendes Kamera-Licht) ----
   const stoppeKamera = useCallback(() => {
     aktivRef.current = false;
+    // Robustheit: In-Flight-Sperre freigeben (nach erfolgreichem Start schon false).
+    startendRef.current = false;
     if (pollRef.current !== null) {
       clearInterval(pollRef.current);
       pollRef.current = null;
@@ -158,17 +165,24 @@ export default function QrScanner({ tenantSlug }: { tenantSlug: string }) {
     // Re-Entrancy-Sperre (O2-a): Auto-Start (permissions.query) + Nutzer-Klick oder
     // ein schneller Doppelklick dürfen getUserMedia NICHT parallel starten — sonst
     // überschreibt der zweite Stream streamRef.current und der erste Track läuft
-    // ungestoppt weiter (Kamera-Leuchte bleibt an). Idempotenter No-Op, solange ein
-    // Start läuft/aktiv ist; stoppeKamera setzt beide Refs zurück (regulärer Neustart ok).
-    if (aktivRef.current || streamRef.current) return;
+    // ungestoppt weiter (Kamera-Leuchte bleibt an). Der Guard prüft ZUSÄTZLICH
+    // startendRef, das SYNCHRON (vor jedem await) gesetzt wird — damit ist auch das
+    // Fenster geschlossen, in dem aktivRef/streamRef nach dem ersten await noch nicht
+    // gesetzt sind. Sobald getUserMedia aufgelöst ist, greift der Guard über
+    // aktivRef/streamRef (Dauer-Sperre bis stoppeKamera); startendRef ist nur die
+    // kurzlebige In-Flight-Sperre und wird via finally IMMER freigegeben.
+    // stoppeKamera setzt alle drei Refs zurück (regulärer Neustart bleibt möglich).
+    if (aktivRef.current || streamRef.current || startendRef.current) return;
+    startendRef.current = true;
     setFehler(null);
     if (!navigator.mediaDevices?.getUserMedia) {
+      startendRef.current = false;
       setFehler(
         "Ihr Browser unterstützt keinen Kamerazugriff. Bitte geben Sie den Code unten manuell ein.",
       );
       return;
     }
-    let stream: MediaStream;
+    let stream: MediaStream | null = null;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
@@ -177,8 +191,13 @@ export default function QrScanner({ tenantSlug }: { tenantSlug: string }) {
       setFehler(
         "Kein Kamerazugriff möglich. Bitte erlauben Sie die Kamera oder geben Sie den Code unten manuell ein.",
       );
-      return;
+    } finally {
+      // In-Flight-Sperre IMMER freigeben — egal ob getUserMedia Erfolg, Fehler oder
+      // (nach dem await) Unmount folgt. Ab hier hält bei Erfolg streamRef/aktivRef den
+      // Guard; die Übergabe passiert synchron (kein await), also lückenlos.
+      startendRef.current = false;
     }
+    if (!stream) return;
     // Race-Guard: Seite während getUserMedia verlassen → Stream sofort stoppen.
     if (!montiertRef.current) {
       stream.getTracks().forEach((t) => t.stop());

@@ -295,6 +295,53 @@ describe("Termin-Buchung (Integration)", () => {
     expect(wC.ok).toBe(false);
   });
 
+  it.skipIf(SKIP)("End-to-End (Booking): Ziel-Konto nach Buchung gesperrt → Wahrnehmen schlägt fehl, Buchung bleibt 'gebucht'", async () => {
+    // Frischer Bürger + frischer Slot, damit die Buchung sicher offen ist.
+    const [nu] = await db
+      .insert(users)
+      .values({
+        tenantId,
+        email: `locked-${Date.now()}@bk-test.de`,
+        minAgeConfirmedAt: new Date(),
+        verificationStatus: "pending",
+      })
+      .returning();
+    const slot = await mkSlot(locId, 1, Date.now() + 10 * DAY);
+    const r = await bookSlotCore(db, tenantId, nu.id, slot.id);
+    expect(r.ok).toBe(true);
+    const bookingId = r.booking!.bookingId;
+
+    // Slot in den bestätigbaren Fensterbereich ziehen (kürzlich fällig), damit der
+    // Fehlschlag NICHT am 1-Tag-Guard, sondern am gesperrten Ziel-Konto liegt.
+    await db
+      .update(verificationSlots)
+      .set({
+        startsAt: new Date(Date.now() - 60 * 60 * 1000),
+        endsAt: new Date(Date.now() - 30 * 60 * 1000),
+      })
+      .where(eq(verificationSlots.id, slot.id));
+
+    // Konto zwischen Buchung und Wahrnehmung sperren.
+    await db.update(users).set({ accountStatus: "locked" }).where(eq(users.id, nu.id));
+
+    const w = await bookingWahrnehmenCore(db, tenantId, verifier, bookingId);
+    // Neutrale Meldung (kein Konten-Status-Orakel), kein 500.
+    expect(w.ok).toBe(false);
+    expect(w.error).toMatch(/nicht.*verifiziert werden/i);
+
+    // Atomarität: Buchung UNVERÄNDERT 'gebucht' (kein Konsum, kein Teil-Effekt).
+    const [booking] = await db
+      .select()
+      .from(verificationBookings)
+      .where(eq(verificationBookings.id, bookingId));
+    expect(booking.status).toBe("gebucht");
+
+    // Kein Stempel auf dem gesperrten Konto.
+    const [user] = await db.select().from(users).where(eq(users.id, nu.id));
+    expect(user.verificationStatus).toBe("pending");
+    expect(user.residencyVerifiedUntil).toBeNull();
+  });
+
   it.skipIf(SKIP)("getStandorteMitFreienSlots: nur aktive Standorte + freie Zukunfts-Slots", async () => {
     const standorte = await getStandorteMitFreienSlots(db, tenantId);
     // Inaktiver Standort darf nicht auftauchen.
