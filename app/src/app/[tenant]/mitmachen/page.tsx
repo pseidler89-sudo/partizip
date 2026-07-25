@@ -19,6 +19,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { demoTenantSlug, isDemoTenant } from "@/lib/demo/config";
+import { TERMIN_URL } from "@/lib/kontakt";
 import { KOMMUNEN_FAQ } from "../kommunen-faq-daten";
 import MitmachenFormular from "./MitmachenFormular";
 
@@ -32,8 +33,6 @@ export const metadata: Metadata = {
 const DEMO_URL = "https://demo.partizip.online";
 /** Verwaltungs-Perspektive der Demo (Block I) — Slug aus DEMO_TENANT_SLUG (SSOT). */
 const DEMO_VERWALTUNG_URL = `${DEMO_URL}/${demoTenantSlug() ?? "demo"}/demo-verwaltung`;
-/** Terminbuchung (Tymeslot, live). Immer machbar, keine Config nötig. */
-const TERMIN_URL = "https://termine.partizip.online/seidler";
 
 function StufenKopf({ n, titel, unter }: { n: string; titel: string; unter: string }) {
   return (

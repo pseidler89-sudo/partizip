@@ -9,6 +9,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { demoTenantSlug, isDemoTenant } from "@/lib/demo/config";
+import { KONTAKT_EMAIL, TERMIN_URL } from "@/lib/kontakt";
 
 export const metadata: Metadata = {
   title: "Für Kommunen & Vereine — Partizip",
@@ -16,8 +17,14 @@ export const metadata: Metadata = {
     "Bürgernahe Umfragen für Kommunen, Kreise und Vereine — datensparsam, überparteilich, barrierefrei, gehostet in Deutschland.",
 };
 
-const DEMO_MAILTO =
-  "mailto:kontakt@partizip.online?subject=Partizip%20%E2%80%93%20Demo%20f%C3%BCr%20unsere%20Kommune";
+/**
+ * E-Mail-Fallback zur Terminbuchung (Adresse aus lib/kontakt, SSOT). Primärer
+ * Weg für persönliche Demos ist TERMIN_URL — eine Buchung erzeugt über den
+ * Tymeslot-Webhook automatisch einen Lead; mailto bleibt als dezenter Textlink.
+ */
+const DEMO_MAILTO = `mailto:${KONTAKT_EMAIL}?subject=${encodeURIComponent(
+  "Partizip – Demo für unsere Kommune",
+)}`;
 
 /** Öffentliche Selbstbedienungs-Demo (Musterstadt-Spielwiese, nächtlicher Reset). */
 const DEMO_URL = "https://demo.partizip.online";
@@ -121,16 +128,24 @@ export default async function FuerKommunenPage({
               </a>
             )}
             <a
-              href={DEMO_MAILTO}
+              href={TERMIN_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="pz-btn pz-btn-secondary pz-btn-lg min-h-[48px]"
             >
-              Persönliche Demo anfragen
+              Demo-Termin buchen
             </a>
           </div>
           <p className="mx-auto mt-3 max-w-xl text-sm" style={{ color: "var(--pz-body)" }}>
             {inDemo
               ? "Sie sind bereits in der Demo-Spielwiese — probieren Sie alles gefahrlos aus, jede Nacht wird zurückgesetzt."
               : "Die Demo-Spielwiese \u201eMusterstadt\u201c ist fiktiv, ohne Anmeldung nutzbar und wird jede Nacht zurückgesetzt — probieren Sie alles gefahrlos aus."}
+          </p>
+          <p className="mx-auto mt-2 max-w-xl text-sm" style={{ color: "var(--pz-body)" }}>
+            Sie buchen lieber nicht? Schreiben Sie uns per E-Mail:{" "}
+            <a href={DEMO_MAILTO} className="font-medium underline underline-offset-4">
+              {KONTAKT_EMAIL}
+            </a>
           </p>
         </div>
       </section>
@@ -199,10 +214,12 @@ export default async function FuerKommunenPage({
               </a>
             )}
             <a
-              href={DEMO_MAILTO}
+              href={TERMIN_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex min-h-[48px] items-center rounded-lg px-6 py-3 text-sm font-semibold text-white underline-offset-4 hover:underline"
             >
-              Persönliche Demo anfragen
+              Demo-Termin buchen
             </a>
             <Link
               href={`/${slug}`}
@@ -211,7 +228,12 @@ export default async function FuerKommunenPage({
               Plattform live ansehen →
             </Link>
           </div>
-          <p className="mt-4 text-sm text-white/80">Oder direkt schreiben: kontakt@partizip.online</p>
+          <p className="mt-4 text-sm text-white/80">
+            Oder per E-Mail:{" "}
+            <a href={DEMO_MAILTO} className="font-medium text-white underline underline-offset-4">
+              {KONTAKT_EMAIL}
+            </a>
+          </p>
         </section>
       </div>
     </main>
