@@ -12,6 +12,12 @@
  *     (Stufe 1 mit OFFENEM Termin für den Verifier-Flow).
  *   - 3 Demo-Umfragen: offenes Stimmungsbild (aktiv), verbindliche Abstimmung
  *     (aktiv), GESCHLOSSENE Frage mit veröffentlichter Beleg-Liste (Stimmen+Belege).
+ *   - 2 FORMAT-Fragen (P1 „Demo-Alleinstellung", ADR-025): Dot-Voting (aktiv,
+ *     Punktebudget) + Widerstandsabfrage (geschlossen → Konsens-Ergebnis rendert
+ *     sofort), beide mit kuratierter Seed-Teilnahme DEUTLICH über der k-Schwelle
+ *     (Daten: src/lib/demo/seed-formate.ts). IDs im musterstadt-Namensraum
+ *     (src/lib/demo/seed-ids.ts) → nächtlicher demo-reset schützt sie, der
+ *     Beispiel-Badge im Admin greift.
  *   - 1 Demo-Standort mit buchbarem Zukunfts-Slot + 1 heute fälligem Slot, auf dem
  *     die Termin-Persona einen offenen Termin (status 'gebucht') hat.
  *
@@ -32,7 +38,10 @@ import {
   users,
   roles,
   polls,
+  pollOptions,
   votes,
+  voteAllocations,
+  voteResistances,
   voteReceipts,
   verificationLocations,
   verificationSlots,
@@ -42,6 +51,18 @@ import {
 import { generateReadableCode } from "../src/lib/readable-code.js";
 import { normalizeEmail } from "../src/lib/auth/email.js";
 import { SEED_NAMESPACE, uuidV5, resolveRegionId } from "./seed-utils.js";
+import { musterstadtSeedId } from "../src/lib/demo/seed-ids.js";
+import {
+  DEMO_DOT_FRAGE,
+  DEMO_DOT_BUDGET,
+  DEMO_DOT_OPTIONEN,
+  DEMO_DOT_VERTEILUNGEN,
+  DEMO_WIDERSTAND_FRAGE,
+  DEMO_WIDERSTAND_OPTIONEN,
+  DEMO_WIDERSTAND_WERTE,
+  demoDotVoterRef,
+  demoWiderstandVoterRef,
+} from "../src/lib/demo/seed-formate.js";
 
 const databaseUrl =
   process.env.DATABASE_URL ??
@@ -97,6 +118,23 @@ async function main() {
   // ADR-024 contract: alle Demo-Rollen/-Umfragen sind stadtweit (Gemeinde-Knoten).
   // Scope-Eingabe → region_id (der Dual-Write-Trigger ist im contract entfernt).
   const stadtRegionId = await resolveRegionId(db, tenantId, "stadt", null);
+
+  /**
+   * EIN Beleg (echter CSPRNG-Code, gemeinsamer Generator) für eine Umfrage —
+   * mit Kollisions-Retry auf den (poll_id, code)-Unique. Invariante überall:
+   * genau ein Beleg je Stimme/Teilnehmer:in.
+   */
+  async function belegAnlegen(pollId: string): Promise<void> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const res = await db
+        .insert(voteReceipts)
+        .values({ pollId, tenantId, code: generateReadableCode("BELEG") })
+        .onConflictDoNothing({ target: [voteReceipts.pollId, voteReceipts.code] })
+        .returning({ id: voteReceipts.id });
+      if (res.length > 0) return;
+    }
+    throw new Error("Beleg-Code konnte nicht kollisionsfrei erzeugt werden.");
+  }
 
   // ----- 1. Personas -------------------------------------------------------
   const userIdByKey = new Map<string, string>();
@@ -243,6 +281,147 @@ async function main() {
     .onConflictDoNothing({ target: polls.id });
   console.log("  polls: offen (aktiv), verbindlich (aktiv), geschlossen");
 
+  // ----- 2b. FORMAT-Fragen (P1 „Demo-Alleinstellung", ADR-025) --------------
+  // IDs BEWUSST im musterstadt-Namensraum (musterstadtSeedId): nur so kennt sie
+  // src/lib/demo/seed-ids.ts → der nächtliche demo-reset schützt sie (NOT-IN),
+  // die Admin-Liste zeigt den Beispiel-Badge, die Demo-Admin-Guards greifen.
+  // createdAt BEWUSST älter als die Musterstadt-Seed-Fragen (−1d/−2d): das
+  // direkt tappbare ja/nein-Stimmungsbild bleibt der Startseiten-Hero.
+  // onConflictDoUpdate frischt Text + Zeitfenster bei jedem Lauf auf
+  // (repeatable Demo: das Dot-Voting ist nach einem Re-Seed wieder offen).
+  const dotId = musterstadtSeedId(TENANT_SLUG, "poll:dot");
+  const widerstandId = musterstadtSeedId(TENANT_SLUG, "poll:widerstand");
+
+  const dotFelder = {
+    frage: DEMO_DOT_FRAGE,
+    status: "aktiv" as const,
+    punkteBudget: DEMO_DOT_BUDGET,
+    opensAt: addDays(now, -3),
+    closesAt: addDays(now, 14),
+    createdAt: addDays(now, -3),
+  };
+  await db
+    .insert(polls)
+    .values({
+      id: dotId,
+      tenantId,
+      regionId: stadtRegionId,
+      typ: "dot_voting",
+      verbindlich: false,
+      erstelltVon: adminId,
+      ...dotFelder,
+    })
+    .onConflictDoUpdate({ target: polls.id, set: dotFelder });
+
+  // Widerstandsabfrage GESCHLOSSEN geseedet: ADR-022/025 halten die
+  // Aufschlüsselung laufender Fragen zurück — erst die geschlossene Frage zeigt
+  // den Kern-Moment des Formats („geringster Widerstand gewinnt") sofort.
+  const widerstandFelder = {
+    frage: DEMO_WIDERSTAND_FRAGE,
+    status: "geschlossen" as const,
+    opensAt: addDays(now, -21),
+    closesAt: addDays(now, -2),
+    createdAt: addDays(now, -21),
+  };
+  await db
+    .insert(polls)
+    .values({
+      id: widerstandId,
+      tenantId,
+      regionId: stadtRegionId,
+      typ: "widerstandsabfrage",
+      verbindlich: false,
+      erstelltVon: adminId,
+      ...widerstandFelder,
+    })
+    .onConflictDoUpdate({ target: polls.id, set: widerstandFelder });
+
+  // Optionen beider Format-Fragen — deterministische IDs (Idempotenz über den
+  // id-Konflikt; Position ist fix, nur das Label wird bei Re-Seed aufgefrischt).
+  const dotOptionIds: string[] = [];
+  for (let i = 0; i < DEMO_DOT_OPTIONEN.length; i++) {
+    const optionId = musterstadtSeedId(TENANT_SLUG, `poll:dot:opt:${i}`);
+    dotOptionIds.push(optionId);
+    await db
+      .insert(pollOptions)
+      .values({ id: optionId, pollId: dotId, tenantId, label: DEMO_DOT_OPTIONEN[i], position: i })
+      .onConflictDoUpdate({ target: pollOptions.id, set: { label: DEMO_DOT_OPTIONEN[i] } });
+  }
+  const widerstandOptionIds: string[] = [];
+  for (let i = 0; i < DEMO_WIDERSTAND_OPTIONEN.length; i++) {
+    const optionId = musterstadtSeedId(TENANT_SLUG, `poll:widerstand:opt:${i}`);
+    widerstandOptionIds.push(optionId);
+    await db
+      .insert(pollOptions)
+      .values({ id: optionId, pollId: widerstandId, tenantId, label: DEMO_WIDERSTAND_OPTIONEN[i], position: i })
+      .onConflictDoUpdate({ target: pollOptions.id, set: { label: DEMO_WIDERSTAND_OPTIONEN[i] } });
+  }
+  console.log(
+    `  format-polls: dot_voting (aktiv, Budget ${DEMO_DOT_BUDGET}, ${DEMO_DOT_OPTIONEN.length} Optionen) · ` +
+      `widerstandsabfrage (geschlossen, ${DEMO_WIDERSTAND_OPTIONEN.length} Optionen)`,
+  );
+
+  // ----- 2c. Kuratierte Seed-Teilnahme der Format-Fragen --------------------
+  // Idempotenz wie bei den ja/nein-Seed-Stimmen: feste Demo-voter_refs +
+  // „nur einfügen, wenn noch keine Abgaben da sind". Teilnehmerzahlen liegen
+  // DEUTLICH über K_ANONYMITY_SCHWELLE, jede Dot-Option wird von ≥ k Wählern
+  // bedacht (keine per-Option-Maskierung); je Wähler EIN Beleg (Invariante).
+  const dotAbgaben = await db
+    .select({ id: voteAllocations.id })
+    .from(voteAllocations)
+    .where(and(eq(voteAllocations.pollId, dotId), eq(voteAllocations.tenantId, tenantId)))
+    .limit(1);
+  if (dotAbgaben.length === 0) {
+    for (let i = 0; i < DEMO_DOT_VERTEILUNGEN.length; i++) {
+      const voterRef = demoDotVoterRef(i);
+      const warVerifiziert = i % 2 === 0;
+      // Nur punkte > 0 speichern (CHECK vote_allocations_punkte_positiv).
+      const zeilen = DEMO_DOT_VERTEILUNGEN[i]
+        .map((punkte, position) => ({
+          pollId: dotId,
+          tenantId,
+          optionId: dotOptionIds[position],
+          voterRef,
+          punkte,
+          warVerifiziert,
+        }))
+        .filter((z) => z.punkte > 0);
+      await db.insert(voteAllocations).values(zeilen);
+      await belegAnlegen(dotId);
+    }
+    console.log(`  dot-teilnahme: ${DEMO_DOT_VERTEILUNGEN.length} Wähler:innen + Belege`);
+  } else {
+    console.log("  dot-teilnahme: bereits vorhanden — unverändert");
+  }
+
+  const widerstandAbgaben = await db
+    .select({ id: voteResistances.id })
+    .from(voteResistances)
+    .where(and(eq(voteResistances.pollId, widerstandId), eq(voteResistances.tenantId, tenantId)))
+    .limit(1);
+  if (widerstandAbgaben.length === 0) {
+    for (let i = 0; i < DEMO_WIDERSTAND_WERTE.length; i++) {
+      const voterRef = demoWiderstandVoterRef(i);
+      const warVerifiziert = i % 2 === 0;
+      // VOLLSTÄNDIGE Abgabe: JEDE Option bekommt eine Zeile — 0-Werte („keine
+      // Einwände") werden MIT gespeichert (Invariante, ADR-025 / Block G).
+      await db.insert(voteResistances).values(
+        DEMO_WIDERSTAND_WERTE[i].map((wert, position) => ({
+          pollId: widerstandId,
+          tenantId,
+          optionId: widerstandOptionIds[position],
+          voterRef,
+          wert,
+          warVerifiziert,
+        })),
+      );
+      await belegAnlegen(widerstandId);
+    }
+    console.log(`  widerstand-teilnahme: ${DEMO_WIDERSTAND_WERTE.length} Wähler:innen (vollständig) + Belege`);
+  } else {
+    console.log("  widerstand-teilnahme: bereits vorhanden — unverändert");
+  }
+
   // ----- 3. Stimmen + Belege für die GESCHLOSSENE Frage --------------------
   // Idempotenz: feste Demo-voter_refs (UNIQUE poll,voter_ref). Belege werden EINMAL
   // erzeugt; bei erneutem Lauf vorhandene Anzahl beibehalten (kein Doppel-Insert).
@@ -268,16 +447,7 @@ async function main() {
         warVerifiziert: i % 2 === 0,
       });
       // 1 Beleg je Stimme (Invariante #Belege == #Stimmen). Echter CSPRNG-Code.
-      let inserted = false;
-      for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
-        const res = await db
-          .insert(voteReceipts)
-          .values({ pollId: geschlossenId, tenantId, code: generateReadableCode("BELEG") })
-          .onConflictDoNothing({ target: [voteReceipts.pollId, voteReceipts.code] })
-          .returning({ id: voteReceipts.id });
-        inserted = res.length > 0;
-      }
-      if (!inserted) throw new Error("Beleg-Code konnte nicht kollisionsfrei erzeugt werden.");
+      await belegAnlegen(geschlossenId);
     }
     console.log(`  votes+belege: ${DEMO_CHOICES.length} (geschlossene Frage)`);
   } else {
@@ -287,9 +457,12 @@ async function main() {
   // ----- 4. Demo-Standort + Slots + offener Termin -------------------------
   // Verifizierung 2.0 / V2: Koordinaten + strukturierte Öffnungszeiten, damit die
   // Bürger-Liste „Stellen in Ihrer Nähe" im Demo etwas zeigt (Walk-in + Distanz).
-  // Als Beispiel gekennzeichnet („(Demo)"); Koordinaten ungefähr Taunusstein.
+  // Als Beispiel gekennzeichnet („(Demo)"). FIKTIONS-REGEL (P1 Teil 2): Adresse,
+  // Name und Telefon sind KLAR FIKTIV (Musterstadt) — das Demo-Banner verspricht
+  // „keine echten Daten". Nur die KOORDINATEN bleiben reale Punkte (unsichtbar
+  // im UI), damit die Distanz-Sortierung der Nähe-Liste etwas zu zeigen hat.
   const rathausFelder = {
-    address: "Aarstraße 150, 65232 Taunusstein",
+    address: "Marktplatz 1, 12345 Musterstadt",
     hinweise: "Bitte einen amtlichen Lichtbildausweis mitbringen.",
     isActive: true,
     lat: "50.1470",
@@ -303,7 +476,7 @@ async function main() {
     ],
     terminErforderlich: false,
     barrierefrei: true,
-    kontakt: "06128 000-0",
+    kontakt: "(00000) 000-0",
   };
   const [loc] = await db
     .insert(verificationLocations)
@@ -321,8 +494,36 @@ async function main() {
 
   // Zweiter Beispiel-Standort (Walk-in, andere Koordinaten) — zeigt die
   // Distanz-Sortierung der Nähe-Liste. Ohne Slots (reiner Walk-in).
-  const wehenFelder = {
-    address: "Kirchgasse 5, 65232 Taunusstein-Wehen",
+  // Fiktions-Bruch-Fix: hieß früher „Ortsverwaltung Wehen (Demo)" mit echter
+  // Taunusstein-Adresse. Der Upsert-Key ist (tenant_id, name) — Alt-Bestand wird
+  // deshalb VOR dem Upsert umbenannt (bzw. entfernt, falls der neue Name schon
+  // existiert), sonst bliebe der alte Standort dauerhaft in der Nähe-Liste.
+  const suedName = "Ortsverwaltung Süd (Demo)";
+  const altName = "Ortsverwaltung Wehen (Demo)";
+  const altRows = await db
+    .select({ id: verificationLocations.id })
+    .from(verificationLocations)
+    .where(and(eq(verificationLocations.tenantId, tenantId), eq(verificationLocations.name, altName)))
+    .limit(1);
+  if (altRows[0]) {
+    const suedRows = await db
+      .select({ id: verificationLocations.id })
+      .from(verificationLocations)
+      .where(and(eq(verificationLocations.tenantId, tenantId), eq(verificationLocations.name, suedName)))
+      .limit(1);
+    if (suedRows[0]) {
+      // Beide vorhanden → der alte Standort ist überzählig (Slots CASCADE; der
+      // Seed legt am Wehen-/Süd-Standort bewusst keine an).
+      await db.delete(verificationLocations).where(eq(verificationLocations.id, altRows[0].id));
+    } else {
+      await db
+        .update(verificationLocations)
+        .set({ name: suedName, updatedAt: now })
+        .where(eq(verificationLocations.id, altRows[0].id));
+    }
+  }
+  const suedFelder = {
+    address: "Gartenweg 5, 12345 Musterstadt",
     hinweise: "Kleinere Außenstelle — an Markttagen kann es voller werden.",
     isActive: true,
     lat: "50.1680",
@@ -339,12 +540,12 @@ async function main() {
     .insert(verificationLocations)
     .values({
       tenantId,
-      name: "Ortsverwaltung Wehen (Demo)",
-      ...wehenFelder,
+      name: suedName,
+      ...suedFelder,
     })
     .onConflictDoUpdate({
       target: [verificationLocations.tenantId, verificationLocations.name],
-      set: { ...wehenFelder, updatedAt: now },
+      set: { ...suedFelder, updatedAt: now },
     });
 
   // Slot-Zeiten DETERMINISTISCH am UTC-Tag verankert (nicht an der exakten Uhrzeit),

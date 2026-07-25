@@ -40,7 +40,7 @@ const SCHRITTE: { n: string; titel: string; text: string }[] = [
   {
     n: "2",
     titel: "Bürger:innen stimmen ab",
-    text: "Niedrige Hürde: Anmeldung per E-Mail-Link (ohne Passwort). Verbindliche Abstimmungen nur mit Wohnsitz-Bestätigung — per QR-Code vor Ort.",
+    text: "Niedrige Hürde: Anmeldung per E-Mail-Link (ohne Passwort). Verbindliche Abstimmungen nur mit Wohnsitz-Bestätigung — per QR-Code vor Ort; die Online-Ausweisfunktion (eID) ist als künftige Ausbaustufe vorgesehen.",
   },
   {
     n: "3",

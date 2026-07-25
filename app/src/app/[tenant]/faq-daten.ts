@@ -12,5 +12,6 @@ export const FAQ: { f: string; a: string }[] = [
   { f: "Brauche ich eine App?", a: "Nein. Alles läuft im Browser — am Handy, Tablet oder Computer." },
   { f: "Ab welchem Alter?", a: "Ab 16 Jahren. Das bestätigen Sie einmalig bei der Anmeldung." },
   { f: "Brauche ich ein Passwort?", a: "Nein. Sie erhalten einen Anmelde-Link per E-Mail — ohne Passwort." },
+  { f: "Kann ich mich online ausweisen?", a: "Noch nicht. Ihren Wohnsitz bestätigen Sie heute persönlich vor Ort — zum Beispiel im Bürgerbüro. Die Online-Ausweisfunktion (eID) des Personalausweises ist als künftige Ausbaustufe vorgesehen. Ein Behördenkonto oder ein Abgleich mit dem Melderegister ist dafür nicht geplant." },
   { f: "Ich bin technisch unsicher — geht das trotzdem?", a: "Ja. Sie brauchen nur Ihre Postleitzahl und eine E-Mail-Adresse. Mehr nicht." },
 ];

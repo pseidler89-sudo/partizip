@@ -16,6 +16,12 @@
  *   1. Stimmen + Beleg-Codes aller AKTIVEN Fragen des Demo-Mandanten löschen
  *      (dort stimmen nur Demo-Besucher ab). Die GESCHLOSSENE Beispiel-Frage
  *      samt ihrer 7 Seed-Stimmen/Belege bleibt — sie IST der Prüf-Moment.
+ *      AUSNAHME (P1): die FORMAT-Seed-Fragen (Dot-Voting/Widerstandsabfrage,
+ *      seed-demo.ts) tragen kuratierte Teilnahme + Belege bereits WÄHREND der
+ *      Laufzeit (vote_allocations/vote_resistances, nicht votes) — der Wipe
+ *      würde ihre Seed-Belege löschen und #Belege == #Teilnehmende brechen.
+ *      Sie bleiben unangetastet; Besucher-Abgaben dort erzeugen je einen Beleg,
+ *      die Invariante hält also auch ohne Wipe.
  *   2. Alle NICHT-Seed-Fragen des Demo-Mandanten löschen (Kaskade räumt
  *      Optionen/Stimmen/Belege/Zuteilungen/Widerstände): ephemere Demo-Admins
  *      (Verwaltungs-Perspektive, lib/demo/actions.ts) erstellen eigene Fragen —
@@ -55,7 +61,10 @@ import {
   auditEvents,
 } from "../src/db/schema.js";
 import { SEED_NAMESPACE, uuidV5 } from "./seed-utils.js";
-import { musterstadtSeedPollIds } from "../src/lib/demo/seed-ids.js";
+import {
+  musterstadtSeedPollIds,
+  musterstadtSeedFormatPollIds,
+} from "../src/lib/demo/seed-ids.js";
 
 const databaseUrl =
   process.env.DATABASE_URL ??
@@ -120,17 +129,22 @@ export async function demoReset(
         .where(and(eq(polls.tenantId, tenantId), eq(polls.status, "aktiv")))
     ).map((r: { id: string }) => r.id);
 
+    // FORMAT-Seed-Fragen vom Stimmen-/Beleg-Wipe ausnehmen (siehe Kopfkommentar,
+    // Punkt 1: kuratierte Seed-Belege + Invariante #Belege == #Teilnehmende).
+    const formatSeedIds = new Set(musterstadtSeedFormatPollIds(SLUG));
+    const wipeIds = aktiveIds.filter((id: string) => !formatSeedIds.has(id));
+
     let votesDeleted = 0;
     let receiptsDeleted = 0;
-    if (aktiveIds.length > 0) {
+    if (wipeIds.length > 0) {
       const v = await tx
         .delete(votes)
-        .where(and(eq(votes.tenantId, tenantId), inArray(votes.pollId, aktiveIds)))
+        .where(and(eq(votes.tenantId, tenantId), inArray(votes.pollId, wipeIds)))
         .returning({ id: votes.id });
       votesDeleted = v.length;
       const r = await tx
         .delete(voteReceipts)
-        .where(and(eq(voteReceipts.tenantId, tenantId), inArray(voteReceipts.pollId, aktiveIds)))
+        .where(and(eq(voteReceipts.tenantId, tenantId), inArray(voteReceipts.pollId, wipeIds)))
         .returning({ id: voteReceipts.id });
       receiptsDeleted = r.length;
     }
