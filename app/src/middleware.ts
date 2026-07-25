@@ -116,7 +116,9 @@ export const config = {
     // `/<slug>/praesentation/...` umschreiben (die Bild-Extensions sind zwar
     // ausgenommen, .html/.css/.js aber nicht) und die Route ins Leere laufen.
     // Das Deck ist tenant-unabhängig und wird unter jeder Domain gleich
-    // ausgeliefert — daher hier schmal (nur dieser eine Pfad-Präfix) ausgenommen.
-    "/((?!api|_next/static|_next/image|favicon.ico|praesentation|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // ausgeliefert — daher hier schmal ausgenommen: exakt `/praesentation`
+    // oder `/praesentation/...` (Grenz-Anker `(?:/|$)`, damit z. B.
+    // `/praesentationX` NICHT mit ausgenommen wird — Gate-B-Härtung PR #67).
+    "/((?!api|_next/static|_next/image|favicon.ico|praesentation(?:/|$)|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
