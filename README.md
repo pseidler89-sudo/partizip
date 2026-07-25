@@ -83,7 +83,7 @@ nächtlicher Reset — ausprobieren ohne Anmeldung).
 
 | | |
 |---|---|
-| ![Startseite der Demo: aktuelle verbindliche Abstimmung mit Hinweis „Ausgezählt wird nach Abstimmungsende" und Stufen-Erklärung](docs/assets/startseite-demo.png) | ![Abstimmungs-Übersicht: laufende Fragen mit Format-Badges (Verbindlich, Stimmungsbild, Punkte-Voting, Widerstandsabfrage) und Ergebnisse-Sektion beendeter Abstimmungen](docs/assets/umfragen-uebersicht.png) |
+| ![Startseite der Demo: aktuelles Stimmungsbild zum direkten Mitstimmen (Ja/Nein/Enthaltung) mit Hinweis auf die geheime Wahl](docs/assets/startseite-demo.png) | ![Abstimmungs-Übersicht: laufende Fragen mit Format-Badges (Verbindlich, Stimmungsbild, Punkte-Voting, Widerstandsabfrage) und Ergebnisse-Sektion beendeter Abstimmungen](docs/assets/umfragen-uebersicht.png) |
 | ![Ergebnis eines beendeten Punkte-Votings: Punkteverteilung auf vier Optionen eines Bürgerbudgets, mit Teilnehmer- und Verifizierten-Zahl sowie Beleg-Prüfung](docs/assets/punkte-voting-ergebnis.png) | ![Ergebnis einer Widerstandsabfrage: vier Varianten mit Gesamtwiderstand und Durchschnitt, die Variante mit dem geringsten Widerstand ist als Konsens-Gewinner markiert](docs/assets/widerstandsabfrage-ergebnis.png) |
 | ![Verifizierungs-Seite: Drei-Schritte-Anleitung (Stelle finden, hingehen, Konto-QR zeigen), Walk-in-Standorte mit Öffnungszeiten und Ausblick auf die künftige eID-Option](docs/assets/verifizieren-walkin.png) | ![Mobile Ansicht der Abstimmungs-Übersicht im Smartphone-Format](docs/assets/umfragen-uebersicht-mobil.png) |
 
