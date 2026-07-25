@@ -108,7 +108,15 @@ function resolveRouting(request: NextRequest): NextResponse {
 
 export const config = {
   matcher: [
-    // API-Routen und statische Assets NICHT rewriten
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // API-Routen und statische Assets NICHT rewriten.
+    //
+    // `praesentation`: das statische Pitch-Deck liegt unter
+    // app/public/praesentation/ (index.html + deck.css/deck.js + assets/).
+    // Ohne diese Ausnahme würde der Subdomain-Rewrite `/praesentation/...` auf
+    // `/<slug>/praesentation/...` umschreiben (die Bild-Extensions sind zwar
+    // ausgenommen, .html/.css/.js aber nicht) und die Route ins Leere laufen.
+    // Das Deck ist tenant-unabhängig und wird unter jeder Domain gleich
+    // ausgeliefert — daher hier schmal (nur dieser eine Pfad-Präfix) ausgenommen.
+    "/((?!api|_next/static|_next/image|favicon.ico|praesentation|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

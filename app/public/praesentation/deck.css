@@ -1,0 +1,913 @@
+/*
+ * Partizip — Pitch-Deck (P4)
+ * Self-contained, keine externen Fonts/CDNs. pz-Tokens 1:1 aus globals.css.
+ * Progressive Enhancement: ohne JS eine scrollbare Seite, mit JS eine
+ * 16:9-Folien-Präsentation. Print/@page: eine Folie je Seite (Querformat).
+ */
+
+:root {
+  /* pz-Tokens (aus app/src/app/globals.css) */
+  --pz-page: #f5f3ee;
+  --pz-surface: #fffdf8;
+  --pz-ink: #1f2a26;
+  --pz-body: #3f5158;
+  --pz-muted: #5b6a70;
+  --pz-line: #e1e8e9;
+  --pz-brand: #0d6a70;
+  --pz-brand-strong: #0a565b;
+  --pz-brand-soft: #e4efe9;
+  --pz-sand: #9c6b2f;
+  --pz-success: #1f7a4d;
+  --pz-success-soft: #e3f2e9;
+  --pz-success-ink: #155d39;
+  --pz-warning: #b4690e;
+  --pz-warning-soft: #fbeedd;
+  --pz-warning-ink: #8a4f08;
+
+  --pz-shadow-2: 0 1px 2px rgb(16 24 28 / 0.04), 0 2px 6px rgb(16 24 28 / 0.05);
+  --pz-shadow-3: 0 2px 4px rgb(16 24 28 / 0.06), 0 8px 20px rgb(16 24 28 / 0.08);
+  --pz-shadow-4: 0 8px 16px rgb(31 42 38 / 0.10), 0 20px 48px rgb(31 42 38 / 0.16);
+
+  /* System-Font-Stack — keine Web-Fonts (Souveränität / offline-tauglich). */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, "Noto Sans", "Liberation Sans", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Segoe UI Mono", Menlo,
+    Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--pz-page);
+  color: var(--pz-body);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Skip-Link */
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: -3rem;
+  z-index: 100;
+  background: var(--pz-brand);
+  color: #fff;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-link:focus {
+  top: 0.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Grund-Layout: scrollbare Folienliste (No-JS-Basis / Nachsende-Ansicht)
+   --------------------------------------------------------------------------- */
+
+.deck {
+  display: block;
+}
+
+.slide {
+  display: block;
+  width: 100%;
+  padding: clamp(1rem, 4vw, 3rem) clamp(0.75rem, 3vw, 2.5rem);
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  aspect-ratio: 16 / 9;
+  background: var(--pz-page);
+  border: 1px solid var(--pz-line);
+  border-radius: 18px;
+  box-shadow: var(--pz-shadow-3);
+  overflow: hidden;
+  /* Container für proportionale cqw-Typografie: die gesamte Folie skaliert
+     mit ihrer Breite — identisch am Beamer, Laptop und beim PDF-Export. */
+  container-type: inline-size;
+  container-name: stage;
+}
+
+/* Alles Innere skaliert über --fs (1 Einheit ~ 22px bei 1180er Breite). */
+.stage__inner {
+  --fs: 1.72cqw;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--fs) * 2.4) calc(var(--fs) * 3);
+  font-size: var(--fs);
+  line-height: 1.5;
+  color: var(--pz-body);
+}
+
+/* Kopf jeder Sachfolie */
+.slide__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--fs) * 0.5);
+  font-size: calc(var(--fs) * 0.72);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pz-brand);
+  margin: 0 0 calc(var(--fs) * 0.6);
+}
+
+.slide h1 {
+  font-size: calc(var(--fs) * 2.15);
+  line-height: 1.12;
+  font-weight: 700;
+  color: var(--pz-ink);
+  margin: 0 0 calc(var(--fs) * 0.5);
+  letter-spacing: -0.01em;
+}
+
+.slide h2.lead {
+  font-size: calc(var(--fs) * 1.12);
+  line-height: 1.32;
+  font-weight: 500;
+  color: var(--pz-body);
+  margin: 0 0 calc(var(--fs) * 1.1);
+  max-width: 46ch;
+}
+
+.slide__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: calc(var(--fs) * 1.8);
+}
+
+.col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--fs) * 0.75);
+}
+
+/* Stichpunkt-Listen */
+ul.points {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--fs) * 0.7);
+}
+ul.points li {
+  position: relative;
+  padding-left: calc(var(--fs) * 1.5);
+  font-size: calc(var(--fs) * 0.94);
+  color: var(--pz-body);
+}
+ul.points li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: calc(var(--fs) * 0.52);
+  width: calc(var(--fs) * 0.62);
+  height: calc(var(--fs) * 0.62);
+  border-radius: 50%;
+  background: var(--pz-brand-soft);
+  border: calc(var(--fs) * 0.14) solid var(--pz-brand);
+}
+ul.points li strong {
+  color: var(--pz-ink);
+  font-weight: 650;
+}
+
+/* Screenshots */
+.shot {
+  background: var(--pz-surface);
+  border: 1px solid var(--pz-line);
+  border-radius: calc(var(--fs) * 0.7);
+  box-shadow: var(--pz-shadow-3);
+  overflow: hidden;
+  max-height: 100%;
+  display: flex;
+}
+.shot img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+.shot--contain img {
+  object-fit: contain;
+  background: var(--pz-surface);
+}
+
+/* Karten */
+.card {
+  background: var(--pz-surface);
+  border: 1px solid var(--pz-line);
+  border-radius: calc(var(--fs) * 0.8);
+  box-shadow: var(--pz-shadow-2);
+  padding: calc(var(--fs) * 1.1) calc(var(--fs) * 1.2);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--fs) * 0.5);
+}
+.card__title {
+  font-size: calc(var(--fs) * 1.05);
+  font-weight: 700;
+  color: var(--pz-ink);
+  margin: 0;
+}
+.card__title.sand {
+  color: var(--pz-sand);
+}
+.card p {
+  margin: 0;
+  font-size: calc(var(--fs) * 0.9);
+  color: var(--pz-body);
+}
+.card--roadmap {
+  border-style: dashed;
+  border-color: var(--pz-warning);
+  background: var(--pz-warning-soft);
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--fs) * 0.35);
+  font-size: calc(var(--fs) * 0.7);
+  font-weight: 650;
+  padding: calc(var(--fs) * 0.22) calc(var(--fs) * 0.6);
+  border-radius: 999px;
+  align-self: flex-start;
+}
+.badge--live {
+  background: var(--pz-success-soft);
+  color: var(--pz-success-ink);
+}
+.badge--roadmap {
+  background: var(--pz-warning-soft);
+  color: var(--pz-warning-ink);
+  border: 1px dashed var(--pz-warning);
+}
+.badge--never {
+  background: transparent;
+  color: var(--pz-muted);
+  border: 1px solid var(--pz-line);
+}
+
+/* Fußzeile der Sachfolien */
+.slide__foot {
+  margin-top: calc(var(--fs) * 0.9);
+  padding-top: calc(var(--fs) * 0.7);
+  border-top: 1px solid var(--pz-line);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--fs) * 0.6);
+  font-size: calc(var(--fs) * 0.66);
+  color: var(--pz-muted);
+}
+.slide__foot .mark {
+  width: calc(var(--fs) * 1.3);
+  height: calc(var(--fs) * 1.3);
+  flex: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Titel- & Schluss-Folie (zentriert, BrandMark groß)
+   --------------------------------------------------------------------------- */
+.stage__inner.center {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: calc(var(--fs) * 3);
+}
+.stage__inner.center .mark-big {
+  width: calc(var(--fs) * 6.2);
+  height: calc(var(--fs) * 6.2);
+  margin-bottom: calc(var(--fs) * 1.4);
+  filter: drop-shadow(var(--pz-shadow-2));
+}
+.stage__inner.center h1 {
+  font-size: calc(var(--fs) * 2.5);
+  max-width: 24ch;
+  margin-bottom: calc(var(--fs) * 0.9);
+}
+.stage__inner.center .subtitle {
+  font-size: calc(var(--fs) * 1.15);
+  color: var(--pz-body);
+  max-width: 40ch;
+  margin: 0 0 calc(var(--fs) * 1.3);
+}
+.sand-rule {
+  width: calc(var(--fs) * 7);
+  height: calc(var(--fs) * 0.18);
+  background: var(--pz-sand);
+  border-radius: 999px;
+  margin: 0 auto;
+}
+.titlemeta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: calc(var(--fs) * 0.6) calc(var(--fs) * 1.4);
+  margin-top: calc(var(--fs) * 1.4);
+  font-size: calc(var(--fs) * 0.82);
+  color: var(--pz-muted);
+}
+.titlemeta span {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--fs) * 0.4);
+}
+.titlemeta span::before {
+  content: "";
+  width: calc(var(--fs) * 0.5);
+  height: calc(var(--fs) * 0.5);
+  border-radius: 50%;
+  background: var(--pz-brand);
+}
+
+/* QR + CTA-Blöcke */
+.cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--fs) * 0.55);
+}
+.qr {
+  width: calc(var(--fs) * 8);
+  height: calc(var(--fs) * 8);
+  background: var(--pz-surface);
+  border: 1px solid var(--pz-line);
+  border-radius: calc(var(--fs) * 0.6);
+  padding: calc(var(--fs) * 0.5);
+  box-shadow: var(--pz-shadow-2);
+}
+.qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.cta__label {
+  font-size: calc(var(--fs) * 0.86);
+  font-weight: 600;
+  color: var(--pz-ink);
+  text-align: center;
+}
+.url {
+  font-family: var(--font-mono);
+  color: var(--pz-brand);
+  font-weight: 650;
+  font-size: calc(var(--fs) * 0.95);
+}
+.contactlines {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--fs) * 0.55);
+  margin-top: calc(var(--fs) * 1.1);
+  font-size: calc(var(--fs) * 0.95);
+}
+.contactlines .step {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--fs) * 0.6);
+  justify-content: center;
+}
+.contactlines .num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--fs) * 1.5);
+  height: calc(var(--fs) * 1.5);
+  border-radius: 50%;
+  background: var(--pz-brand);
+  color: #fff;
+  font-weight: 700;
+  font-size: calc(var(--fs) * 0.8);
+  flex: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Diagramm-Bausteine (inline-SVG-Stil + CSS-Blöcke)
+   --------------------------------------------------------------------------- */
+.diagram {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.diagram svg {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+}
+
+/* Folie 2: Rat / Lücke / Bürgerschaft */
+.gap-diagram {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  height: 100%;
+}
+.gap-block {
+  flex: 1;
+  border-radius: calc(var(--fs) * 0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--fs) * 0.5);
+  color: #fff;
+  background: var(--pz-brand);
+  padding: calc(var(--fs) * 1.5);
+  text-align: center;
+}
+.gap-block .t {
+  font-size: calc(var(--fs) * 1.25);
+  font-weight: 700;
+}
+.gap-block .s {
+  font-size: calc(var(--fs) * 0.82);
+  opacity: 0.92;
+}
+.gap-space {
+  flex: 0 0 calc(var(--fs) * 4.5);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gap-space::before {
+  content: "";
+  position: absolute;
+  inset: 30% 0;
+  border-left: calc(var(--fs) * 0.16) dashed var(--pz-sand);
+  border-right: calc(var(--fs) * 0.16) dashed var(--pz-sand);
+}
+.gap-space .label {
+  font-size: calc(var(--fs) * 0.78);
+  font-weight: 700;
+  color: var(--pz-sand);
+  background: var(--pz-page);
+  padding: calc(var(--fs) * 0.3) calc(var(--fs) * 0.5);
+  border-radius: 6px;
+  text-align: center;
+}
+
+/* Fünf-Säulen (Folie 6) */
+.pillars {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: calc(var(--fs) * 0.9);
+  width: 100%;
+}
+.pillar {
+  background: var(--pz-surface);
+  border: 1px solid var(--pz-line);
+  border-radius: calc(var(--fs) * 0.7);
+  padding: calc(var(--fs) * 1) calc(var(--fs) * 0.7);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--fs) * 0.5);
+  box-shadow: var(--pz-shadow-2);
+}
+.pillar .ico {
+  width: calc(var(--fs) * 2.4);
+  height: calc(var(--fs) * 2.4);
+  border-radius: 50%;
+  background: var(--pz-brand-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pillar .ico svg {
+  width: 58%;
+  height: 58%;
+  stroke: var(--pz-brand);
+}
+.pillar .pt {
+  font-size: calc(var(--fs) * 0.86);
+  font-weight: 700;
+  color: var(--pz-ink);
+}
+.pillar .pd {
+  font-size: calc(var(--fs) * 0.74);
+  color: var(--pz-muted);
+  line-height: 1.35;
+}
+.struck {
+  margin-top: calc(var(--fs) * 0.9);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--fs) * 0.6);
+  font-size: calc(var(--fs) * 0.78);
+  color: var(--pz-muted);
+}
+.struck s {
+  color: var(--pz-muted);
+}
+.struck .ok {
+  color: var(--pz-brand);
+  font-weight: 600;
+}
+
+/* Nabe-und-Speichen (Folie 7) */
+.hub {
+  width: 100%;
+  height: 100%;
+}
+
+/* Drei-Spalten Roadmap (Folie 10) */
+.threecol {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: calc(var(--fs) * 1);
+  width: 100%;
+}
+.rmcol {
+  border-radius: calc(var(--fs) * 0.7);
+  padding: calc(var(--fs) * 1) calc(var(--fs) * 1);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--fs) * 0.55);
+}
+.rmcol--live {
+  background: var(--pz-success-soft);
+  border: 1px solid var(--pz-success);
+}
+.rmcol--plan {
+  background: var(--pz-warning-soft);
+  border: 1px dashed var(--pz-warning);
+}
+.rmcol--never {
+  background: var(--pz-surface);
+  border: 1px solid var(--pz-line);
+}
+.rmcol h3 {
+  margin: 0;
+  font-size: calc(var(--fs) * 0.95);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--fs) * 0.4);
+}
+.rmcol--live h3 {
+  color: var(--pz-success-ink);
+}
+.rmcol--plan h3 {
+  color: var(--pz-warning-ink);
+}
+.rmcol--never h3 {
+  color: var(--pz-muted);
+}
+.rmcol ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--fs) * 0.4);
+  font-size: calc(var(--fs) * 0.78);
+}
+.rmcol li {
+  padding-left: calc(var(--fs) * 1.1);
+  position: relative;
+  color: var(--pz-body);
+}
+.rmcol--live li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  color: var(--pz-success);
+  font-weight: 700;
+}
+.rmcol--plan li::before {
+  content: "→";
+  position: absolute;
+  left: 0;
+  color: var(--pz-warning);
+  font-weight: 700;
+}
+.rmcol--never li {
+  color: var(--pz-muted);
+}
+.rmcol--never li::before {
+  content: "×";
+  position: absolute;
+  left: 0;
+  color: var(--pz-muted);
+  font-weight: 700;
+}
+.rmcol--never li s {
+  text-decoration-color: var(--pz-muted);
+}
+
+/* Vier-Augen-Skizze (Folie 8) */
+.foureyes {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--fs) * 0.6);
+  padding: calc(var(--fs) * 0.8);
+  color: var(--pz-brand);
+  font-size: calc(var(--fs) * 0.8);
+  font-weight: 600;
+}
+.foureyes svg {
+  width: calc(var(--fs) * 2);
+  height: calc(var(--fs) * 2);
+}
+
+/* ---------------------------------------------------------------------------
+   Sprechnotizen (im Print & Presenting-Fokus verborgen)
+   --------------------------------------------------------------------------- */
+.notes {
+  max-width: 1180px;
+  margin: 0.9rem auto 0;
+  border: 1px solid var(--pz-line);
+  border-radius: 12px;
+  background: var(--pz-surface);
+  padding: 0.4rem 1rem;
+  font-size: 0.95rem;
+}
+.notes > summary {
+  cursor: pointer;
+  color: var(--pz-brand);
+  font-weight: 600;
+  padding: 0.4rem 0;
+}
+.notes > summary:focus-visible {
+  outline: 2px solid var(--pz-brand);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.notes p {
+  color: var(--pz-body);
+  line-height: 1.55;
+  margin: 0.4rem 0 0.7rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Navigations-UI (nur mit JS sichtbar)
+   --------------------------------------------------------------------------- */
+.deck-nav,
+.deck-progress,
+.click-zone {
+  display: none;
+}
+
+/* =========================================================================
+   PRESENTING-MODUS (JS aktiv): eine 16:9-Folie füllt den Viewport
+   ========================================================================= */
+.deck--js {
+  height: 100vh;
+  overflow: hidden;
+}
+.deck--js .slide {
+  position: fixed;
+  inset: 0;
+  padding: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--pz-page);
+}
+.deck--js .slide.is-active {
+  display: flex;
+}
+.deck--js .stage {
+  width: min(100vw, calc(100vh * 16 / 9));
+  height: min(56.25vw, 100vh);
+  max-width: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.deck--js .notes {
+  display: none;
+}
+
+.deck--js .click-zone {
+  display: block;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 22%;
+  z-index: 20;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.deck--js .click-zone--prev {
+  left: 0;
+  cursor: w-resize;
+}
+.deck--js .click-zone--next {
+  right: 0;
+  cursor: e-resize;
+}
+.click-zone:focus-visible {
+  outline: 2px solid var(--pz-brand);
+  outline-offset: -4px;
+}
+
+.deck--js .deck-nav {
+  display: flex;
+  position: fixed;
+  bottom: 0.9rem;
+  right: 1.1rem;
+  z-index: 30;
+  align-items: center;
+  gap: 0.5rem;
+  background: color-mix(in srgb, var(--pz-surface) 88%, transparent);
+  border: 1px solid var(--pz-line);
+  border-radius: 999px;
+  padding: 0.3rem 0.5rem;
+  box-shadow: var(--pz-shadow-2);
+  backdrop-filter: blur(4px);
+}
+.deck-nav button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--pz-brand);
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.deck-nav button:hover {
+  background: var(--pz-brand-soft);
+}
+.deck-nav button:focus-visible {
+  outline: 2px solid var(--pz-brand);
+  outline-offset: 2px;
+}
+.deck-nav .counter {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--pz-muted);
+  min-width: 3.2rem;
+  text-align: center;
+}
+
+.deck--js .deck-progress {
+  display: flex;
+  position: fixed;
+  bottom: 1.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  gap: 0.4rem;
+  align-items: center;
+}
+.deck-progress button {
+  appearance: none;
+  border: none;
+  padding: 0;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--pz-line);
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.deck-progress button[aria-current="true"] {
+  background: var(--pz-brand);
+  transform: scale(1.35);
+}
+.deck-progress button:focus-visible {
+  outline: 2px solid var(--pz-brand);
+  outline-offset: 2px;
+}
+
+/* Hinweis-Toast (Tastatur) */
+.deck--js .kbd-hint {
+  display: block;
+  position: fixed;
+  bottom: 0.9rem;
+  left: 1.1rem;
+  z-index: 30;
+  font-size: 0.72rem;
+  color: var(--pz-muted);
+  background: color-mix(in srgb, var(--pz-surface) 88%, transparent);
+  border: 1px solid var(--pz-line);
+  border-radius: 8px;
+  padding: 0.3rem 0.55rem;
+}
+.kbd-hint {
+  display: none;
+}
+.kbd-hint kbd {
+  font-family: var(--font-mono);
+  background: var(--pz-brand-soft);
+  color: var(--pz-brand-strong);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+  font-size: 0.9em;
+}
+
+/* =========================================================================
+   Barrierefreiheit: Fokus & Reduced Motion
+   ========================================================================= */
+a {
+  color: var(--pz-brand);
+}
+:focus-visible {
+  outline: 2px solid var(--pz-brand);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* =========================================================================
+   PRINT / PDF: eine Folie je Seite, Querformat, Hintergründe drucken
+   ========================================================================= */
+@media print {
+  /* Seite exakt im 16:9-Format, damit jede Folie die Seite füllt
+     (Print == Bildschirm) — kein Weißraum, kein Fußzeilen-Überlapp. */
+  @page {
+    size: 297mm 167mm;
+    margin: 0;
+  }
+  html,
+  body {
+    background: #fff;
+    height: auto;
+    overflow: visible;
+  }
+  .deck--js,
+  .deck {
+    height: auto;
+    overflow: visible;
+  }
+  .deck-nav,
+  .deck-progress,
+  .click-zone,
+  .kbd-hint,
+  .notes,
+  .skip-link {
+    display: none !important;
+  }
+  /* Presenting-Overrides zurücksetzen: alle Folien drucken, je eine pro Seite */
+  .deck--js .slide,
+  .slide {
+    position: static !important;
+    display: block !important;
+    inset: auto !important;
+    width: 297mm;
+    height: 167mm;
+    overflow: hidden;
+    padding: 0 !important;
+    break-after: page;
+    page-break-after: always;
+    break-inside: avoid;
+  }
+  .slide:last-of-type {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  .deck--js .stage,
+  .stage {
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    aspect-ratio: auto;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

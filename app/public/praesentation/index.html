@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Partizip — Präsentation</title>
+    <meta
+      name="description"
+      content="Partizip — verständliche Ratsarbeit und verifizierte Beteiligung für Ihre Kommune. Überparteilich, datensparsam, quelloffen."
+    />
+    <link rel="stylesheet" href="/praesentation/deck.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#folie-1">Zum Inhalt springen</a>
+
+    <main id="deck" class="deck" aria-label="Partizip Präsentation">
+      <!-- =============================================================
+           FOLIE 1 — Titel & Haltung
+           ============================================================= -->
+      <section
+        id="folie-1"
+        class="slide"
+        role="group"
+        aria-roledescription="Folie"
+        aria-label="Folie 1 von 11: Titel"
+        data-title="Titel &amp; Haltung"
+      >
+        <div class="stage">
+          <div class="stage__inner center">
+            <img
+              class="mark-big"
+              src="/praesentation/assets/partizip-mark.svg"
+              alt="Partizip Bildzeichen: eine Sprechblase mit Haken — mitreden und entscheiden"
+            />
+            <h1>
+              Partizip — verständliche Ratsarbeit und verifizierte Beteiligung
+              für Ihre Kommune
+            </h1>
+            <p class="subtitle">
+              Überparteilich. Datensparsam. In Ihrer eigenen Hoheit betreibbar.
+            </p>
+            <div class="sand-rule" aria-hidden="true"></div>
+            <div class="titlemeta">
+              <span>Öffentlicher Pilot, live seit Juli 2026</span>
+              <span>Quelloffen unter AGPL-3.0</span>
+              <span>Bürgerinnen und Bürger zahlen nie</span>
+            </div>
+          </div>
+        </div>
+        <details class="notes">
+          <summary>Sprechnotiz</summary>
+          <p>
+            Vielen Dank für Ihre Zeit. Ich zeige Ihnen, wie Bürgerinnen und
+            Bürger bei lokalen Fragen mitreden und verbindlich abstimmen können —
+            überparteilich, datensparsam und auf einem Server in Ihrer eigenen
+            Hoheit. Alles, was ich zeige, ist heute öffentlich erreichbar.
+          </p>
+        </details>
+      </section>
+
+      <!-- =============================================================
+           FOLIE 2 — Das Problem
+           ============================================================= -->
+      <section
+        id="folie-2"
+        class="slide"
+        role="group"
+        aria-roledescription="Folie"
+        aria-label="Folie 2 von 11: Das Problem"
+        data-title="Das Problem"
+      >
+        <div class="stage">
+          <div class="stage__inner">
+            <p class="slide__eyebrow">Das Problem</p>
+            <h1 style="font-size: calc(var(--fs) * 1.95)">
+              Zwischen Rathaus und Bürgerschaft klafft eine Lücke
+            </h1>
+            <h2 class="lead" style="margin-bottom: calc(var(--fs) * 0.7)">
+              Ratsinformationen sind formal und schwer zugänglich — und für echte
+              Rückmeldung fehlt ein niedrigschwelliger, vertrauenswürdiger Weg.
+              Das bietet bisher kein Anbieter aus einer Hand.
+            </h2>
+            <div class="slide__body">
+              <div class="col" style="flex: 1.05">
+                <ul class="points">
+                  <li>
+                    Ratsdokumente liegen als <strong>PDF</strong> im
+                    Ratsinformationssystem — korrekt, aber schwer verständlich.
+                  </li>
+                  <li>
+                    Rückmeldung passiert in <strong>lauten Kanälen</strong>, die
+                    auf Empörung statt Konsens optimieren.
+                  </li>
+                  <li>
+                    Es fehlt: verständliche, quellengebundene Aufbereitung
+                    <strong>plus</strong> verifizierte, geheime Beteiligung in
+                    einem Werkzeug.
+                  </li>
+                </ul>
+              </div>
+              <div class="col diagram" aria-hidden="true">
+                <div class="gap-diagram">
+                  <div class="gap-block">
+                    <span class="t">Rat</span>
+                    <span class="s">formale Dokumente</span>
+                  </div>
+                  <div class="gap-space">
+                    <span class="label">Lücke</span>
+                  </div>
+                  <div class="gap-block">
+                    <span class="t">Bürgerschaft</span>
+                    <span class="s">keine vertraute Rückmeldung</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="slide__foot">
+              <img class="mark" src="/praesentation/assets/partizip-mark.svg" alt="" />
+              <span
+                >Live auf partizip.online — Demo ohne Anmeldung:
+                demo.partizip.online · Gebaut vs. Roadmap sauber getrennt.</span
+              >
+            </div>
+          </div>
+        </div>
+        <details class="notes">
+          <summary>Sprechnotiz</summary>
+          <p>
+            Heute liegen Ratsinformationen formal korrekt vor, aber kaum jemand
+            liest ein 80-seitiges PDF. Und wo Rückmeldung stattfindet, dominieren
+            laute Kanäle. Es fehlt der ruhige, verständliche Weg dazwischen — mit
+            einer Rückmeldung, der man trauen kann.
+          </p>
+        </details>
+      </section>
+
+      <!-- =============================================================
+           FOLIE 3 — Was Partizip ist: Mitmachen zuerst
+           ============================================================= -->
+      <section
+        id="folie-3"
+        class="slide"
+        role="group"
+        aria-roledescription="Folie"
+        aria-label="Folie 3 von 11: Was Partizip ist"
+        data-title="Mitmachen zuerst"
+      >
+        <div class="stage">
+          <div class="stage__inner">
+            <p class="slide__eyebrow">Was Partizip ist — Mitmachen zuerst</p>
+            <h1>Die Haustür ist eine Frage, kein Dokumentenberg</h1>
+            <div class="slide__body">
+              <div class="col" style="flex: 1.15">
+                <ul class="points" style="gap: calc(var(--fs) * 0.55)">
+                  <li>
+                    Mitstimmen mit E-Mail-Konto (<strong>Stufe 1</strong>);
+                    verbindlich abstimmen erst nach Wohnsitz-Verifizierung
+                    (<strong>Stufe 2</strong>).
+                  </li>
+                  <li>
+                    <strong>Nur-Lesen ohne Anmeldung</strong> — Reibung entsteht
+                    nur dort, wo sie nötig ist.
+                  </li>
+                  <li>
+                    Ergebnisse zeigen <strong>Gesamt- und verifizierte Stimmen
+                    getrennt</strong>.
+                  </li>
+                </ul>
+                <div class="cta" style="gap: calc(var(--fs) * 0.4)">
+                  <div
+                    class="qr"
+                    role="img"
+                    aria-label="QR-Code zur öffentlichen Demo demo.partizip.online"
+                    style="width: calc(var(--fs) * 5.4); height: calc(var(--fs) * 5.4)"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges"><path stroke="#0d6a70" d="M0 0.5h7m1 0h1m2 0h5m1 0h4m1 0h7M0 1.5h1m5 0h1m1 0h1m2 0h3m2 0h1m1 0h1m1 0h1m1 0h1m5 0h1M0 2.5h1m1 0h3m1 0h1m3 0h1m1 0h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M0 3.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h2m1 0h1m1 0h1m2 0h1m1 0h3m1 0h1M0 4.5h1m1 0h3m1 0h1m2 0h1m4 0h1m1 0h1m2 0h2m1 0h1m1 0h3m1 0h1M0 5.5h1m5 0h1m3 0h1m2 0h1m1 0h5m2 0h1m5 0h1M0 6.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M8 7.5h3m4 0h3m2 0h1M0 8.5h1m1 0h2m1 0h3m1 0h2m1 0h2m1 0h1m1 0h4m1 0h1m2 0h1m1 0h2M3 9.5h2m6 0h5m1 0h6m1 0h1m3 0h1M0 10.5h2m1 0h1m1 0h6m2 0h1m2 0h3m2 0h2m1 0h1m1 0h2M0 11.5h2m2 0h2m1 0h3m1 0h2m3 0h1m2 0h1m3 0h2m3 0h1M2 12.5h2m1 0h3m6 0h2m1 0h1m1 0h1m5 0h2M1 13.5h1m1 0h2m2 0h2m2 0h1m2 0h1m1 0h1m2 0h1m1 0h2m3 0h3M0 14.5h4m1 0h7m1 0h1m1 0h2m2 0h1m2 0h2m2 0h3M4 15.5h2m1 0h1m1 0h2m3 0h1m1 0h1m2 0h1m1 0h1m1 0h1m3 0h1M0 16.5h1m1 0h1m3 0h2m2 0h1m1 0h1m1 0h3m1 0h2m1 0h1m1 0h3m1 0h1M1 17.5h4m4 0h2m3 0h1m1 0h2m2 0h1m2 0h1m1 0h3M0 18.5h1m1 0h5m2 0h1m1 0h1m1 0h5m2 0h2m1 0h2m1 0h1M4 19.5h1m2 0h1m1 0h6m2 0h1m2 0h2m4 0h1M1 20.5h1m1 0h1m2 0h1m1 0h1m1 0h1m2 0h2m1 0h3m1 0h7M8 21.5h1m1 0h1m4 0h2m1 0h1m1 0h1m3 0h5M0 22.5h7m1 0h1m1 0h2m2 0h2m1 0h4m1 0h1m1 0h2m1 0h1M0 23.5h1m5 0h1m1 0h3m1 0h4m2 0h1m1 0h1m3 0h2m2 0h1M0 24.5h1m1 0h3m1 0h1m3 0h1m5 0h1m1 0h1m1 0h5m1 0h1m1 0h1M0 25.5h1m1 0h3m1 0h1m1 0h2m1 0h3m6 0h2m1 0h3m1 0h1M0 26.5h1m1 0h3m1 0h1m1 0h1m4 0h1m3 0h2m2 0h1m1 0h1m2 0h1m1 0h1M0 27.5h1m5 0h1m2 0h2m4 0h1m1 0h5m2 0h2m1 0h1M0 28.5h7m1 0h2m1 0h1m1 0h1m3 0h4m1 0h1m4 0h1"/></svg>
+                  </div>
+                  <div class="cta__label">
+                    Jetzt selbst ausprobieren — ohne Anmeldung
+                  </div>
+                  <div class="url">demo.partizip.online</div>
+                </div>
+              </div>
+              <div class="col" style="flex: 1.35">
+                <div class="shot">
+                  <img
+                    src="/praesentation/assets/startseite-demo.png"
+                    alt="Demo-Startseite von Partizip: die lokale Frage „Soll der Wochenmarkt auf dem Rathausplatz künftig auch samstags stattfinden?“ mit den Optionen Ja, Nein und Enthaltung sowie dem Hinweis „Geheime Wahl: Ihre Antwort wird nur als anonyme Stimme gezählt“."
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <details class="notes">
+          <summary>Sprechnotiz</summary>
+          <p>
+            So sieht der Einstieg aus: eine konkrete lokale Frage, direkt
+            beantwortbar. Wer nur lesen will, muss sich nicht anmelden. Und Sie
+            können das jederzeit selbst ausprobieren — der Link führt ohne
+            Anmeldung in unsere öffentliche Demo, die sich jede Nacht zurücksetzt.
+          </p>
+        </details>
+      </section>
+
+      <!-- =============================================================
+           FOLIE 4 — Drei Formate (Alleinstellung)
+           ============================================================= -->
+      <section
+        id="folie-4"
+        class="slide"
+        role="group"
+        aria-roledescription="Folie"
+        aria-label="Folie 4 von 11: Drei Abstimmungsformate"
+        data-title="Drei Formate"
+      >
+        <div class="stage">
+          <div class="stage__inner">
+            <p class="slide__eyebrow">Alleinstellung</p>
+            <h1 style="font-size: calc(var(--fs) * 1.8)">
+              Drei Abstimmungsformate — auf Konsens ausgelegt, nicht auf Empörung
+            </h1>
+            <div class="slide__body">
+              <div class="col">
+                <div class="card" style="gap: calc(var(--fs) * 0.4)">
+                  <span class="badge badge--live">Format 1</span>
+                  <p class="card__title">Ja / Nein / Enthaltung</p>
+                  <div class="shot shot--contain" style="height: calc(var(--fs) * 11.5); min-height: 0">
+                    <img
+                      src="/praesentation/assets/umfragen-uebersicht.png"
+                      alt="Abstimmungs-Übersicht mit Format-Badges wie „Stimmungsbild“, „Verbindlich“, „Punkte-Voting“ und „Widerstandsabfrage“ sowie einer getrennten Ergebnisse-Sektion."
+                    />
+                  </div>
+                  <p>Stimmungsbild oder verbindliche Frage.</p>
+                </div>
+              </div>
+              <div class="col">
+                <div class="card" style="gap: calc(var(--fs) * 0.4)">
+                  <span class="badge badge--live">Format 2</span>
+                  <p class="card__title">Punkte-Voting</p>
+                  <div class="shot shot--contain" style="height: calc(var(--fs) * 11.5); min-height: 0">
+                    <img
+                      src="/praesentation/assets/punkte-voting-ergebnis.png"
+                      alt="Ergebnis eines Punkte-Votings zum Bürgerbudget: mehrere Optionen mit verteilten Punkten und Prozentbalken — eine Verteilung statt eines Einzelsiegers."
+                    />
+                  </div>
+                  <p>Punktebudget verteilen statt Ja/Nein.</p>
+                </div>
+              </div>
+              <div class="col">
+                <div class="card" style="gap: calc(var(--fs) * 0.4)">
+                  <span class="badge badge--live">Format 3</span>
+                  <p class="card__title">Widerstandsabfrage</p>
+                  <div class="shot shot--contain" style="height: calc(var(--fs) * 11.5); min-height: 0">
+                    <img
+                      src="/praesentation/assets/widerstandsabfrage-ergebnis.png"
+                      alt="Ergebnis einer Widerstandsabfrage: je Option der Gesamtwiderstand; die Option mit dem geringsten Widerstand ist als „Geringster Widerstand“ markiert."
+                    />
+                  </div>
+                  <p>Widerstand 0–10 — geringster gewinnt.</p>
+                </div>
+              </div>
+            </div>
+            <div class="slide__foot">
+              <img class="mark" src="/praesentation/assets/partizip-mark.svg" alt="" />
+              <span>
+                Bewusst <strong>keine</strong> Tier-Lists oder Turnier-Formate —
+                sie brechen k-Anonymität und kippen in Empörungs-Gamification.
+              </span>
+            </div>
+          </div>
+        </div>
+        <details class="notes">
+          <summary>Sprechnotiz</summary>
+          <p>
+            Der Unterschied liegt in der Methode: Beim Punkte-Voting priorisieren
+            Menschen mit einem Budget, statt nur Ja oder Nein zu sagen. Bei der
+            Widerstandsabfrage gewinnt nicht die knappe Mehrheit, sondern die
+            Lösung mit dem geringsten Widerstand — die, mit der die meisten leben
+            können. Formate, die Themen gegeneinander ausspielen, bauen wir
+            bewusst nicht.
+          </p>
+        </details>
+      </section>
+
+      <!-- =============================================================
+           FOLIE 5 — Verifiziert, aber anonym
+           ============================================================= -->
+      <section
+        id="folie-5"
+        class="slide"
+        role="group"
+        aria-roledescription="Folie"
+        aria-label="Folie 5 von 11: Verifiziert, aber anonym"
+        data-title="Verifiziert, aber anonym"
+      >
+        <div class="stage">
+          <div class="stage__inner">
+            <p class="slide__eyebrow">Integrität ohne Daten-Sammeln</p>
+            <h1 style="font-size: calc(var(--fs) * 1.85)">
+              Verifiziert, aber anonym — echte Berechtigte, geheime Wahl
+            </h1>
+            <div class="slide__body">
+              <div class="col" style="flex: 1.25">
+                <h2 class="lead" style="margin-bottom: calc(var(--fs) * 0.7)">
+                  Die Berechtigung wird an der Person geprüft — in den Stimmzettel
+                  fließt nur ein Deckname und die Antwort.
+                </h2>
+                <ul class="points" style="gap: calc(var(--fs) * 0.55)">
+                  <li>
+                    <strong>Die Bürgerin/der Bürger zeigt den eigenen
+                    Konto-QR-Code</strong> — eine verifizierende Person der
+                    Kommune scannt und bestätigt ihn.
+                  </li>
+                  <li>
+                    An <strong>Walk-in-Standorten</strong> (z.&nbsp;B. Bürgerbüro)
+                    während der Öffnungszeiten, <strong>ohne Terminzwang</strong>.
+                  </li>
+                  <li>
+                    Gespeichert wird nur die Bestätigung —
+                    <strong>kein Ausweisabgleich, kein Melderegister-Zugriff</strong>.
+                  </li>
+                  <li>Verifizierung mit Ablauf und Erinnerung zur Re-Verifizierung.</li>
+                </ul>
+              </div>
+              <div class="col" style="flex: 1">
+                <div class="shot">
+                  <img
+                    src="/praesentation/assets/verifizieren-walkin.png"
+                    alt="Anleitung „Bestätigen Sie Ihren Wohnsitz“ in drei Schritten: Stelle in Ihrer Nähe finden, hingehen (oder Termin, falls nötig), Ausweisen und den eigenen Verifizierungs-QR zeigen — darunter Walk-in-Standorte mit Öffnungszeiten und ein eID-Ausblick."
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="slide__foot">
+              <img class="mark" src="/praesentation/assets/partizip-mark.svg" alt="" />
+              <span
+                >Live auf partizip.online — Demo ohne Anmeldung:
+                demo.partizip.online · Gebaut vs. Roadmap sauber getrennt.</span
+              >
+            </div>
+          </div>
+        </div>
+        <details class="notes">
+          <summary>Sprechnotiz</summary>
+          <p>
+            Verifizierung heißt bei uns: Die Person zeigt ihren eigenen QR-Code,
+            eine Mitarbeiterin scannt ihn — meist einfach im Bürgerbüro, ohne
+            Termin. Wir gleichen keinen Ausweis mit dem Melderegister ab und
+            speichern keine Ausweisdaten. Gespeichert wird nur: Wohnsitz
+            bestätigt. Und trotzdem bleibt die spätere Stimme anonym.
+          </p>
+        </details>
+      </section>
+
+      <!-- =============================================================
+           FOLIE 6 — Vertrauen ist Architektur
+           ============================================================= -->
+      <section
+        id="folie-6"
+        class="slide"
+        role="group"
+        aria-roledescription="Folie"
+        aria-label="Folie 6 von 11: Vertrauen ist Architektur"
+        data-title="Vertrauen ist Architektur"
+      >
+        <div class="stage">
+          <div class="stage__inner">
+            <p class="slide__eyebrow">Nachprüfbar, nicht behauptet</p>
+            <h1>Vertrauen ist Architektur — nachprüfbar, nicht behauptet</h1>
+            <div class="slide__body" style="flex-direction: column">
+              <div class="pillars">
+                <div class="pillar">
+                  <span class="ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+                  </span>
+                  <span class="pt">Geheime Stimmabgabe</span>
+                  <span class="pd"
+                    >Wahl technisch nicht mit der Person verkettbar; Beleg-Codes
+                    zum Selbst-Prüfen; Auszählung erst nach Ende.</span
+                  >
+                </div>
+                <div class="pillar">
+                  <span class="ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="8" r="3"/><circle cx="17" cy="8" r="3"/><circle cx="12" cy="16" r="3"/></svg>
+                  </span>
+                  <span class="pt">k-Anonymität serverseitig</span>
+                  <span class="pd"
+                    >Kleine Teilnehmerzahlen werden schon auf dem Server
+                    maskiert.</span
+                  >
+                </div>
+                <div class="pillar">
+                  <span class="ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+                  </span>
+                  <span class="pt">KI-Neutralitäts-Check</span>
+                  <span class="pd"
+                    >Öffentlicher, versionierter Prüfmaßstab; hält im Zweifel an,
+                    lehnt nie final ab — der Mensch bleibt letzte Instanz.</span
+                  >
+                </div>
+                <div class="pillar">
+                  <span class="ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H4v4"/><path d="M16 3h4v4"/><path d="M8 21H4v-4"/><path d="M16 21h4v-4"/><circle cx="12" cy="12" r="3"/></svg>
+                  </span>
+                  <span class="pt">Open Source (AGPL-3.0)</span>
+                  <span class="pd"
+                    >Wer betreibt oder verändert, gibt Änderungen wieder frei —
+                    nachvollziehbar für alle.</span
+                  >
+                </div>
+                <div class="pillar">
+                  <span class="ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M12 3v7"/><path d="M8 6l4-3 4 3"/></svg>
+                  </span>
+                  <span class="pt">Betrieb in Deutschland</span>
+                  <span class="pd"
+                    >Bewusst kein BundID, kein Melderegister-Zugriff.</span
+                  >
+                </div>
+              </div>
+              <div class="struck">
+                <s>Identität = Login</s>
+                <span class="ok"
+                  >— nie; eine eID dient bei uns nur der Verifizierung.</span
+                >
+              </div>
+            </div>
+            <div class="slide__foot">
+              <img class="mark" src="/praesentation/assets/partizip-mark.svg" alt="" />
+              <span
+                >Live auf partizip.online — Demo ohne Anmeldung:
+                demo.partizip.online · Gebaut vs. Roadmap sauber getrennt.</span
+              >
+            </div>
+          </div>
+        </div>
+        <details class="notes">
+          <summary>Sprechnotiz</summary>
+          <p>
+            Das Entscheidende: Diese Eigenschaften sind gebaut, nicht
+            versprochen. Die Wahl ist mathematisch von der Person getrennt, kleine
+            Gruppen werden serverseitig maskiert, und selbst unser
+            KI-Neutralitäts-Check hat einen öffentlichen Prompt, den Sie nachlesen
+            können — mit dem Menschen als letzter Instanz. Der Code ist offen; Sie
+            müssen uns nichts glauben.
+          </p>
+        </details>
+      </section>
+
+      <!-- =============================================================
+           FOLIE 7 — Souverän bis in die Verbreitung
+           ============================================================= -->
+      <section
+        id="folie-7"
+        class="slide"
+        role="group"
+        aria-roledescription="Folie"
+        aria-label="Folie 7 von 11: Souverän bis in die Verbreitung"
+        data-title="Souveräne Verbreitung"
+      >
+        <div class="stage">
+          <div class="stage__inner">
+            <p class="slide__eyebrow">Keine fremden Silos</p>
+            <h1 style="font-size: calc(var(--fs) * 1.95)">
+              Souverän bis in die Verbreitung — keine fremden Silos
+            </h1>
+            <div class="slide__body">
+              <div class="col" style="flex: 1.1">
+                <h2 class="lead" style="margin-bottom: calc(var(--fs) * 0.7)">
+                  Souveränität endet nicht am Serverrand — auch die Reichweite
+                  läuft über eigene Kanäle und offene Protokolle.
+                </h2>
+                <ul class="points" style="gap: calc(var(--fs) * 0.55)">
+                  <li>
+                    <strong>Datensparsam:</strong> nur das Nötige; kein
+                    Datenverkauf, kein Dritt-Tracking; DSGVO-Selbstservice im
+                    eigenen Konto.
+                  </li>
+                  <li>
+                    Verbreitung über <strong>eigene Digest-Seiten + RSS</strong>,
+                    <strong>eigenen ActivityPub-Server (Fediverse)</strong> und
+                    <strong>AT-Protocol (Bluesky)</strong>.
+                  </li>
+                  <li>
+                    Bewusst <strong>kein Telegram, kein WhatsApp</strong>, keine
+                    proprietären Silos in der Kette.
+                  </li>
+                </ul>
+              </div>
+              <div class="col diagram" aria-hidden="true">
+                <svg class="hub" viewBox="0 0 340 260" fill="none">
+                  <line x1="170" y1="130" x2="60" y2="55" stroke="#0d6a70" stroke-width="2" />
+                  <line x1="170" y1="130" x2="285" y2="55" stroke="#0d6a70" stroke-width="2" />
+                  <line x1="170" y1="130" x2="70" y2="210" stroke="#5b6a70" stroke-width="2" stroke-dasharray="5 5" />
+                  <line x1="170" y1="130" x2="270" y2="210" stroke="#5b6a70" stroke-width="2" stroke-dasharray="5 5" />
+                  <circle cx="170" cy="130" r="52" fill="#0d6a70" />
+                  <text x="170" y="123" text-anchor="middle" fill="#fffdf8" font-size="14" font-weight="700" font-family="sans-serif">Ihre Seite</text>
+                  <text x="170" y="141" text-anchor="middle" fill="#e4efe9" font-size="11" font-family="sans-serif">Permalink + RSS</text>
+                  <g font-family="sans-serif">
+                    <rect x="14" y="34" width="92" height="40" rx="10" fill="#e4efe9" stroke="#0d6a70" />
+                    <text x="60" y="59" text-anchor="middle" fill="#0a565b" font-size="13" font-weight="600">Fediverse</text>
+                    <rect x="239" y="34" width="86" height="40" rx="10" fill="#e4efe9" stroke="#0d6a70" />
+                    <text x="282" y="59" text-anchor="middle" fill="#0a565b" font-size="13" font-weight="600">Bluesky</text>
+                    <rect x="20" y="196" width="100" height="38" rx="10" fill="#f5f3ee" stroke="#e1e8e9" />
+                    <text x="70" y="220" text-anchor="middle" fill="#5b6a70" font-size="12" text-decoration="line-through">Telegram</text>
+                    <line x1="34" y1="215" x2="106" y2="215" stroke="#5b6a70" stroke-width="1.5" />
+                    <rect x="220" y="196" width="100" height="38" rx="10" fill="#f5f3ee" stroke="#e1e8e9" />
+                    <text x="270" y="220" text-anchor="middle" fill="#5b6a70" font-size="12">WhatsApp</text>
+                    <line x1="234" y1="215" x2="306" y2="215" stroke="#5b6a70" stroke-width="1.5" />
+                  </g>
+                </svg>
+              </div>
+            </div>
+            <div class="slide__foot">
+              <img class="mark" src="/praesentation/assets/partizip-mark.svg" alt="" />
+              <span>Telegram und WhatsApp bewusst nicht — Reichweite bleibt in Ihrer Hoheit.</span>
+            </div>
+          </div>
+        </div>
+        <details class="notes">
+          <summary>Sprechnotiz</summary>
+          <p>
+            Ratsinformationen verbreiten wir nicht über Telegram oder WhatsApp,
+            sondern über Ihre eigene Seite, RSS und offene Protokolle. So bleibt
+            auch die Reichweite in Ihrer Hoheit — und niemand zwischen Ihnen und
+            den Bürgern verdient an deren Daten.
+          </p>
+        </details>
+      </section>
+
+      <!-- =============================================================
+           FOLIE 8 — Für die Verwaltung
+           ============================================================= -->
+      <section
+        id="folie-8"
+        class="slide"
+        role="group"
+        aria-roledescription="Folie"
+        aria-label="Folie 8 von 11: Für die Verwaltung"
+        data-title="Für die Verwaltung"
+      >
+        <div class="stage">
+          <div class="stage__inner">
+            <p class="slide__eyebrow">Für die Verwaltung</p>
+            <h1 style="font-size: calc(var(--fs) * 1.9)">
+              Für Ihr Haus: eigene Fragen in Minuten, Ratsinfos im
+              Vier-Augen-Prinzip
+            </h1>
+            <div class="slide__body">
+              <div class="col" style="flex: 1.2">
+                <ul class="points" style="gap: calc(var(--fs) * 0.5)">
+                  <li>
+                    <strong>Eigene Fragen in Minuten</strong> erstellen und
+                    teilen — die volle Kette bis zum Schließen ist gebaut.
+                  </li>
+                  <li>
+                    <strong>Ratsinfo-Digests mit Freigabe-Gate:</strong> jede
+                    Aussage mit Quellenlink; Redaktion und Freigabe getrennt
+                    (Vier-Augen, serverseitig).
+                  </li>
+                  <li>
+                    <strong>Aufgaben-Ansicht</strong> je Rolle — sichtbar ist nur,
+                    was serverseitig erlaubt ist: Verifizierung, Redaktion,
+                    Verwaltung, Beobachter.
+                  </li>
+                  <li>
+                    <strong>Gebietsbaum</strong> (Ortsteil → … → Bund): jede Frage
+                    erreicht die richtige Ebene — neue Kommune = Konfiguration,
+                    kein Code.
+                  </li>
+                </ul>
+                <div class="foureyes" style="margin-top: calc(var(--fs) * 0.2); padding: calc(var(--fs) * 0.3)" aria-label="Vier-Augen-Prinzip: zwei Personen bestätigen gemeinsam">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#0d6a70" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M4 20a5 5 0 0 1 10 0"/></svg>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#0d6a70" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M4 20a5 5 0 0 1 10 0"/></svg>
+                  <span aria-hidden="true">→</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#0d6a70" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>
+                  <span>Vier-Augen-Freigabe</span>
+                </div>
+              </div>
+              <div class="col" style="flex: 1">
+                <div class="shot">
+                  <img
+                    src="/praesentation/assets/umfragen-uebersicht.png"
+                    alt="Abstimmungs-Übersicht aus Verwaltungssicht: laufende Fragen mit Format-Badges und eine getrennte Ergebnisse-Sektion mit ausgezählten Abstimmungen."
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <details class="notes">
+          <summary>Sprechnotiz</summary>
+          <p>
+            Für Ihr Haus ist der Aufwand klein: Eine Frage ist in wenigen Minuten
+            eingestellt. Und alles, was veröffentlicht wird — besonders die
+            Ratsinfo-Zusammenfassungen — läuft über ein Vier-Augen-Prinzip mit
+            Quellenlink. Es wird nie etwas automatisch publiziert, und jede Rolle
+            sieht nur, was sie darf.
+          </p>
+        </details>
+      </section>
+
+      <!-- =============================================================
+           FOLIE 9 — Betrieb & Kosten: ehrlich
+           ============================================================= -->
+      <section
+        id="folie-9"
+        class="slide"
+        role="group"
+        aria-roledescription="Folie"
+        aria-label="Folie 9 von 11: Betrieb und Kosten"
+        data-title="Betrieb &amp; Kosten"
+      >
+        <div class="stage">
+          <div class="stage__inner">
+            <p class="slide__eyebrow">Betrieb &amp; Kosten — ehrlich</p>
+            <h1>Betrieb und Kosten — bewusst ehrlich</h1>
+            <h2 class="lead">
+              Der Einstieg ist klein und risikoarm: ein Pilot; Selbst-Hosting in
+              eigener Hoheit ist möglich; die Software ist quelloffen.
+            </h2>
+            <div class="slide__body">
+              <div class="col">
+                <div class="card" style="flex: 1">
+                  <p class="card__title sand">Heute: begleiteter Pilot</p>
+                  <p>
+                    Ein überschaubarer, begleiteter Start statt Großprojekt —
+                    Partizip ist ein laufender öffentlicher Pilot, kein fertiges
+                    Massenprodukt.
+                  </p>
+                  <p>
+                    <strong>Bürgerinnen und Bürger zahlen nie</strong> — als
+                    Haltung, nicht als Preisliste.
+                  </p>
+                </div>
+              </div>
+              <div class="col">
+                <div class="card" style="flex: 1">
+                  <p class="card__title sand">Optional: Selbst-Hosting in Ihrer Hoheit</p>
+                  <p>
+                    Dokumentierte Produktions-Anleitung (Docker, Migrationen,
+                    Backups, neue Kommune anlegen) im öffentlichen Repo.
+                  </p>
+                  <p>
+                    <strong>Quelloffen (AGPL-3.0):</strong> keine Lizenzkosten,
+                    keine Anbieter-Abhängigkeit.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div class="slide__foot">
+              <img class="mark" src="/praesentation/assets/partizip-mark.svg" alt="" />
+              <span
+                >Live auf partizip.online — Demo ohne Anmeldung:
+                demo.partizip.online · Gebaut vs. Roadmap sauber getrennt.</span
+              >
+            </div>
+          </div>
+        </div>
+        <details class="notes">
+          <summary>Sprechnotiz</summary>
+          <p>
+            Ich verkaufe Ihnen heute kein Großprojekt. Der ehrliche Weg ist ein
+            kleiner, begleiteter Pilot. Wenn Sie wollen, können Sie Partizip
+            später vollständig selbst betreiben — die Anleitung dafür ist offen
+            dokumentiert. Und die Software ist quelloffen, es gibt keine
+            Lizenzfalle.
+          </p>
+        </details>
+      </section>
+
+      <!-- =============================================================
+           FOLIE 10 — Roadmap: ehrlich getrennt
+           ============================================================= -->
+      <section
+        id="folie-10"
+        class="slide"
+        role="group"
+        aria-roledescription="Folie"
+        aria-label="Folie 10 von 11: Roadmap"
+        data-title="Roadmap — ehrlich getrennt"
+      >
+        <div class="stage">
+          <div class="stage__inner">
+            <p class="slide__eyebrow">Ehrlich getrennt, ohne Termine</p>
+            <h1>Ehrlich getrennt: Was heute läuft — und was kommt</h1>
+            <div class="slide__body">
+              <div class="threecol">
+                <div class="rmcol rmcol--live">
+                  <h3>
+                    <span class="badge badge--live" style="align-self: auto">LIVE</span>
+                  </h3>
+                  <ul>
+                    <li>Drei Abstimmungsformate</li>
+                    <li>Wohnsitz-Verifizierung per Konto-QR</li>
+                    <li>Gebietsbaum bis Bund-Ebene</li>
+                    <li>Geheime Wahl + k-Anonymität</li>
+                    <li>KI-Neutralitäts-Check (assistiert)</li>
+                    <li>DSGVO-Selbstservice</li>
+                    <li>Souveräne Kanäle</li>
+                    <li>Öffentliche Demo mit Verwaltungs-Perspektive</li>
+                  </ul>
+                </div>
+                <div class="rmcol rmcol--plan">
+                  <h3>
+                    <span class="badge badge--roadmap" style="align-self: auto"
+                      >GEPLANT, ohne Termin</span
+                    >
+                  </h3>
+                  <ul>
+                    <li>eID / EUDI-Wallet als Ausbaustufe (bleibt Verifizierung, nie Login)</li>
+                    <li>NFC-Chip als Passkey für Inklusion</li>
+                    <li>Zwei-Faktor für Admin-Rollen</li>
+                    <li>Kreis/Land als eigene Instanzen</li>
+                  </ul>
+                </div>
+                <div class="rmcol rmcol--never">
+                  <h3>
+                    <span class="badge badge--never" style="align-self: auto"
+                      >BEWUSST NICHT</span
+                    >
+                  </h3>
+                  <ul>
+                    <li><s>BundID / Melderegister</s></li>
+                    <li><s>Tier-Lists / Turnier-Formate</s></li>
+                    <li><s>Tracking</s></li>
+                    <li><s>Parteipolitische Positionierung</s></li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <div class="slide__foot">
+              <img class="mark" src="/praesentation/assets/partizip-mark.svg" alt="" />
+              <span
+                >Diese Trennung von Gebaut und Geplant ist selbst ein
+                Vertrauensargument — keine erfundenen Termine.</span
+              >
+            </div>
+          </div>
+        </div>
+        <details class="notes">
+          <summary>Sprechnotiz</summary>
+          <p>
+            Mir ist wichtig, sauber zu trennen. Links steht, was heute live und
+            ausprobierbar ist. In der Mitte, was geplant ist — etwa die
+            eID-Verifizierung als Ausbaustufe; die eID bleibt bei uns aber immer
+            nur Verifizierung, nie Login. Und rechts, was wir bewusst nicht bauen.
+            Termine nenne ich keine, die ich nicht halten kann.
+          </p>
+        </details>
+      </section>
+
+      <!-- =============================================================
+           FOLIE 11 — Nächste Schritte & Kontakt
+           ============================================================= -->
+      <section
+        id="folie-11"
+        class="slide"
+        role="group"
+        aria-roledescription="Folie"
+        aria-label="Folie 11 von 11: Nächste Schritte und Kontakt"
+        data-title="Nächste Schritte &amp; Kontakt"
+      >
+        <div class="stage">
+          <div class="stage__inner center">
+            <img
+              class="mark-big"
+              src="/praesentation/assets/partizip-mark.svg"
+              alt="Partizip Bildzeichen"
+              style="width: calc(var(--fs) * 4.4); height: calc(var(--fs) * 4.4); margin-bottom: calc(var(--fs) * 1)"
+            />
+            <h1 style="font-size: calc(var(--fs) * 2.1)">
+              Ein kleiner, konkreter erster Schritt
+            </h1>
+            <div
+              class="qr"
+              role="img"
+              aria-label="QR-Code zur öffentlichen Demo demo.partizip.online"
+              style="width: calc(var(--fs) * 7); height: calc(var(--fs) * 7)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges"><path stroke="#0d6a70" d="M0 0.5h7m1 0h1m2 0h5m1 0h4m1 0h7M0 1.5h1m5 0h1m1 0h1m2 0h3m2 0h1m1 0h1m1 0h1m1 0h1m5 0h1M0 2.5h1m1 0h3m1 0h1m3 0h1m1 0h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M0 3.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h2m1 0h1m1 0h1m2 0h1m1 0h3m1 0h1M0 4.5h1m1 0h3m1 0h1m2 0h1m4 0h1m1 0h1m2 0h2m1 0h1m1 0h3m1 0h1M0 5.5h1m5 0h1m3 0h1m2 0h1m1 0h5m2 0h1m5 0h1M0 6.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M8 7.5h3m4 0h3m2 0h1M0 8.5h1m1 0h2m1 0h3m1 0h2m1 0h2m1 0h1m1 0h4m1 0h1m2 0h1m1 0h2M3 9.5h2m6 0h5m1 0h6m1 0h1m3 0h1M0 10.5h2m1 0h1m1 0h6m2 0h1m2 0h3m2 0h2m1 0h1m1 0h2M0 11.5h2m2 0h2m1 0h3m1 0h2m3 0h1m2 0h1m3 0h2m3 0h1M2 12.5h2m1 0h3m6 0h2m1 0h1m1 0h1m5 0h2M1 13.5h1m1 0h2m2 0h2m2 0h1m2 0h1m1 0h1m2 0h1m1 0h2m3 0h3M0 14.5h4m1 0h7m1 0h1m1 0h2m2 0h1m2 0h2m2 0h3M4 15.5h2m1 0h1m1 0h2m3 0h1m1 0h1m2 0h1m1 0h1m1 0h1m3 0h1M0 16.5h1m1 0h1m3 0h2m2 0h1m1 0h1m1 0h3m1 0h2m1 0h1m1 0h3m1 0h1M1 17.5h4m4 0h2m3 0h1m1 0h2m2 0h1m2 0h1m1 0h3M0 18.5h1m1 0h5m2 0h1m1 0h1m1 0h5m2 0h2m1 0h2m1 0h1M4 19.5h1m2 0h1m1 0h6m2 0h1m2 0h2m4 0h1M1 20.5h1m1 0h1m2 0h1m1 0h1m1 0h1m2 0h2m1 0h3m1 0h7M8 21.5h1m1 0h1m4 0h2m1 0h1m1 0h1m3 0h5M0 22.5h7m1 0h1m1 0h2m2 0h2m1 0h4m1 0h1m1 0h2m1 0h1M0 23.5h1m5 0h1m1 0h3m1 0h4m2 0h1m1 0h1m3 0h2m2 0h1M0 24.5h1m1 0h3m1 0h1m3 0h1m5 0h1m1 0h1m1 0h5m1 0h1m1 0h1M0 25.5h1m1 0h3m1 0h1m1 0h2m1 0h3m6 0h2m1 0h3m1 0h1M0 26.5h1m1 0h3m1 0h1m1 0h1m4 0h1m3 0h2m2 0h1m1 0h1m2 0h1m1 0h1M0 27.5h1m5 0h1m2 0h2m4 0h1m1 0h5m2 0h2m1 0h1M0 28.5h7m1 0h2m1 0h1m1 0h1m3 0h4m1 0h1m4 0h1"/></svg>
+            </div>
+            <div class="contactlines">
+              <div class="step">
+                <span class="num">1</span>
+                <span>Demo selbst ausprobieren — ohne Anmeldung:
+                  <span class="url">demo.partizip.online</span></span
+                >
+              </div>
+              <div class="step">
+                <span class="num">2</span>
+                <span>Kurzen Termin buchen:
+                  <span class="url">termine.partizip.online/seidler</span></span
+                >
+              </div>
+              <div class="step">
+                <span class="num">3</span>
+                <span>Schreiben Sie uns:
+                  <span class="url">kontakt@partizip.online</span></span
+                >
+              </div>
+            </div>
+            <div class="sand-rule" style="margin-top: calc(var(--fs) * 1.3)" aria-hidden="true"></div>
+          </div>
+        </div>
+        <details class="notes">
+          <summary>Sprechnotiz</summary>
+          <p>
+            Was ich mir wünsche, ist klein: Probieren Sie die Demo einmal selbst
+            aus — der QR-Code führt Sie ohne Anmeldung hinein. Wenn es Sie
+            interessiert, buchen Sie einen kurzen Termin oder schreiben Sie uns.
+            Wir zeigen Ihnen ein fertiges Produkt und laden Sie ein, es
+            mitzugestalten.
+          </p>
+        </details>
+      </section>
+    </main>
+
+    <script src="/praesentation/deck.js"></script>
+  </body>
+</html>
