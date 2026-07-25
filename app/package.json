@@ -29,6 +29,7 @@
     "digest:generate": "tsx scripts/digest-generate.ts",
     "digest:export": "tsx scripts/digest-export.ts",
     "digest:import-draft": "tsx scripts/digest-import-draft.ts",
+    "digest:publish": "tsx scripts/digest-publish.ts",
     "grant-role": "tsx scripts/grant-role.ts",
     "grant-residency": "tsx scripts/grant-residency.ts",
     "anliegen:match": "tsx scripts/anliegen-match.ts",
