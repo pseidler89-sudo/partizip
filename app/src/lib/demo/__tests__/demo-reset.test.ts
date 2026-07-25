@@ -23,7 +23,7 @@ import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { musterstadtSeedId } from "@/lib/demo/seed-ids";
 import { demoReset } from "../../../../scripts/demo-reset.js";
 
-const { tenants, users, polls } = schema;
+const { tenants, users, polls, pollOptions, votes, voteAllocations, voteReceipts } = schema;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(__dirname, "../../../../../db/migrations");
@@ -74,6 +74,67 @@ describe("demo-reset (Integration)", () => {
       typ: "ja_nein_enthaltung",
       status: "aktiv",
     });
+    // Besucher-Stimme + Beleg auf der AKTIVEN ja/nein-Seed-Frage — die MUSS der
+    // Reset weiterhin wischen (Spielwiese jeden Morgen frisch).
+    await db.insert(votes).values({
+      pollId: musterstadtSeedId(DEMO_SLUG, "poll:offen"),
+      tenantId: t.id,
+      voterRef: "besucher-hmac-1",
+      choice: "ja",
+    });
+    await db.insert(voteReceipts).values({
+      pollId: musterstadtSeedId(DEMO_SLUG, "poll:offen"),
+      tenantId: t.id,
+      code: "BELEG-OFFEN-1",
+    });
+
+    // FORMAT-Seed-Frage (P1): aktives Dot-Voting mit kuratierter Seed-Abgabe +
+    // Beleg — der Reset darf sie NICHT anfassen (Beleg-Invariante, s. Skript).
+    const dotPollId = musterstadtSeedId(DEMO_SLUG, "poll:dot");
+    await db.insert(polls).values({
+      id: dotPollId,
+      tenantId: t.id,
+      regionId,
+      frage: "Format-Seed-Frage (Dot)?",
+      typ: "dot_voting",
+      punkteBudget: 5,
+      status: "aktiv",
+    });
+    const [opt] = await db
+      .insert(pollOptions)
+      .values({ pollId: dotPollId, tenantId: t.id, label: "Option A", position: 0 })
+      .returning();
+    await db.insert(voteAllocations).values({
+      pollId: dotPollId,
+      tenantId: t.id,
+      optionId: opt.id,
+      voterRef: "demo:dot:0",
+      punkte: 5,
+      warVerifiziert: true,
+    });
+    await db.insert(voteReceipts).values({
+      pollId: dotPollId,
+      tenantId: t.id,
+      code: "BELEG-FORMAT-1",
+    });
+    // BESUCHER-Abgabe auf der Format-Frage (HMAC-artiger Ref OHNE 'demo:'-
+    // Präfix) + deren Beleg: der Reset muss GENAU diese wischen (Schritt 1b)
+    // und die Beleg-Zahl auf die kuratierte Teilnahme zurückführen — sonst
+    // akkumulieren Besucher-Punkte über Nächte und verschieben die kuratierte
+    // Erzählung (Gate-B MINOR).
+    await db.insert(voteAllocations).values({
+      pollId: dotPollId,
+      tenantId: t.id,
+      optionId: opt.id,
+      voterRef: "a3f9c2e1d4b5a6f7besucherhmac",
+      punkte: 5,
+      warVerifiziert: false,
+    });
+    await db.insert(voteReceipts).values({
+      pollId: dotPollId,
+      tenantId: t.id,
+      code: "BELEG-FORMAT-2",
+    });
 
     // Zwei User: ein ephemeres @demo.invalid-Konto UND ein persistentes
     // Fremdkonto (vor dem Fence angelegt) — beide müssen verschwinden.
@@ -98,6 +159,8 @@ describe("demo-reset (Integration)", () => {
     // demoReset erwartet eine schema-lose drizzle-Instanz auf dieselbe Verbindung.
     const stats = await demoReset(drizzle(sql_), DEMO_SLUG);
     expect(stats.usersDeleted).toBe(2); // ephemer + persistentes Fremdkonto
+    // 1b: genau EIN Besucher auf der Format-Frage gewischt (Seed-Ref bleibt).
+    expect(stats.formatWaehlerDeleted).toBe(1);
 
     const nachher = await db
       .select({ id: users.id })
@@ -117,6 +180,46 @@ describe("demo-reset (Integration)", () => {
       );
     expect(seedPoll.length).toBe(1);
   });
+
+  it.skipIf(SKIP)(
+    "Format-Seed-Frage überlebt MIT kuratierter Abgabe+Beleg; Besucher-Abgabe+Beleg dort GEWISCHT; aktive ja/nein-Besucher-Stimmen gewischt",
+    async () => {
+      const offenId = musterstadtSeedId(DEMO_SLUG, "poll:offen");
+      const dotId = musterstadtSeedId(DEMO_SLUG, "poll:dot");
+
+      // Besucher-Stimme + Beleg der aktiven ja/nein-Frage: gewischt.
+      const offenVotes = await db
+        .select({ id: votes.id })
+        .from(votes)
+        .where(eq(votes.pollId, offenId));
+      expect(offenVotes.length).toBe(0);
+      const offenReceipts = await db
+        .select({ id: voteReceipts.id })
+        .from(voteReceipts)
+        .where(eq(voteReceipts.pollId, offenId));
+      expect(offenReceipts.length).toBe(0);
+
+      // Format-Frage: Poll und kuratierte Seed-Abgabe bleiben; die BESUCHER-
+      // Abgabe (HMAC-Ref) ist gewischt (Schritt 1b) und die Beleg-Zahl wieder
+      // auf der Invariante #Belege == #Teilnehmende (1 == 1).
+      const dotPoll = await db
+        .select({ id: polls.id })
+        .from(polls)
+        .where(and(eq(polls.id, dotId), eq(polls.tenantId, demoTenantId)));
+      expect(dotPoll.length).toBe(1);
+      const alloc = await db
+        .select({ voterRef: voteAllocations.voterRef })
+        .from(voteAllocations)
+        .where(eq(voteAllocations.pollId, dotId));
+      expect(alloc.length).toBe(1);
+      expect(alloc[0].voterRef).toBe("demo:dot:0");
+      const dotReceipts = await db
+        .select({ id: voteReceipts.id })
+        .from(voteReceipts)
+        .where(eq(voteReceipts.pollId, dotId));
+      expect(dotReceipts.length).toBe(1);
+    },
+  );
 
   it.skipIf(SKIP)("Guard: falscher Tenant-Name → Abbruch (nichts gelöscht)", async () => {
     const [fremd] = await db

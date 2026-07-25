@@ -449,6 +449,38 @@ export async function mitErgebnissen(
 }
 
 /**
+ * SQL-Fragment der vertikalen Gebiets-Scheibe (ADR-024) — geteilt von
+ * getAktivePolls und getBeendetePolls (identische Sicht-Regeln, keine Drift).
+ *
+ * viewer_path als Skalar-Subquery (ltree). Ohne viewerRegionId → Gemeinde-Knoten
+ * des Tenants als Fallback-Anker. Vorfahren-Scheibe (`@>`): immer (Gemeinde/
+ * Kreis/Land/Bund + Selbst). Die Nachfahren-Scheibe (`<@`, eigene Ortsteile)
+ * kommt NUR hinzu, wenn der Wohnknoten selbst ein Ortsteil (Blatt) ist — sonst
+ * würde ein Gemeinde-Wohnknoten alle Ortsteil-Polls inkl. Nachbarorte sehen
+ * (Gate-B MAJOR). viewer_path kann NULL sein (Tenant ohne Gemeinde-Knoten) →
+ * dann matcht weder `@>` noch `<@` (ltree-Vergleich mit NULL = NULL) → leere,
+ * sichere Sicht.
+ */
+function regionScheibeSql(tenantId: string, viewerRegionId: string | null) {
+  const viewerPath = viewerRegionId
+    ? sql`(SELECT path FROM regions WHERE id = ${viewerRegionId}::uuid)`
+    : sql`(SELECT g.path FROM regions g WHERE g.typ = 'gemeinde' AND g.tenant_id = ${tenantId}::uuid ORDER BY g.created_at LIMIT 1)`;
+
+  return viewerRegionId
+    ? sql`(
+        ${regions.path} @> ${viewerPath}
+        OR (
+          EXISTS (
+            SELECT 1 FROM regions v
+            WHERE v.id = ${viewerRegionId}::uuid AND v.typ = 'ortsteil'
+          )
+          AND ${regions.path} <@ ${viewerPath}
+        )
+      )`
+    : sql`(${regions.path} @> ${viewerPath})`;
+}
+
+/**
  * Aktive, im Zeitfenster offene Umfragen des Tenants, neu→alt — Standard-Sicht als
  * VERTIKALE SCHEIBE über den Gebietsbaum (ADR-024, GEBIETSMODELL §5; ETAPPE 2).
  *
@@ -488,29 +520,7 @@ export async function getAktivePolls(
 ): Promise<PollListItem[]> {
   const now = new Date();
   const viewerRegionId = opts?.viewerRegionId ?? null;
-
-  // viewer_path als Skalar-Subquery (ltree). Ohne home_region_id → Gemeinde-Knoten
-  // des Tenants als Fallback-Anker.
-  const viewerPath = viewerRegionId
-    ? sql`(SELECT path FROM regions WHERE id = ${viewerRegionId}::uuid)`
-    : sql`(SELECT g.path FROM regions g WHERE g.typ = 'gemeinde' AND g.tenant_id = ${tenantId}::uuid ORDER BY g.created_at LIMIT 1)`;
-
-  // Vorfahren-Scheibe (`@>`): immer (Gemeinde/Kreis/Land/Bund + Selbst). Die
-  // Nachfahren-Scheibe (`<@`, eigene Ortsteile) kommt NUR hinzu, wenn der
-  // Wohnknoten selbst ein Ortsteil (Blatt) ist — sonst würde ein Gemeinde-
-  // Wohnknoten alle Ortsteil-Polls inkl. Nachbarorte sehen (Gate-B MAJOR).
-  const scheibe = viewerRegionId
-    ? sql`(
-        ${regions.path} @> ${viewerPath}
-        OR (
-          EXISTS (
-            SELECT 1 FROM regions v
-            WHERE v.id = ${viewerRegionId}::uuid AND v.typ = 'ortsteil'
-          )
-          AND ${regions.path} <@ ${viewerPath}
-        )
-      )`
-    : sql`(${regions.path} @> ${viewerPath})`;
+  const scheibe = regionScheibeSql(tenantId, viewerRegionId);
 
   const rows = await db
     .select({
@@ -550,6 +560,82 @@ export async function getAktivePolls(
       )
     )
     .orderBy(desc(polls.createdAt));
+
+  return rows.map(
+    (r: Omit<PollListItem, "ersteller"> & ErstellerRohSpalten) => ({
+      ...r,
+      ersteller: baueErsteller(r),
+    }),
+  );
+}
+
+/**
+ * BEENDETE Umfragen des Tenants für die öffentliche „Ergebnisse"-Sektion
+ * (jüngst beendete zuerst) — gleiche vertikale Gebiets-Scheibe wie
+ * getAktivePolls (ADR-024).
+ *
+ * Hintergrund (Gate-B MAJOR-1): Ergebnisse beendeter Umfragen sind laut ADR-022
+ * öffentlich (Aufschlüsselung NACH Schluss), waren aber nirgends gelistet —
+ * Startseite und /umfragen zeigten nur status='aktiv', „Bereits teilgenommen"
+ * nur eigene Teilnahmen. Beendete Fragen (insbesondere die Format-Ergebnisse
+ * des Demo-Mandanten) waren damit nur per Direkt-URL erreichbar.
+ *
+ * Beendet-Semantik deckungsgleich mit istBeendet (ergebnis.ts): status
+ * 'geschlossen' ODER aktive Umfrage mit abgelaufenem Zeitfenster. Entwürfe
+ * erscheinen nie. Begrenzt (Default 10) — die Sektion ist ein Schaufenster der
+ * jüngsten Ergebnisse, kein vollständiges Archiv.
+ */
+export async function getBeendetePolls(
+  db: Db,
+  tenantId: string,
+  opts?: { viewerRegionId?: string | null; limit?: number }
+): Promise<PollListItem[]> {
+  const now = new Date();
+  const viewerRegionId = opts?.viewerRegionId ?? null;
+  const limit = opts?.limit ?? 10;
+  const scheibe = regionScheibeSql(tenantId, viewerRegionId);
+
+  const rows = await db
+    .select({
+      id: polls.id,
+      frage: polls.frage,
+      typ: polls.typ,
+      status: polls.status,
+      verbindlich: polls.verbindlich,
+      regionId: polls.regionId,
+      regionTyp: regions.typ,
+      regionName: regions.name,
+      regionPath: sql<string>`${regions.path}::text`,
+      opensAt: polls.opensAt,
+      closesAt: polls.closesAt,
+      createdAt: polls.createdAt,
+      erstelltVon: polls.erstelltVon,
+      erstellerDisplayName: erstellerUser.displayName,
+      erstellerFunktion: erstellerUser.funktion,
+      erstellerIstRollentraeger: erstellerIstRollentraegerSql,
+    })
+    .from(polls)
+    .innerJoin(regions, eq(regions.id, polls.regionId))
+    .leftJoin(
+      erstellerUser,
+      and(eq(erstellerUser.id, polls.erstelltVon), eq(erstellerUser.tenantId, polls.tenantId)),
+    )
+    .where(
+      and(
+        eq(polls.tenantId, tenantId),
+        or(
+          eq(polls.status, "geschlossen"),
+          // Zeitlich abgelaufen, Status noch 'aktiv' (istBeendet-Semantik);
+          // lte mit NULL closes_at matcht nie (SQL-NULL) → offene Fragen sicher.
+          and(eq(polls.status, "aktiv"), lte(polls.closesAt, now))
+        ),
+        scheibe
+      )
+    )
+    // Jüngst beendete zuerst; NULLS LAST, weil manuell geschlossene Alt-Fragen
+    // ohne closesAt sonst (PG-Default DESC = NULLS FIRST) oben stünden.
+    .orderBy(sql`${polls.closesAt} DESC NULLS LAST`, desc(polls.createdAt))
+    .limit(limit);
 
   return rows.map(
     (r: Omit<PollListItem, "ersteller"> & ErstellerRohSpalten) => ({

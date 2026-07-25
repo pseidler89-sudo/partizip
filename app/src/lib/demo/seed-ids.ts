@@ -1,7 +1,8 @@
 /**
  * demo/seed-ids.ts — kanonische Quelle der deterministischen Seed-IDs.
  *
- * Die Musterstadt-Seeds (scripts/seed-musterstadt.ts) erzeugen ihre Datensätze
+ * Die Musterstadt-Seeds (scripts/seed-musterstadt.ts und — für die Format-
+ * Fragen — scripts/seed-demo.ts) erzeugen ihre Datensätze
  * mit deterministischen UUID-v5-IDs. Reset-Skript UND Server-Actions müssen
  * dieselben IDs kennen: das Reset-Skript, um Besucher-Spielstände von den
  * kuratierten Seed-Daten zu trennen; die Actions, um die Seed-Fragen/-Digests
@@ -40,13 +41,32 @@ export function uuidV5(namespace: string, name: string): string {
 }
 
 /**
- * Seed-Schlüssel der drei Musterstadt-Beispiel-Fragen — MUSS den in
- * scripts/seed-musterstadt.ts verwendeten Keys entsprechen (dort: id("poll:…")).
+ * Seed-Schlüssel der FORMAT-Beispiel-Fragen (P1 „Demo-Alleinstellung"):
+ * aktives Dot-Voting + GESCHLOSSENES Dot-Voting („Vorjahres-Runde" mit sofort
+ * sichtbarem Ergebnis, Gate-B MAJOR-2) + Widerstandsabfrage, angelegt von
+ * scripts/seed-demo.ts (bewusst im
+ * musterstadt-Namensraum, damit Reset/Guards sie kennen). Sie tragen KURATIERTE
+ * Seed-Teilnahme samt Belegen bereits während der Laufzeit (vote_allocations/
+ * vote_resistances, NICHT votes) — der nächtliche Reset lässt ihre Abgaben und
+ * Belege deshalb unangetastet (sonst bräche #Belege == #Teilnehmende).
+ */
+export const MUSTERSTADT_SEED_FORMAT_POLL_KEYS = [
+  "poll:dot",
+  "poll:dot-abgeschlossen",
+  "poll:widerstand",
+] as const;
+
+/**
+ * Seed-Schlüssel der kuratierten Musterstadt-Beispiel-Fragen — MUSS den in
+ * scripts/seed-musterstadt.ts (drei ja/nein-Fragen, dort: id("poll:…")) bzw.
+ * scripts/seed-demo.ts (Format-Fragen, musterstadtSeedId) verwendeten Keys
+ * entsprechen.
  */
 export const MUSTERSTADT_SEED_POLL_KEYS = [
   "poll:offen",
   "poll:verbindlich",
   "poll:geschlossen",
+  ...MUSTERSTADT_SEED_FORMAT_POLL_KEYS,
 ] as const;
 
 /** Seed-Schlüssel des veröffentlichten Musterstadt-Beispiel-Digests (id("digest")). */
@@ -57,12 +77,21 @@ export function musterstadtSeedId(slug: string, key: string): string {
   return uuidV5(SEED_NAMESPACE, `musterstadt:${slug}:${key}`);
 }
 
-/** Die drei Seed-Poll-IDs des Demo-Mandanten (für Reset-NOT-IN und Guards). */
+/** Die Seed-Poll-IDs des Demo-Mandanten (für Reset-NOT-IN und Guards). */
 export function musterstadtSeedPollIds(slug: string): string[] {
   return MUSTERSTADT_SEED_POLL_KEYS.map((key) => musterstadtSeedId(slug, key));
 }
 
-/** Ist die Poll-ID eine der drei kuratierten Musterstadt-Seed-Fragen? */
+/**
+ * Die IDs der FORMAT-Seed-Fragen (Dot-Voting/Widerstandsabfrage): der nächtliche
+ * Reset nimmt sie vom Stimmen-/Beleg-Wipe aktiver Fragen aus (kuratierte
+ * Seed-Teilnahme + Beleg-Invariante, siehe MUSTERSTADT_SEED_FORMAT_POLL_KEYS).
+ */
+export function musterstadtSeedFormatPollIds(slug: string): string[] {
+  return MUSTERSTADT_SEED_FORMAT_POLL_KEYS.map((key) => musterstadtSeedId(slug, key));
+}
+
+/** Ist die Poll-ID eine der kuratierten Musterstadt-Seed-Fragen? */
 export function istMusterstadtSeedPollId(slug: string, pollId: string): boolean {
   return musterstadtSeedPollIds(slug).includes(pollId);
 }

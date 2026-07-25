@@ -22,6 +22,7 @@ import { sha256Hex } from "@/lib/auth/crypto";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import {
   getAktivePolls,
+  getBeendetePolls,
   getMeineTeilnahmen,
   hatBereitsAbgestimmtBatch,
   mitErgebnissen,
@@ -281,6 +282,14 @@ export default async function UmfragenListePage({ params }: PageProps) {
   const aktive = await getAktivePolls(db, tenant.id, { viewerRegionId });
   const aktiveMitErgebnis: PollMitErgebnis[] = await mitErgebnissen(db, tenant.id, aktive);
 
+  // „Ergebnisse"-Sektion (Gate-B MAJOR-1): beendete Umfragen sind laut ADR-022
+  // mit voller Aufschlüsselung öffentlich, waren aber nirgends gelistet —
+  // insbesondere die Format-Ergebnisse des Demo-Mandanten (Widerstandsabfrage/
+  // geschlossenes Dot-Voting) waren für Besucher unauffindbar. Gleiche
+  // Gebiets-Scheibe wie die aktive Liste; Aggregat via mitErgebnissen.
+  const beendete = await getBeendetePolls(db, tenant.id, { viewerRegionId });
+  const beendeteMitErgebnis: PollMitErgebnis[] = await mitErgebnissen(db, tenant.id, beendete);
+
   // Region-Banner (nur wenn eine Region gemerkt ist).
   const ortsteilOptionen = region != null ? await getOrtsteileForTenant(db, tenant.id) : [];
   const banner =
@@ -314,6 +323,14 @@ export default async function UmfragenListePage({ params }: PageProps) {
         ) : (
           <GruppierteListe slug={slugFromPath} items={aktiveMitErgebnis} cta="Anmelden zum Mitstimmen" institution={institution} />
         )}
+
+        {beendeteMitErgebnis.length > 0 && (
+          <ErgebnisseSektion
+            slug={slugFromPath}
+            items={beendeteMitErgebnis}
+            institution={institution}
+          />
+        )}
       </main>
     );
   }
@@ -331,6 +348,10 @@ export default async function UmfragenListePage({ params }: PageProps) {
   const offen = aktiveMitErgebnis.filter((p) => !abgestimmtSet.has(p.id));
 
   const teilnahmen = await getMeineTeilnahmen(db, tenant.id, userId!);
+  // „Ergebnisse" ohne Dopplung: Umfragen mit eigener Teilnahme stehen bereits
+  // (inkl. Ergebnis) unter „Bereits teilgenommen".
+  const teilnahmenIds = new Set(teilnahmen.map((p) => p.id));
+  const ergebnisseOhneTeilnahme = beendeteMitErgebnis.filter((p) => !teilnahmenIds.has(p.id));
 
   // Erst-Login-Lücke: Eingeloggte ohne Wohnort-Anker sehen nur die tenant-weite
   // Sicht. Einmalige Einladung, den Wohnort zu setzen (regionAusPlz schreibt für
@@ -415,7 +436,52 @@ export default async function UmfragenListePage({ params }: PageProps) {
           </ul>
         )}
       </section>
+
+      {/* Beendete Umfragen OHNE eigene Teilnahme — die eigenen stehen bereits
+          (mit Ergebnis) unter „Bereits teilgenommen" und werden nicht doppelt
+          gezeigt. */}
+      {ergebnisseOhneTeilnahme.length > 0 && (
+        <ErgebnisseSektion
+          slug={slugFromPath}
+          items={ergebnisseOhneTeilnahme}
+          institution={institution}
+        />
+      )}
     </main>
+  );
+}
+
+/**
+ * „Ergebnisse"-Sektion: beendete Umfragen mit veröffentlichter Aufschlüsselung
+ * (ADR-022). Für alle Besucher sichtbar — der Ergebnis-Moment der Formate
+ * (Ja/Nein-Balken, Punkte-Verteilung, geringster Widerstand) ist damit ohne
+ * Direkt-URL auffindbar (Gate-B MAJOR-1).
+ */
+function ErgebnisseSektion({
+  slug,
+  items,
+  institution,
+}: {
+  slug: string;
+  items: PollMitErgebnis[];
+  institution: string;
+}) {
+  return (
+    <section className="mt-10">
+      <h2 className="mb-1 text-sm font-semibold" style={{ color: "var(--pz-ink)" }}>
+        Ergebnisse
+      </h2>
+      <p className="mb-3 text-xs" style={{ color: "var(--pz-muted)" }}>
+        Beendete Abstimmungen — ausgezählt und für alle einsehbar.
+      </p>
+      <ul className="space-y-4">
+        {items.map((p) => (
+          <li key={p.id}>
+            <PollKarte slug={slug} poll={p} cta="Ergebnis ansehen" institution={institution} />
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

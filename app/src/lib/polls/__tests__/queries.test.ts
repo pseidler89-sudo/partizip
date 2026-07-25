@@ -39,6 +39,7 @@ import {
   getPollErgebnis,
   getAktivePolls,
   getAllPollsForAdmin,
+  getBeendetePolls,
   getMeineTeilnahmen,
   hatBereitsAbgestimmtBatch,
   mitErgebnissen,
@@ -219,6 +220,61 @@ describe("polls/queries (Integration)", () => {
 
     const list = await getAktivePolls(db as never, t.id);
     expect(list.map((p) => p.id)).toEqual([neu.id, alt.id]); // neu→alt
+  });
+
+  it.skipIf(SKIP)("getBeendetePolls: geschlossene + zeitlich abgelaufene Polls (istBeendet-Semantik), jüngst beendete zuerst; laufend/entwurf/fremder Tenant nie", async () => {
+    const [t] = await db
+      .insert(tenants)
+      .values({ slug: `bp-${Date.now()}`, name: "Beendete-Polls" })
+      .returning();
+    const stadtT = await resolveRegionIdForScope(db as never, t.id, "stadt", null);
+    const vorEinerStunde = new Date(Date.now() - 3_600_000);
+    const vorEinemTag = new Date(Date.now() - 86_400_000);
+    const future = new Date(Date.now() + 3_600_000);
+
+    const [geschlossenNeu] = await db
+      .insert(polls)
+      .values({
+        tenantId: t.id, regionId: stadtT, frage: "geschlossen neu?",
+        typ: "widerstandsabfrage", status: "geschlossen", closesAt: vorEinerStunde,
+      })
+      .returning();
+    const [geschlossenAlt] = await db
+      .insert(polls)
+      .values({
+        tenantId: t.id, regionId: stadtT, frage: "geschlossen alt?",
+        typ: "ja_nein_enthaltung", status: "geschlossen", closesAt: vorEinemTag,
+      })
+      .returning();
+    // Zeitlich abgelaufen, Status noch 'aktiv' → beendet (istBeendet-Semantik).
+    const [abgelaufen] = await db
+      .insert(polls)
+      .values({
+        tenantId: t.id, regionId: stadtT, frage: "abgelaufen?",
+        typ: "ja_nein_enthaltung", status: "aktiv",
+        closesAt: new Date(Date.now() - 30 * 60_000),
+      })
+      .returning();
+    // NICHT beendet: laufend (ohne/mit künftigem closesAt), Entwurf.
+    await db.insert(polls).values([
+      { tenantId: t.id, regionId: stadtT, frage: "läuft ohne Ende", typ: "ja_nein_enthaltung", status: "aktiv" },
+      { tenantId: t.id, regionId: stadtT, frage: "läuft bis später", typ: "dot_voting", punkteBudget: 5, status: "aktiv", closesAt: future },
+      { tenantId: t.id, regionId: stadtT, frage: "entwurf zu", typ: "ja_nein_enthaltung", status: "entwurf", closesAt: vorEinemTag },
+    ]);
+
+    const list = await getBeendetePolls(db as never, t.id);
+    // Jüngst beendete zuerst (closesAt DESC).
+    expect(list.map((p) => p.id)).toEqual([abgelaufen.id, geschlossenNeu.id, geschlossenAlt.id]);
+
+    // Fremder Tenant sieht nichts davon (Tenant-Isolation).
+    const fremd = await getBeendetePolls(db as never, tenantId);
+    const fremdIds = new Set(fremd.map((p) => p.id));
+    expect(fremdIds.has(geschlossenNeu.id)).toBe(false);
+    expect(fremdIds.has(abgelaufen.id)).toBe(false);
+
+    // limit greift.
+    const limitiert = await getBeendetePolls(db as never, t.id, { limit: 1 });
+    expect(limitiert.map((p) => p.id)).toEqual([abgelaufen.id]);
   });
 
   it.skipIf(SKIP)("getAktivePolls: vertikale Scheibe (ADR-024) — eigener Ortsteil + Vorfahren + BUND, keine Nachbarorte", async () => {

@@ -13,9 +13,11 @@ import {
   uuidV5,
   musterstadtSeedId,
   musterstadtSeedPollIds,
+  musterstadtSeedFormatPollIds,
   istMusterstadtSeedPollId,
   istMusterstadtSeedDigestId,
   MUSTERSTADT_SEED_POLL_KEYS,
+  MUSTERSTADT_SEED_FORMAT_POLL_KEYS,
 } from "@/lib/demo/seed-ids";
 
 describe("demo/seed-ids", () => {
@@ -29,11 +31,32 @@ describe("demo/seed-ids", () => {
     );
   });
 
-  it("istMusterstadtSeedPollId: erkennt alle drei Seed-Poll-Keys", () => {
+  it("istMusterstadtSeedPollId: erkennt alle sechs Seed-Poll-Keys (3 ja/nein + 3 Formate)", () => {
     for (const key of MUSTERSTADT_SEED_POLL_KEYS) {
       expect(istMusterstadtSeedPollId("demo", musterstadtSeedId("demo", key))).toBe(true);
     }
-    expect(musterstadtSeedPollIds("demo")).toHaveLength(3);
+    expect(musterstadtSeedPollIds("demo")).toHaveLength(6);
+  });
+
+  it("die geschlossene Dot-Frage (poll:dot-abgeschlossen) ist Format-Seed UND Seed-Poll (Reset-Schutz + Guards)", () => {
+    const id = musterstadtSeedId("demo", "poll:dot-abgeschlossen");
+    expect(istMusterstadtSeedPollId("demo", id)).toBe(true);
+    expect(musterstadtSeedFormatPollIds("demo")).toContain(id);
+  });
+
+  it("Format-Poll-IDs (dot/widerstand) sind eine Teilmenge der Seed-Poll-IDs", () => {
+    const alle = new Set(musterstadtSeedPollIds("demo"));
+    const format = musterstadtSeedFormatPollIds("demo");
+    expect(format).toHaveLength(MUSTERSTADT_SEED_FORMAT_POLL_KEYS.length);
+    for (const id of format) {
+      expect(alle.has(id)).toBe(true);
+    }
+    // Die drei ja/nein-Fragen sind KEINE Format-Fragen (der Reset wischt deren
+    // aktive Stimmen weiterhin — nur die Format-Fragen sind ausgenommen).
+    const formatSet = new Set(format);
+    expect(formatSet.has(musterstadtSeedId("demo", "poll:offen"))).toBe(false);
+    expect(formatSet.has(musterstadtSeedId("demo", "poll:verbindlich"))).toBe(false);
+    expect(formatSet.has(musterstadtSeedId("demo", "poll:geschlossen"))).toBe(false);
   });
 
   it("istMusterstadtSeedPollId: fremde UUIDs und andere Seed-Keys sind KEINE Seed-Polls", () => {

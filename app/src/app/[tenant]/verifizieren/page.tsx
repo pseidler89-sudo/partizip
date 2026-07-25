@@ -442,6 +442,21 @@ export default async function VerifizierenPage({ params, searchParams }: PagePro
           {verifiziert ? "Zur Startseite" : "Später — erst einmal mitmachen"}
         </Link>
       </div>
+
+      {/* eID-Ausblick (ADR-018/ADR-023): ehrliche Ausbaustufe, kein Versprechen
+          mit Datum — Stufe 3 ist im Stufenmodell bereits „z. B. eID" reserviert. */}
+      <div
+        className="mt-8 rounded-xl border p-3.5"
+        style={{ borderColor: "var(--pz-line)" }}
+      >
+        <p className="text-xs leading-relaxed" style={{ color: "var(--pz-muted)" }}>
+          <b>Ausblick:</b> Künftig soll die Wohnsitz-Bestätigung auch bequem
+          online über die Online-Ausweisfunktion (eID) des Personalausweises
+          möglich sein. Heute ist der persönliche Weg vor Ort bewusst der
+          Standard — er ist einfach erklärbar und kommt ohne Behördenkonto und
+          ohne Abgleich mit dem Melderegister aus.
+        </p>
+      </div>
     </main>
   );
 }
