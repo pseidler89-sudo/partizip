@@ -31,11 +31,17 @@ describe("demo/seed-ids", () => {
     );
   });
 
-  it("istMusterstadtSeedPollId: erkennt alle fünf Seed-Poll-Keys (3 ja/nein + 2 Formate)", () => {
+  it("istMusterstadtSeedPollId: erkennt alle sechs Seed-Poll-Keys (3 ja/nein + 3 Formate)", () => {
     for (const key of MUSTERSTADT_SEED_POLL_KEYS) {
       expect(istMusterstadtSeedPollId("demo", musterstadtSeedId("demo", key))).toBe(true);
     }
-    expect(musterstadtSeedPollIds("demo")).toHaveLength(5);
+    expect(musterstadtSeedPollIds("demo")).toHaveLength(6);
+  });
+
+  it("die geschlossene Dot-Frage (poll:dot-abgeschlossen) ist Format-Seed UND Seed-Poll (Reset-Schutz + Guards)", () => {
+    const id = musterstadtSeedId("demo", "poll:dot-abgeschlossen");
+    expect(istMusterstadtSeedPollId("demo", id)).toBe(true);
+    expect(musterstadtSeedFormatPollIds("demo")).toContain(id);
   });
 
   it("Format-Poll-IDs (dot/widerstand) sind eine Teilmenge der Seed-Poll-IDs", () => {

@@ -42,7 +42,9 @@ export function uuidV5(namespace: string, name: string): string {
 
 /**
  * Seed-Schlüssel der FORMAT-Beispiel-Fragen (P1 „Demo-Alleinstellung"):
- * Dot-Voting + Widerstandsabfrage, angelegt von scripts/seed-demo.ts (bewusst im
+ * aktives Dot-Voting + GESCHLOSSENES Dot-Voting („Vorjahres-Runde" mit sofort
+ * sichtbarem Ergebnis, Gate-B MAJOR-2) + Widerstandsabfrage, angelegt von
+ * scripts/seed-demo.ts (bewusst im
  * musterstadt-Namensraum, damit Reset/Guards sie kennen). Sie tragen KURATIERTE
  * Seed-Teilnahme samt Belegen bereits während der Laufzeit (vote_allocations/
  * vote_resistances, NICHT votes) — der nächtliche Reset lässt ihre Abgaben und
@@ -50,6 +52,7 @@ export function uuidV5(namespace: string, name: string): string {
  */
 export const MUSTERSTADT_SEED_FORMAT_POLL_KEYS = [
   "poll:dot",
+  "poll:dot-abgeschlossen",
   "poll:widerstand",
 ] as const;
 

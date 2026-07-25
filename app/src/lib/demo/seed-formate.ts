@@ -62,6 +62,56 @@ export const DEMO_DOT_VERTEILUNGEN: ReadonlyArray<readonly number[]> = [
   [1, 1, 1, 1, 1],
 ];
 
+/**
+ * Frage der GESCHLOSSENEN Dot-Voting-Beispielfrage (Gate-B MAJOR-2): die aktive
+ * Dot-Frage hält ihre Aufschlüsselung laut ADR-022/-025 bis zum Ende zurück und
+ * kann vom Demo-Admin wegen des Seed-Guards nicht geschlossen werden — der
+ * Render-Moment des Formats (Punkte-Balken) wäre im Schaufenster unsichtbar.
+ * Darum ZWEI Dot-Fragen: die aktive zum Mitmachen (oben), diese geschlossene
+ * „Vorjahres-Runde" mit sofort sichtbarem Ergebnis.
+ */
+export const DEMO_DOT_ABGESCHLOSSEN_FRAGE =
+  "Wofür sollten die 15.000 € aus dem Bürgerbudget des Vorjahres eingesetzt werden?";
+
+/** Punktebudget je Wähler:in der geschlossenen Dot-Frage. */
+export const DEMO_DOT_ABGESCHLOSSEN_BUDGET = 5;
+
+/** Optionen der geschlossenen Dot-Frage (Index = position). */
+export const DEMO_DOT_ABGESCHLOSSEN_OPTIONEN = [
+  "Neue Sitzgruppen am Flussufer",
+  "Boule-Bahn im Stadtpark",
+  "Obstbäume für die Streuobstwiese",
+  "Reparatur-Café im Bürgerhaus",
+] as const;
+
+/**
+ * Punkte-Verteilungen der geschlossenen Dot-Frage — gleiche Invarianten wie
+ * DEMO_DOT_VERTEILUNGEN (Budget exakt ausgeschöpft, jede Option ≥ k Wähler,
+ * Teilnehmerzahl ≥ 3k, eindeutiger Gewinner). Erzählung: die Sitzgruppen am
+ * Flussufer gewannen klar, aber ohne Erdrutsch.
+ * Punktesummen: 28 / 24 / 20 / 18 (Wähler je Option: 12 / 14 / 12 / 12).
+ */
+export const DEMO_DOT_ABGESCHLOSSEN_VERTEILUNGEN: ReadonlyArray<readonly number[]> = [
+  [3, 2, 0, 0],
+  [3, 2, 0, 0],
+  [3, 2, 0, 0],
+  [3, 2, 0, 0],
+  [3, 2, 0, 0],
+  [3, 2, 0, 0],
+  [2, 0, 2, 1],
+  [2, 0, 2, 1],
+  [2, 0, 2, 1],
+  [2, 0, 2, 1],
+  [0, 2, 1, 2],
+  [0, 2, 1, 2],
+  [0, 2, 1, 2],
+  [0, 2, 1, 2],
+  [0, 1, 2, 2],
+  [0, 1, 2, 2],
+  [1, 1, 2, 1],
+  [1, 1, 2, 1],
+];
+
 /** Frage der Widerstandsabfrage (geschlossen geseedet → Ergebnis rendert sofort). */
 export const DEMO_WIDERSTAND_FRAGE =
   "Verkehrsberuhigung Marktstraße: Welche Variante erzeugt den geringsten Widerstand?";
@@ -113,4 +163,9 @@ export function demoDotVoterRef(index: number): string {
 /** voter_ref der Seed-Teilnahme der Widerstandsabfrage. */
 export function demoWiderstandVoterRef(index: number): string {
   return `demo:widerstand:${index}`;
+}
+
+/** voter_ref der Seed-Teilnahme der GESCHLOSSENEN Dot-Frage. */
+export function demoDotAbgeschlossenVoterRef(index: number): string {
+  return `demo:dot-abgeschlossen:${index}`;
 }

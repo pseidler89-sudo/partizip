@@ -117,6 +117,24 @@ describe("demo-reset (Integration)", () => {
       tenantId: t.id,
       code: "BELEG-FORMAT-1",
     });
+    // BESUCHER-Abgabe auf der Format-Frage (HMAC-artiger Ref OHNE 'demo:'-
+    // Präfix) + deren Beleg: der Reset muss GENAU diese wischen (Schritt 1b)
+    // und die Beleg-Zahl auf die kuratierte Teilnahme zurückführen — sonst
+    // akkumulieren Besucher-Punkte über Nächte und verschieben die kuratierte
+    // Erzählung (Gate-B MINOR).
+    await db.insert(voteAllocations).values({
+      pollId: dotPollId,
+      tenantId: t.id,
+      optionId: opt.id,
+      voterRef: "a3f9c2e1d4b5a6f7besucherhmac",
+      punkte: 5,
+      warVerifiziert: false,
+    });
+    await db.insert(voteReceipts).values({
+      pollId: dotPollId,
+      tenantId: t.id,
+      code: "BELEG-FORMAT-2",
+    });
 
     // Zwei User: ein ephemeres @demo.invalid-Konto UND ein persistentes
     // Fremdkonto (vor dem Fence angelegt) — beide müssen verschwinden.
@@ -141,6 +159,8 @@ describe("demo-reset (Integration)", () => {
     // demoReset erwartet eine schema-lose drizzle-Instanz auf dieselbe Verbindung.
     const stats = await demoReset(drizzle(sql_), DEMO_SLUG);
     expect(stats.usersDeleted).toBe(2); // ephemer + persistentes Fremdkonto
+    // 1b: genau EIN Besucher auf der Format-Frage gewischt (Seed-Ref bleibt).
+    expect(stats.formatWaehlerDeleted).toBe(1);
 
     const nachher = await db
       .select({ id: users.id })
@@ -162,7 +182,7 @@ describe("demo-reset (Integration)", () => {
   });
 
   it.skipIf(SKIP)(
-    "Format-Seed-Frage überlebt MIT Abgaben+Beleg; aktive ja/nein-Besucher-Stimmen sind gewischt",
+    "Format-Seed-Frage überlebt MIT kuratierter Abgabe+Beleg; Besucher-Abgabe+Beleg dort GEWISCHT; aktive ja/nein-Besucher-Stimmen gewischt",
     async () => {
       const offenId = musterstadtSeedId(DEMO_SLUG, "poll:offen");
       const dotId = musterstadtSeedId(DEMO_SLUG, "poll:dot");
@@ -179,8 +199,9 @@ describe("demo-reset (Integration)", () => {
         .where(eq(voteReceipts.pollId, offenId));
       expect(offenReceipts.length).toBe(0);
 
-      // Format-Frage: Poll, kuratierte Abgabe UND Beleg bleiben (Invariante
-      // #Belege == #Teilnehmende — 1 == 1).
+      // Format-Frage: Poll und kuratierte Seed-Abgabe bleiben; die BESUCHER-
+      // Abgabe (HMAC-Ref) ist gewischt (Schritt 1b) und die Beleg-Zahl wieder
+      // auf der Invariante #Belege == #Teilnehmende (1 == 1).
       const dotPoll = await db
         .select({ id: polls.id })
         .from(polls)

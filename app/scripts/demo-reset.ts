@@ -18,10 +18,16 @@
  *      samt ihrer 7 Seed-Stimmen/Belege bleibt — sie IST der Prüf-Moment.
  *      AUSNAHME (P1): die FORMAT-Seed-Fragen (Dot-Voting/Widerstandsabfrage,
  *      seed-demo.ts) tragen kuratierte Teilnahme + Belege bereits WÄHREND der
- *      Laufzeit (vote_allocations/vote_resistances, nicht votes) — der Wipe
- *      würde ihre Seed-Belege löschen und #Belege == #Teilnehmende brechen.
- *      Sie bleiben unangetastet; Besucher-Abgaben dort erzeugen je einen Beleg,
- *      die Invariante hält also auch ohne Wipe.
+ *      Laufzeit (vote_allocations/vote_resistances, nicht votes) — der
+ *      pauschale Wipe würde ihre Seed-Belege löschen und #Belege ==
+ *      #Teilnehmende brechen. Stattdessen (1b, Gate-B MINOR): NUR die
+ *      BESUCHER-Abgaben der Format-Fragen wischen (kuratierte Seed-Refs tragen
+ *      den 'demo:'-Präfix, echte Besucher-Refs sind HMAC-Hex) und je
+ *      gewischtem Besucher EINEN Beleg entfernen. Belege sind bewusst
+ *      unverknüpft und ohne created_at (Secret Ballot) und damit fungibel —
+ *      es zählt allein die Invariante #Belege == #Teilnehmende, nicht WELCHE
+ *      Zeile bleibt. So ist die Spielwiese auch auf den Format-Fragen jeden
+ *      Morgen frisch (kuratierte Erzählung driftet nicht).
  *   2. Alle NICHT-Seed-Fragen des Demo-Mandanten löschen (Kaskade räumt
  *      Optionen/Stimmen/Belege/Zuteilungen/Widerstände): ephemere Demo-Admins
  *      (Verwaltungs-Perspektive, lib/demo/actions.ts) erstellen eigene Fragen —
@@ -48,11 +54,13 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { and, eq, inArray, lt, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, notInArray, notLike, sql } from "drizzle-orm";
 import {
   tenants,
   polls,
   votes,
+  voteAllocations,
+  voteResistances,
   voteReceipts,
   users,
   anliegen,
@@ -79,6 +87,9 @@ export interface DemoResetStats {
   qrCodesDeleted: number;
   usersDeleted: number;
   anliegenDeleted: number;
+  /** Besucher (distinct voter_refs), deren Abgaben auf den FORMAT-Seed-Fragen
+   *  gewischt wurden (1b) — die kuratierte Seed-Teilnahme bleibt. */
+  formatWaehlerDeleted: number;
 }
 
 /**
@@ -149,6 +160,58 @@ export async function demoReset(
       receiptsDeleted = r.length;
     }
 
+    // 1b. BESUCHER-Abgaben der FORMAT-Seed-Fragen wischen (Gate-B MINOR: „jeden
+    // Morgen frisch" gilt auch für die Format-Fragen — Besucher-Punkte dürfen
+    // die kuratierte Erzählung nicht über Nächte hinweg verschieben). Kuratierte
+    // Seed-Refs tragen den 'demo:'-Präfix (lib/demo/seed-formate.ts); echte
+    // Besucher-Refs sind HMAC-Hex ohne ':' — der Präfix trennt exakt. Je
+    // gewischtem Besucher (distinct voter_ref) wird EIN Beleg entfernt: Belege
+    // sind bewusst personen-/abgaben-unverknüpft und ohne created_at (Secret
+    // Ballot) und damit fungibel — allein #Belege == #Teilnehmende zählt.
+    let formatWaehlerDeleted = 0;
+    for (const formatPollId of musterstadtSeedFormatPollIds(SLUG)) {
+      const alloc = await tx
+        .delete(voteAllocations)
+        .where(
+          and(
+            eq(voteAllocations.tenantId, tenantId),
+            eq(voteAllocations.pollId, formatPollId),
+            notLike(voteAllocations.voterRef, "demo:%"),
+          ),
+        )
+        .returning({ voterRef: voteAllocations.voterRef });
+      const resist = await tx
+        .delete(voteResistances)
+        .where(
+          and(
+            eq(voteResistances.tenantId, tenantId),
+            eq(voteResistances.pollId, formatPollId),
+            notLike(voteResistances.voterRef, "demo:%"),
+          ),
+        )
+        .returning({ voterRef: voteResistances.voterRef });
+      const besucherRefs = new Set<string>(
+        [...alloc, ...resist].map((r: { voterRef: string }) => r.voterRef),
+      );
+      if (besucherRefs.size > 0) {
+        const opfer = await tx
+          .select({ id: voteReceipts.id })
+          .from(voteReceipts)
+          .where(
+            and(eq(voteReceipts.tenantId, tenantId), eq(voteReceipts.pollId, formatPollId)),
+          )
+          .limit(besucherRefs.size);
+        await tx.delete(voteReceipts).where(
+          inArray(
+            voteReceipts.id,
+            opfer.map((o: { id: string }) => o.id),
+          ),
+        );
+        formatWaehlerDeleted += besucherRefs.size;
+        receiptsDeleted += opfer.length;
+      }
+    }
+
     // Nicht-Seed-Fragen der Demo-Admins (Verwaltungs-Perspektive) — VOR der
     // User-Löschung, damit der Spielstand komplett verschwindet (polls-Kaskade
     // räumt options/votes/receipts/allocations/resistances; erstelltVon wäre
@@ -202,6 +265,7 @@ export async function demoReset(
         qrCodesDeleted: q.length,
         usersDeleted: u.length,
         anliegenDeleted: a.length,
+        formatWaehlerDeleted,
       },
     });
 
@@ -212,6 +276,7 @@ export async function demoReset(
       qrCodesDeleted: q.length,
       usersDeleted: u.length,
       anliegenDeleted: a.length,
+      formatWaehlerDeleted,
     };
   });
 
@@ -233,7 +298,8 @@ async function main() {
     console.log(
       `Demo-Reset '${SLUG}': ${stats.votesDeleted} Stimmen, ${stats.receiptsDeleted} Belege, ` +
         `${stats.pollsDeleted} Demo-Fragen, ${stats.qrCodesDeleted} QR-Codes, ` +
-        `${stats.usersDeleted} User (alle des Demo-Tenants), ${stats.anliegenDeleted} Anliegen entfernt.`,
+        `${stats.usersDeleted} User (alle des Demo-Tenants), ${stats.anliegenDeleted} Anliegen, ` +
+        `${stats.formatWaehlerDeleted} Format-Besucher-Abgaben entfernt.`,
     );
   } finally {
     await sqlc.end();

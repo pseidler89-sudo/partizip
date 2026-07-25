@@ -23,6 +23,7 @@ import Link from "next/link";
 import { createDb } from "@/db/client";
 import { polls, sessions, users } from "@/db/schema";
 import { isDemoTenant } from "@/lib/demo/config";
+import { musterstadtSeedId } from "@/lib/demo/seed-ids";
 import { DemoBanner } from "./DemoBanner";
 import { DemoGuide } from "./DemoGuide";
 import { sha256Hex } from "@/lib/auth/crypto";
@@ -98,19 +99,40 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
     }
   }
 
-  // Demo-Mandant: Belege-Link der neuesten GESCHLOSSENEN Beispiel-Frage für den
-  // geführten Rundgang (Schritt „Beleg prüfen") — tenant-scoped, nur im Demo-Fall.
+  // Demo-Mandant: Belege-Link für den geführten Rundgang (Schritt „Beleg
+  // prüfen") — tenant-scoped, nur im Demo-Fall. DETERMINISTISCH auf die
+  // kuratierte geschlossene ja/nein-Seed-Frage gepinnt (Gate-B MINOR): die
+  // frühere „neueste geschlossene"-Query (orderBy closesAt) kippte je nach
+  // Seed-Zeitpunkt auf die Format-Seed-Fragen um, deren closesAt bei jedem
+  // seed-demo-Lauf aufgefrischt wird — der Prüf-Moment wäre nicht mehr
+  // kuratiert. Fallback (Seed-Frage fehlt): neueste geschlossene wie bisher.
   const demo = isDemoTenant(tenant.slug);
   let demoBelegeHref = `/${slugFromPath}/umfragen`;
   if (demo) {
-    const geschlossen = await db
+    const kuratierteId = musterstadtSeedId(tenant.slug, "poll:geschlossen");
+    const kuratiert = await db
       .select({ id: polls.id })
       .from(polls)
-      .where(and(eq(polls.tenantId, tenant.id), eq(polls.status, "geschlossen")))
-      .orderBy(desc(polls.closesAt))
+      .where(
+        and(
+          eq(polls.tenantId, tenant.id),
+          eq(polls.id, kuratierteId),
+          eq(polls.status, "geschlossen"),
+        ),
+      )
       .limit(1);
-    if (geschlossen[0]) {
-      demoBelegeHref = `/${slugFromPath}/umfrage/${geschlossen[0].id}/belege`;
+    if (kuratiert[0]) {
+      demoBelegeHref = `/${slugFromPath}/umfrage/${kuratiert[0].id}/belege`;
+    } else {
+      const geschlossen = await db
+        .select({ id: polls.id })
+        .from(polls)
+        .where(and(eq(polls.tenantId, tenant.id), eq(polls.status, "geschlossen")))
+        .orderBy(desc(polls.closesAt))
+        .limit(1);
+      if (geschlossen[0]) {
+        demoBelegeHref = `/${slugFromPath}/umfrage/${geschlossen[0].id}/belege`;
+      }
     }
   }
 

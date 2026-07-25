@@ -12,9 +12,13 @@
  *     (Stufe 1 mit OFFENEM Termin für den Verifier-Flow).
  *   - 3 Demo-Umfragen: offenes Stimmungsbild (aktiv), verbindliche Abstimmung
  *     (aktiv), GESCHLOSSENE Frage mit veröffentlichter Beleg-Liste (Stimmen+Belege).
- *   - 2 FORMAT-Fragen (P1 „Demo-Alleinstellung", ADR-025): Dot-Voting (aktiv,
- *     Punktebudget) + Widerstandsabfrage (geschlossen → Konsens-Ergebnis rendert
- *     sofort), beide mit kuratierter Seed-Teilnahme DEUTLICH über der k-Schwelle
+ *   - 3 FORMAT-Fragen (P1 „Demo-Alleinstellung", ADR-025): Dot-Voting (aktiv,
+ *     Punktebudget), Dot-Voting „Vorjahres-Runde" (GESCHLOSSEN → die Punkte-
+ *     Aufschlüsselung rendert sofort; Gate-B MAJOR-2 — die aktive Frage hält
+ *     ihre Aufschlüsselung laut ADR-022/-025 bis zum Ende zurück und der
+ *     Seed-Guard verhindert das Schließen) + Widerstandsabfrage (geschlossen →
+ *     Konsens-Ergebnis rendert sofort), alle mit kuratierter Seed-Teilnahme
+ *     DEUTLICH über der k-Schwelle
  *     (Daten: src/lib/demo/seed-formate.ts). IDs im musterstadt-Namensraum
  *     (src/lib/demo/seed-ids.ts) → nächtlicher demo-reset schützt sie, der
  *     Beispiel-Badge im Admin greift.
@@ -57,10 +61,15 @@ import {
   DEMO_DOT_BUDGET,
   DEMO_DOT_OPTIONEN,
   DEMO_DOT_VERTEILUNGEN,
+  DEMO_DOT_ABGESCHLOSSEN_FRAGE,
+  DEMO_DOT_ABGESCHLOSSEN_BUDGET,
+  DEMO_DOT_ABGESCHLOSSEN_OPTIONEN,
+  DEMO_DOT_ABGESCHLOSSEN_VERTEILUNGEN,
   DEMO_WIDERSTAND_FRAGE,
   DEMO_WIDERSTAND_OPTIONEN,
   DEMO_WIDERSTAND_WERTE,
   demoDotVoterRef,
+  demoDotAbgeschlossenVoterRef,
   demoWiderstandVoterRef,
 } from "../src/lib/demo/seed-formate.js";
 
@@ -122,11 +131,12 @@ async function main() {
   /**
    * EIN Beleg (echter CSPRNG-Code, gemeinsamer Generator) für eine Umfrage —
    * mit Kollisions-Retry auf den (poll_id, code)-Unique. Invariante überall:
-   * genau ein Beleg je Stimme/Teilnehmer:in.
+   * genau ein Beleg je Stimme/Teilnehmer:in. Nimmt den Executor (db ODER tx)
+   * entgegen, damit die Teilnahme-Blöcke transaktional seeden können.
    */
-  async function belegAnlegen(pollId: string): Promise<void> {
+  async function belegAnlegen(dbx: Pick<typeof db, "insert">, pollId: string): Promise<void> {
     for (let attempt = 0; attempt < 5; attempt++) {
-      const res = await db
+      const res = await dbx
         .insert(voteReceipts)
         .values({ pollId, tenantId, code: generateReadableCode("BELEG") })
         .onConflictDoNothing({ target: [voteReceipts.pollId, voteReceipts.code] })
@@ -290,6 +300,7 @@ async function main() {
   // onConflictDoUpdate frischt Text + Zeitfenster bei jedem Lauf auf
   // (repeatable Demo: das Dot-Voting ist nach einem Re-Seed wieder offen).
   const dotId = musterstadtSeedId(TENANT_SLUG, "poll:dot");
+  const dotAbgeschlossenId = musterstadtSeedId(TENANT_SLUG, "poll:dot-abgeschlossen");
   const widerstandId = musterstadtSeedId(TENANT_SLUG, "poll:widerstand");
 
   const dotFelder = {
@@ -312,6 +323,32 @@ async function main() {
       ...dotFelder,
     })
     .onConflictDoUpdate({ target: polls.id, set: dotFelder });
+
+  // Dot-Voting „Vorjahres-Runde" GESCHLOSSEN geseedet (Gate-B MAJOR-2): die
+  // aktive Dot-Frage hält ihre Aufschlüsselung bis zum Ende zurück (ADR-022/025)
+  // und der Seed-Guard (lib/polls/actions.ts) verhindert, dass ein Demo-Admin
+  // sie schließt — erst DIESE geschlossene Frage zeigt den Punkte-Balken-Moment
+  // des Formats sofort. Zeitfenster klar in der Vergangenheit.
+  const dotAbgeschlossenFelder = {
+    frage: DEMO_DOT_ABGESCHLOSSEN_FRAGE,
+    status: "geschlossen" as const,
+    punkteBudget: DEMO_DOT_ABGESCHLOSSEN_BUDGET,
+    opensAt: addDays(now, -60),
+    closesAt: addDays(now, -30),
+    createdAt: addDays(now, -60),
+  };
+  await db
+    .insert(polls)
+    .values({
+      id: dotAbgeschlossenId,
+      tenantId,
+      regionId: stadtRegionId,
+      typ: "dot_voting",
+      verbindlich: false,
+      erstelltVon: adminId,
+      ...dotAbgeschlossenFelder,
+    })
+    .onConflictDoUpdate({ target: polls.id, set: dotAbgeschlossenFelder });
 
   // Widerstandsabfrage GESCHLOSSEN geseedet: ADR-022/025 halten die
   // Aufschlüsselung laufender Fragen zurück — erst die geschlossene Frage zeigt
@@ -347,6 +384,15 @@ async function main() {
       .values({ id: optionId, pollId: dotId, tenantId, label: DEMO_DOT_OPTIONEN[i], position: i })
       .onConflictDoUpdate({ target: pollOptions.id, set: { label: DEMO_DOT_OPTIONEN[i] } });
   }
+  const dotAbgeschlossenOptionIds: string[] = [];
+  for (let i = 0; i < DEMO_DOT_ABGESCHLOSSEN_OPTIONEN.length; i++) {
+    const optionId = musterstadtSeedId(TENANT_SLUG, `poll:dot-abgeschlossen:opt:${i}`);
+    dotAbgeschlossenOptionIds.push(optionId);
+    await db
+      .insert(pollOptions)
+      .values({ id: optionId, pollId: dotAbgeschlossenId, tenantId, label: DEMO_DOT_ABGESCHLOSSEN_OPTIONEN[i], position: i })
+      .onConflictDoUpdate({ target: pollOptions.id, set: { label: DEMO_DOT_ABGESCHLOSSEN_OPTIONEN[i] } });
+  }
   const widerstandOptionIds: string[] = [];
   for (let i = 0; i < DEMO_WIDERSTAND_OPTIONEN.length; i++) {
     const optionId = musterstadtSeedId(TENANT_SLUG, `poll:widerstand:opt:${i}`);
@@ -358,6 +404,7 @@ async function main() {
   }
   console.log(
     `  format-polls: dot_voting (aktiv, Budget ${DEMO_DOT_BUDGET}, ${DEMO_DOT_OPTIONEN.length} Optionen) · ` +
+      `dot_voting (geschlossen, Budget ${DEMO_DOT_ABGESCHLOSSEN_BUDGET}, ${DEMO_DOT_ABGESCHLOSSEN_OPTIONEN.length} Optionen) · ` +
       `widerstandsabfrage (geschlossen, ${DEMO_WIDERSTAND_OPTIONEN.length} Optionen)`,
   );
 
@@ -366,46 +413,73 @@ async function main() {
   // „nur einfügen, wenn noch keine Abgaben da sind". Teilnehmerzahlen liegen
   // DEUTLICH über K_ANONYMITY_SCHWELLE, jede Dot-Option wird von ≥ k Wählern
   // bedacht (keine per-Option-Maskierung); je Wähler EIN Beleg (Invariante).
-  const dotAbgaben = await db
-    .select({ id: voteAllocations.id })
-    .from(voteAllocations)
-    .where(and(eq(voteAllocations.pollId, dotId), eq(voteAllocations.tenantId, tenantId)))
-    .limit(1);
-  if (dotAbgaben.length === 0) {
-    for (let i = 0; i < DEMO_DOT_VERTEILUNGEN.length; i++) {
-      const voterRef = demoDotVoterRef(i);
-      const warVerifiziert = i % 2 === 0;
-      // Nur punkte > 0 speichern (CHECK vote_allocations_punkte_positiv).
-      const zeilen = DEMO_DOT_VERTEILUNGEN[i]
-        .map((punkte, position) => ({
-          pollId: dotId,
-          tenantId,
-          optionId: dotOptionIds[position],
-          voterRef,
-          punkte,
-          warVerifiziert,
-        }))
-        .filter((z) => z.punkte > 0);
-      await db.insert(voteAllocations).values(zeilen);
-      await belegAnlegen(dotId);
-    }
-    console.log(`  dot-teilnahme: ${DEMO_DOT_VERTEILUNGEN.length} Wähler:innen + Belege`);
-  } else {
-    console.log("  dot-teilnahme: bereits vorhanden — unverändert");
+  // Jeder Block läuft in EINER Transaktion (Gate-B MINOR-5, crash-tolerant):
+  // bricht der Seed mitten in der Wähler-Schleife ab, bleibt KEIN Teilzustand
+  // zurück — der „≥ 1 Zeile → skip"-Guard würde eine partielle Teilnahme sonst
+  // dauerhaft einfrieren (Abgaben unter k / Belege ≠ Teilnehmende).
+  async function seedDotTeilnahme(
+    pollId: string,
+    optionIds: readonly string[],
+    verteilungen: ReadonlyArray<readonly number[]>,
+    voterRefFuer: (i: number) => string,
+    label: string,
+  ): Promise<void> {
+    await db.transaction(async (tx) => {
+      const vorhanden = await tx
+        .select({ id: voteAllocations.id })
+        .from(voteAllocations)
+        .where(and(eq(voteAllocations.pollId, pollId), eq(voteAllocations.tenantId, tenantId)))
+        .limit(1);
+      if (vorhanden.length > 0) {
+        console.log(`  ${label}: bereits vorhanden — unverändert`);
+        return;
+      }
+      for (let i = 0; i < verteilungen.length; i++) {
+        const voterRef = voterRefFuer(i);
+        const warVerifiziert = i % 2 === 0;
+        // Nur punkte > 0 speichern (CHECK vote_allocations_punkte_positiv).
+        const zeilen = verteilungen[i]
+          .map((punkte, position) => ({
+            pollId,
+            tenantId,
+            optionId: optionIds[position],
+            voterRef,
+            punkte,
+            warVerifiziert,
+          }))
+          .filter((z) => z.punkte > 0);
+        await tx.insert(voteAllocations).values(zeilen);
+        await belegAnlegen(tx, pollId);
+      }
+      console.log(`  ${label}: ${verteilungen.length} Wähler:innen + Belege`);
+    });
   }
 
-  const widerstandAbgaben = await db
-    .select({ id: voteResistances.id })
-    .from(voteResistances)
-    .where(and(eq(voteResistances.pollId, widerstandId), eq(voteResistances.tenantId, tenantId)))
-    .limit(1);
-  if (widerstandAbgaben.length === 0) {
+  await seedDotTeilnahme(dotId, dotOptionIds, DEMO_DOT_VERTEILUNGEN, demoDotVoterRef, "dot-teilnahme");
+  await seedDotTeilnahme(
+    dotAbgeschlossenId,
+    dotAbgeschlossenOptionIds,
+    DEMO_DOT_ABGESCHLOSSEN_VERTEILUNGEN,
+    demoDotAbgeschlossenVoterRef,
+    "dot-abgeschlossen-teilnahme",
+  );
+
+  await db.transaction(async (tx) => {
+    const widerstandAbgaben = await tx
+      .select({ id: voteResistances.id })
+      .from(voteResistances)
+      .where(and(eq(voteResistances.pollId, widerstandId), eq(voteResistances.tenantId, tenantId)))
+      .limit(1);
+    if (widerstandAbgaben.length > 0) {
+      console.log("  widerstand-teilnahme: bereits vorhanden — unverändert");
+      return;
+    }
     for (let i = 0; i < DEMO_WIDERSTAND_WERTE.length; i++) {
       const voterRef = demoWiderstandVoterRef(i);
       const warVerifiziert = i % 2 === 0;
       // VOLLSTÄNDIGE Abgabe: JEDE Option bekommt eine Zeile — 0-Werte („keine
       // Einwände") werden MIT gespeichert (Invariante, ADR-025 / Block G).
-      await db.insert(voteResistances).values(
+      await tx.insert(voteResistances).values(
         DEMO_WIDERSTAND_WERTE[i].map((wert, position) => ({
           pollId: widerstandId,
           tenantId,
@@ -415,12 +489,10 @@ async function main() {
           warVerifiziert,
         })),
       );
-      await belegAnlegen(widerstandId);
+      await belegAnlegen(tx, widerstandId);
     }
     console.log(`  widerstand-teilnahme: ${DEMO_WIDERSTAND_WERTE.length} Wähler:innen (vollständig) + Belege`);
-  } else {
-    console.log("  widerstand-teilnahme: bereits vorhanden — unverändert");
-  }
+  });
 
   // ----- 3. Stimmen + Belege für die GESCHLOSSENE Frage --------------------
   // Idempotenz: feste Demo-voter_refs (UNIQUE poll,voter_ref). Belege werden EINMAL
@@ -447,7 +519,7 @@ async function main() {
         warVerifiziert: i % 2 === 0,
       });
       // 1 Beleg je Stimme (Invariante #Belege == #Stimmen). Echter CSPRNG-Code.
-      await belegAnlegen(geschlossenId);
+      await belegAnlegen(db, geschlossenId);
     }
     console.log(`  votes+belege: ${DEMO_CHOICES.length} (geschlossene Frage)`);
   } else {
