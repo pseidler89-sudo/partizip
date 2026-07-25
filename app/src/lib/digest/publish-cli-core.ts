@@ -13,7 +13,7 @@
  * KEIN direkter Status-Write, der die Gates umgeht.
  */
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { tenants, users, digests, digestStatements, auditEvents } from "@/db/schema";
 import { normalizeEmail } from "@/lib/auth/email";
@@ -147,20 +147,42 @@ export async function digestPublishCli(
 
   // =======================================================================
   // Aus 'entwurf': Titel → Aussagen prüfen → freigeben
+  //
+  // Die Schritte laufen bewusst getrennt (KEINE gemeinsame Transaktion) —
+  // exakt wie im Admin-UI, wo sie einzelne Aktionen sind: Titel-Korrektur und
+  // Prüf-Stempel überleben eine fehlgeschlagene Freigabe (z. B. SoD-Block)
+  // und gehen beim Wiederholen nicht verloren. Alle Schritte sind idempotent.
   // =======================================================================
   if (digest.status === "entwurf") {
     if (neuerTitel !== null) {
-      await db.update(digests).set({ title: neuerTitel }).where(eq(digests.id, digest.id));
+      // Defense-in-Depth: zusätzlich tenant-scoped, obwohl der Digest oben
+      // bereits tenant-scoped geladen wurde.
+      await db
+        .update(digests)
+        .set({ title: neuerTitel })
+        .where(and(eq(digests.id, digest.id), eq(digests.tenantId, tenant.id)));
       schritte.push("titel_korrigiert");
     }
 
     // Ungeprüfte Aussagen stempeln (m7: NUR isNull(geprueft_at), nie überschreiben).
     const anzahlGeprueft = await db.transaction(async (tx: Db) => {
+      // Defense-in-Depth: digest_statements hat keine eigene tenant_id-Spalte,
+      // daher tenant-Scoping über die digests-Beziehung (Subquery).
       const neu = await tx
         .update(digestStatements)
         .set({ geprueftAt: new Date(), geprueftBy: actorId })
         .where(
-          and(eq(digestStatements.digestId, digest.id), isNull(digestStatements.geprueftAt)),
+          and(
+            eq(digestStatements.digestId, digest.id),
+            isNull(digestStatements.geprueftAt),
+            inArray(
+              digestStatements.digestId,
+              tx
+                .select({ id: digests.id })
+                .from(digests)
+                .where(and(eq(digests.id, digest.id), eq(digests.tenantId, tenant.id))),
+            ),
+          ),
         )
         .returning({ id: digestStatements.id });
       await tx.insert(auditEvents).values({
