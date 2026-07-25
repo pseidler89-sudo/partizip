@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 };
 
 const DEMO_MAILTO =
-  "mailto:patrick@seidler.ml?subject=Partizip%20%E2%80%93%20Demo%20f%C3%BCr%20unsere%20Kommune";
+  "mailto:kontakt@partizip.online?subject=Partizip%20%E2%80%93%20Demo%20f%C3%BCr%20unsere%20Kommune";
 
 /** Öffentliche Selbstbedienungs-Demo (Musterstadt-Spielwiese, nächtlicher Reset). */
 const DEMO_URL = "https://demo.partizip.online";
@@ -211,7 +211,7 @@ export default async function FuerKommunenPage({
               Plattform live ansehen →
             </Link>
           </div>
-          <p className="mt-4 text-sm text-white/80">Oder direkt schreiben: patrick@seidler.ml</p>
+          <p className="mt-4 text-sm text-white/80">Oder direkt schreiben: kontakt@partizip.online</p>
         </section>
       </div>
     </main>

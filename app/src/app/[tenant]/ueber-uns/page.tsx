@@ -179,11 +179,11 @@ export default async function UeberUnsPage({
           {ANBIETER.name}
           <br />
           <a
-            href={`mailto:${ANBIETER.email}`}
+            href="mailto:kontakt@partizip.online"
             className="underline"
             style={{ color: "var(--pz-brand)" }}
           >
-            {ANBIETER.email}
+            kontakt@partizip.online
           </a>
         </p>
         <p className="mt-4 text-xs" style={{ color: "var(--pz-muted)" }}>
