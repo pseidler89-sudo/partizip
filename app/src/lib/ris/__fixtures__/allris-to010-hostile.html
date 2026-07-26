@@ -1,0 +1,60 @@
+<!--
+  allris-to010-hostile.html — SYNTHETISCHE Sicherheits-Fixture (KEIN Seiten-Abzug!)
+
+  Achtung: Die Regel „Fixtures immer als unveränderten Live-Abzug erzeugen" gilt
+  für die STRUKTUR-Fixtures (allris-to010-real.html / allris-to020-real.html).
+  Diese Datei ist bewusst von Hand geschrieben: sie bildet eine MANIPULIERTE
+  Seite nach, wie sie eine kompromittierte oder feindliche RIS-Installation
+  ausliefern könnte. Sie darf nicht „realistisch aufgeräumt" werden — jeder Link
+  hier ist ein Angriffsfall, den parseTo010 verwerfen muss.
+
+  Enthaltene Fälle:
+    1. <base href> auf fremde Origin (zieht sonst ALLE relativen Links mit)
+    2. Cloud-Metadaten-Endpunkt (SSRF-Klassiker, http://169.254.169.254)
+    3. protokollrelativer Link (//attacker.example/...)
+    4. absolute fremde Origin mit passendem /allris/-Pfad
+    5. Nicht-HTTP-Schemes (javascript:, data:, file:) — Positivliste, nicht Negativliste
+    6. eigene Origin, aber AUSSERHALB von /allris/ (Pfad-Schranke)
+    7. Look-alike-Host (www.taunusstein.de.attacker.example)
+    8. ein legitimer relativer Link — muss trotz feindlichem <base> erhalten bleiben
+-->
+<html>
+  <head>
+    <!-- (1) feindliches <base> -->
+    <base href="https://attacker.example/allris/" />
+    <title>Manipulierte Sitzungsseite</title>
+  </head>
+  <body>
+    <dl>
+      <dt class="colTitle"><span class="label">Gremium:</span></dt>
+      <dd class="colEntry"><span class="text4">Ortsbeirat Bleidenstadt</span></dd>
+    </dl>
+
+    <!-- (2) Cloud-Metadaten -->
+    <a href="http://169.254.169.254/allris/to020?TOLFDNR=1">Metadaten</a>
+    <a href="http://169.254.169.254/latest/meta-data/iam/security-credentials/">Credentials</a>
+
+    <!-- (3) protokollrelativ -->
+    <a href="//attacker.example/allris/to020?TOLFDNR=2">Protokollrelativ</a>
+
+    <!-- (4) fremde Origin mit passendem Pfad -->
+    <a href="https://attacker.example/allris/to020?TOLFDNR=3">Fremde Origin</a>
+    <a href="https://attacker.example/allris/vo020?VOLFDNR=4">Fremde Vorlage</a>
+    <a href="https://attacker.example/allris/wicket/resource/org.apache.wicket.Application/doc1.pdf">Einladung</a>
+
+    <!-- (5) Nicht-HTTP-Schemes -->
+    <a href="javascript:alert(1)">JS</a>
+    <a href="data:text/html,<script>alert(1)</script>">Data</a>
+    <a href="file:///etc/passwd">Datei</a>
+
+    <!-- (6) eigene Origin, aber ausserhalb /allris/ -->
+    <a href="https://www.taunusstein.de/intern/to020?TOLFDNR=5">Intern</a>
+    <a href="https://www.taunusstein.de/allris/../intern/to020?TOLFDNR=6">Traversal aus /allris/ heraus</a>
+
+    <!-- (7) Look-alike-Host -->
+    <a href="https://www.taunusstein.de.attacker.example/allris/to020?TOLFDNR=7">Look-alike</a>
+
+    <!-- (8) legitim, relativ — muss trotz (1) auf die eigene Installation zeigen -->
+    <a href="to020?TOLFDNR=48521&amp;SILFDNR=4021">Echter TOP</a>
+  </body>
+</html>

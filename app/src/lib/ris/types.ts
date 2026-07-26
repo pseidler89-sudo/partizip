@@ -25,8 +25,13 @@ export interface DocumentRef {
   bodyText?: string | null;
   // M1(c): Primäre URL (Download/Ressource) — kann instabile Wicket-URL sein
   sourceUrl: string;
-  // M1(c): Stabile öffentliche Seite für Digest-Statements (ALLRIS: to010/to020/vo020;
-  // Provox: meeting/details oder getfile). NIE in digest_statements persistieren wenn fehlt.
+  /**
+   * @deprecated OHNE WIRKUNG. `ris_documents` hat keine Spalte dafür, der Wert
+   * wurde nie persistiert; kein Adapter setzt ihn mehr (oparl seit m-1, allris
+   * seit der SSRF-Härtung). Der Digest ersetzt instabile Wicket-URLs selbst über
+   * `extractive_v1.resolveStableUrl(doc, meeting.sourceUrl)`.
+   * Feld bleibt nur, bis die letzten Test-Zusicherungen darauf entfallen.
+   */
   stableSourceUrl?: string;
   contentHash?: string;
 }

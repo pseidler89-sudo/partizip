@@ -7,8 +7,18 @@
  *
  * Scraping-Strategie:
  *   - Sitzungsdetails: GET /allris/to010?SILFDNR=<id>&TOLFDNR=... (TO + Dokumente)
- *   - TOP-Details:     GET /allris/to020?TOLFDNR=<id> (Beschlusstext + Abstimmung)
  *   - PDF-Links:       Sitzungsbezogen frisch auflösen (doc-IDs instabil!)
+ *   - TOP-Details (to020, Beschlusstext + Abstimmung): STILLGELEGT, siehe
+ *     „Hälfte B" bei parseTo020 weiter unten. Der Adapter liefert für TOPs
+ *     nur Metadaten (Nummer, Betreff, Link), keinen bodyText.
+ *
+ * SICHERHEIT: Alle Ziel-URLs stammen aus Fremd-HTML. Sie werden gegen eine
+ * Scheme-Positivliste, die eigene Origin und den Pfadpräfix `/allris/` geprüft —
+ * einmal beim Parsen (parseTo010) und ein zweites Mal unmittelbar vor jedem
+ * Fetch (assertAllowedRisUrl). Ohne diese Schranken kann eine manipulierte
+ * Seite den Importer zu beliebigen Zielen schicken (SSRF: Cloud-Metadaten,
+ * interne Dienste) und die Antwort landet als Digest-Text bzw. als anklickbarer
+ * Link auf der öffentlichen Digest-Seite.
  *
  * Robots.txt: /allris/___tmp/ gesperrt; relevante Pfade frei.
  *
@@ -20,10 +30,40 @@
  * Neue Fixtures deshalb IMMER per Download der echten Seite erzeugen.
  */
 
-import { createHash } from "node:crypto";
 import type { RisAdapter, MeetingRef, FetchedMeeting, DocumentRef, FetchFn } from "./types.js";
 import { makeRisGetFn } from "./fetch-wrapper.js";
 import { extractPdfText } from "./provox.js";
+
+// ---------------------------------------------------------------------------
+// Grenzen
+// ---------------------------------------------------------------------------
+
+/**
+ * Obergrenze für Dokumente je Sitzung (analog oparl.ts).
+ * Ohne Deckel erzeugt eine manipulierte oder fehlerhafte Seite mit tausenden
+ * Links ebenso viele DB-Zeilen und (bei PDFs) ebenso viele gedrosselte Requests
+ * à 1,1 s gegen den Stadtserver.
+ */
+export const MAX_DOCS = 30;
+
+/**
+ * Obergrenze für die zu parsende HTML-Größe. Die echten ALLRIS-Seiten liegen bei
+ * ~115 KB; alles jenseits von 2 MB ist kein Sitzungsdokument mehr, sondern Last.
+ */
+export const MAX_HTML_BYTES = 2_000_000;
+
+/**
+ * Schneidet übergroßes HTML ab — laut, nicht still: ein stiller Deckel verdeckt
+ * genau den Fehler, den er melden soll.
+ */
+function capHtml(html: string, kontext: string): string {
+  if (html.length <= MAX_HTML_BYTES) return html;
+  console.warn(
+    `[AllrisAdapter] ${kontext}: HTML ist ${html.length} Zeichen groß und wird auf ` +
+      `${MAX_HTML_BYTES} abgeschnitten. Das Ergebnis ist unvollständig.`
+  );
+  return html.slice(0, MAX_HTML_BYTES);
+}
 
 // ---------------------------------------------------------------------------
 // HTML-Parsing-Hilfsfunktionen (pure, testbar ohne fetch)
@@ -96,36 +136,91 @@ function escapeRegExp(text: string): string {
 }
 
 /**
- * Löst einen href gegen die Basis-URL auf. ALLRIS 4 liefert ABSOLUTE hrefs
+ * Erlaubte Schemes als POSITIVliste. Eine Negativliste (`javascript:`, `mailto:`,
+ * …) ist prinzipiell unvollständig — `data:`, `file:`, `gopher:` und alles
+ * Künftige rutschen durch.
+ */
+const ALLOWED_SCHEMES = new Set(["https:", "http:"]);
+
+/** Jede ALLRIS-Ressource liegt unterhalb dieses Pfads. */
+const ALLRIS_PATH_PREFIX = "/allris/";
+
+/**
+ * Gehört eine bereits aufgelöste URL zur erlaubten ALLRIS-Installation?
+ *
+ * Drei harte Bedingungen: erlaubtes Scheme, IDENTISCHE Origin wie die
+ * konfigurierte Basis-URL (Schema + Host + Port) und Pfad unterhalb `/allris/`.
+ * Damit sind `http://169.254.169.254/to020?…` (Cloud-Metadaten),
+ * `//attacker.example/…` (protokollrelativ) und ein injiziertes
+ * `<base href="https://attacker.example/allris/">` gleichermaßen ausgeschlossen.
+ */
+export function isAllowedRisUrl(candidate: string, allowedBaseUrl: string): boolean {
+  let url: URL;
+  let base: URL;
+  try {
+    url = new URL(candidate);
+    base = new URL(allowedBaseUrl);
+  } catch {
+    return false;
+  }
+  if (!ALLOWED_SCHEMES.has(url.protocol)) return false;
+  if (url.origin !== base.origin) return false;
+  if (!url.pathname.startsWith(ALLRIS_PATH_PREFIX)) return false;
+  return true;
+}
+
+/**
+ * Löst einen href gegen die Seiten-Basis auf UND prüft ihn gegen die erlaubte
+ * Installation. ALLRIS 4 liefert ABSOLUTE hrefs
  * (`https://www.taunusstein.de/allris/to020?...`); ältere/andere Installationen
  * liefern relative. Beides muss funktionieren.
  * Entities (`&amp;`) werden dekodiert — sonst gehen Folge-Fetches mit literalem
  * `&amp;` in der Query raus.
+ *
+ * Rückgabe `null` = Link verwerfen. Beide Argumente (`href`, `pageBase`) stammen
+ * aus Fremd-HTML; die Prüfung erfolgt deshalb gegen `allowedBaseUrl`, das
+ * ausschließlich aus der Konfiguration kommt.
  */
-function resolveUrl(href: string, baseUrl: string): string | null {
+function resolveUrl(href: string, pageBase: string, allowedBaseUrl: string): string | null {
   const decoded = decodeEntities(href).trim();
-  if (!decoded || decoded.startsWith("#") || /^(javascript|mailto):/i.test(decoded)) return null;
+  if (!decoded || decoded.startsWith("#")) return null;
+  let resolved: string;
   try {
-    return new URL(decoded, baseUrl).toString();
+    resolved = new URL(decoded, pageBase).toString();
   } catch {
     return null;
   }
+  return isAllowedRisUrl(resolved, allowedBaseUrl) ? resolved : null;
 }
 
 /**
  * `<base href="…">` der Seite (ALLRIS setzt `…/allris/`). Ohne base-Tag gilt die
  * ALLRIS-Konvention `<baseUrl>/allris/`, damit auch dokument-relative hrefs
  * (`to020?TOLFDNR=…`) korrekt auflösen.
+ *
+ * Ein `<base href>`, das die eigene Origin verlässt oder aus `/allris/`
+ * herausführt, wird IGNORIERT (Fallback) — sonst genügt ein einziges injiziertes
+ * Tag, um jeden relativen Link der Seite auf einen fremden Host zu ziehen.
  */
-function resolveBaseHref(html: string, baseUrl: string): string {
-  const fallback = `${baseUrl.replace(/\/$/, "")}/allris/`;
-  const match = html.match(/<base[^>]+href="([^"]*)"/i);
-  if (!match) return fallback;
+function resolveBaseHref(html: string, allowedBaseUrl: string): string {
+  const fallback = `${allowedBaseUrl.replace(/\/$/, "")}${ALLRIS_PATH_PREFIX}`;
+  const match = html.match(/<base\s([^>]*)>/i);
+  const href = match?.[1].match(/\bhref="([^"]*)"/i)?.[1];
+  if (!href) return fallback;
+  let candidate: string;
   try {
-    return new URL(decodeEntities(match[1]), fallback).toString();
+    candidate = new URL(decodeEntities(href), fallback).toString();
   } catch {
     return fallback;
   }
+  if (!isAllowedRisUrl(candidate, allowedBaseUrl)) {
+    console.warn(
+      `[AllrisAdapter] <base href="${href}"> verlässt die erlaubte ALLRIS-Installation ` +
+        `(${allowedBaseUrl}${ALLRIS_PATH_PREFIX}) und wird ignoriert.`
+    );
+    return fallback;
+  }
+  return candidate;
 }
 
 /**
@@ -136,17 +231,38 @@ function resolveBaseHref(html: string, baseUrl: string): string {
  * LABEL-basiert, NICHT positionsbasiert: die Reihenfolge der Felder ist je nach
  * Sitzungsart unterschiedlich, und ein dokumentweiter Regex-Scan trifft
  * zuverlässig den falschen Treffer (z. B. die ALLRIS-Versionszeile im <head>).
+ *
+ * ReDoS: Der Tag-Kopf wird in EINEM Schritt gefasst (`<span\s([^>]*)>`); die
+ * Klassenprüfung läuft danach auf dem isolierten Attributstring. Zwei
+ * unbegrenzte `[^>]*` um eine Gruppe herum (`class="[^"]*\blabel\b[^"]*"`)
+ * lassen die Laufzeit bei feindlichem Input kubisch wachsen.
  */
 function extractGrunddatum(html: string, label: string): string | undefined {
-  const pattern = new RegExp(
-    `<span[^>]*class="[^"]*\\blabel\\b[^"]*"[^>]*>\\s*${escapeRegExp(label)}\\s*:?\\s*</span>` +
-      `[\\s\\S]{0,120}?<dd[^>]*>([\\s\\S]*?)</dd>`,
-    "i"
+  const spanPattern = new RegExp(
+    `<span\\s([^>]*)>\\s*${escapeRegExp(label)}\\s*:?\\s*</span>`,
+    "gi"
   );
-  const match = html.match(pattern);
-  if (!match) return undefined;
-  const value = stripHtml(match[1]);
-  return value.length > 0 ? value : undefined;
+  let match: RegExpExecArray | null;
+  while ((match = spanPattern.exec(html)) !== null) {
+    if (!hasClassWord(match[1], "label")) continue;
+    // Fenster nach dem Label: der zugehörige <dd>-Wert steht unmittelbar dahinter.
+    const window = html.slice(spanPattern.lastIndex, spanPattern.lastIndex + 20_000);
+    const ddMatch = window.match(/^[\s\S]{0,120}?<dd[^>]*>([\s\S]*?)<\/dd>/i);
+    if (!ddMatch) continue;
+    const value = stripHtml(ddMatch[1]);
+    if (value.length > 0) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Prüft ein Klassenwort auf einem bereits ISOLIERTEN Attributstring
+ * (Ergebnis von `<tag\s([^>]*)>`), nicht auf dem Roh-HTML.
+ */
+function hasClassWord(attrs: string, word: string): boolean {
+  const classValue = attrs.match(/\bclass="([^"]*)"/i)?.[1];
+  if (!classValue) return false;
+  return new RegExp(`\\b${escapeRegExp(word)}\\b`).test(classValue);
 }
 
 /** Erstes Grunddaten-Feld, das einen Wert liefert. */
@@ -158,21 +274,40 @@ function extractFirstGrunddatum(html: string, labels: string[]): string | undefi
   return undefined;
 }
 
-function sha256Hex(text: string): string {
-  return createHash("sha256").update(text, "utf-8").digest("hex");
-}
+// HINWEIS: Hier gibt es bewusst keine Hash-Funktion mehr. Der früher im Adapter
+// berechnete `contentHash` wurde nie verwendet — scripts/ris-import.ts rechnet
+// den Hash beim Upsert selbst aus `body_text` neu.
 
 /**
  * Parst die to010-Seite (Sitzung/Tagesordnung).
  * Extrahiert: Gremium, Betreff, Datum/Uhrzeit, Ort, Dokumente, TOP-/Vorlagen-Links.
+ *
+ * @param allowedBaseUrl Erlaubte ALLRIS-Installation (aus der KONFIGURATION, nicht
+ *   aus der Seite). Jeder Link muss darunter liegen; alles andere wird verworfen.
+ *   Default ist `baseUrl`, weil beides in der Praxis dieselbe Quelle ist — der
+ *   Parameter macht die Schranke aber explizit und in Tests einzeln setzbar.
  */
 export function parseTo010(
   html: string,
   baseUrl: string,
-  silfdnr: string
+  silfdnr: string,
+  allowedBaseUrl: string = baseUrl
 ): { meta: Partial<MeetingRef>; documents: DocumentRef[] } {
+  html = capHtml(html, `to010?SILFDNR=${silfdnr}`);
+
   const documents: DocumentRef[] = [];
-  const pageBase = resolveBaseHref(html, baseUrl);
+  let verworfeneDocs = 0;
+  /** Fügt ein Dokument hinzu; false = Deckel erreicht. */
+  const pushDoc = (doc: DocumentRef): boolean => {
+    if (documents.length >= MAX_DOCS) {
+      verworfeneDocs++;
+      return false;
+    }
+    documents.push(doc);
+    return true;
+  };
+
+  const pageBase = resolveBaseHref(html, allowedBaseUrl);
   const links = matchLinks(html);
 
   // Kopfzeile "<Gremium> - <Datum>" als Fallback, falls die Grunddaten fehlen.
@@ -196,17 +331,19 @@ export function parseTo010(
   // wenn nichts da ist, bleibt location bewusst undefined (nichts erfinden).
   const location = extractFirstGrunddatum(html, ["Ort", "Raum", "Sitzungsort", "Sitzungsraum"]);
 
+  // Stabile Sitzungs-URL (meta.sourceUrl). Sie wird NICHT aus der Seite
+  // übernommen, sondern aus Konfiguration + SILFDNR gebaut.
+  const meetingPageUrl =
+    resolveUrl(`to010?SILFDNR=${encodeURIComponent(silfdnr)}`, pageBase, allowedBaseUrl) ??
+    `${allowedBaseUrl.replace(/\/$/, "")}${ALLRIS_PATH_PREFIX}to010?SILFDNR=${encodeURIComponent(silfdnr)}`;
+
   // Sitzungsdokumente (PDF-Links)
   // M1(b): Wicket-doc-IDs (doc<N>.pdf) sind INSTABIL → stable external_id aus docType+normalisiertem Label
   // Die Wicket-URL wird in source_url gespeichert und IMMER aktualisiert (UPDATE-Pfad in upsertDocument).
-  const stableSourceUrl =
-    resolveUrl(`to010?SILFDNR=${encodeURIComponent(silfdnr)}`, pageBase) ??
-    `${baseUrl.replace(/\/$/, "")}/allris/to010?SILFDNR=${silfdnr}`;
-
   const seenDocTypes = new Set<string>();
   for (const link of links) {
     if (!/\/wicket\/resource\/org\.apache\.wicket\.Application\/doc\d+\.pdf/i.test(link.href)) continue;
-    const sourceUrl = resolveUrl(link.href, pageBase);
+    const sourceUrl = resolveUrl(link.href, pageBase, allowedBaseUrl);
     if (!sourceUrl) continue;
 
     const linkText = link.text;
@@ -229,15 +366,18 @@ export function parseTo010(
     if (seenDocTypes.has(stableId)) continue;
     seenDocTypes.add(stableId);
 
-    // M1(c): Stabile Seiten-URL für Digest-Statements (Wicket-URL ist instabil)
-    documents.push({ docType, externalId: stableId, title: linkText || undefined, sourceUrl, stableSourceUrl });
+    // HINWEIS: KEIN stableSourceUrl-Feld mehr (analog oparl.ts). Es gibt in
+    // `ris_documents` keine Spalte dafür — der Wert wurde nie persistiert. Der
+    // Digest ersetzt instabile Wicket-URLs selbst über
+    // `extractive_v1.resolveStableUrl(doc, meeting.sourceUrl)`.
+    pushDoc({ docType, externalId: stableId, title: linkText || undefined, sourceUrl });
   }
 
   // TO-Links (to020?TOLFDNR=…) — TOPs mit Beschlüssen
   const seenTops = new Set<string>();
   for (const link of links) {
     if (!/(?:^|\/)to020\?/i.test(link.href)) continue;
-    const sourceUrl = resolveUrl(link.href, pageBase);
+    const sourceUrl = resolveUrl(link.href, pageBase, allowedBaseUrl);
     if (!sourceUrl) continue;
     const tolfdnr = new URL(sourceUrl).searchParams.get("TOLFDNR");
     if (!tolfdnr || seenTops.has(tolfdnr)) continue;
@@ -245,7 +385,7 @@ export function parseTo010(
 
     // TOP-Nummer steht in derselben Zeile in <td class="tonr"> und ist über
     // dieselbe TOLFDNR verankert (id="link_<TOLFDNR>") — kein Positionsraten.
-    const nummer = extractTopNummer(html, tolfdnr);
+    const nummer = extractTopNummer(links, tolfdnr);
     const betreffText = link.text;
     let topTitle: string;
     if (nummer && betreffText) topTitle = `TOP ${nummer} – ${betreffText}`;
@@ -253,12 +393,11 @@ export function parseTo010(
     else if (betreffText) topTitle = betreffText;
     else topTitle = `TOP (TOLFDNR ${tolfdnr})`;
 
-    documents.push({
+    pushDoc({
       docType: "top",
       externalId: tolfdnr,
       title: topTitle,
       sourceUrl,
-      stableSourceUrl: sourceUrl,
     });
   }
 
@@ -266,19 +405,28 @@ export function parseTo010(
   const seenVorlagen = new Set<string>();
   for (const link of links) {
     if (!/(?:^|\/)vo020\?/i.test(link.href)) continue;
-    const sourceUrl = resolveUrl(link.href, pageBase);
+    const sourceUrl = resolveUrl(link.href, pageBase, allowedBaseUrl);
     if (!sourceUrl) continue;
     const volfdnr = new URL(sourceUrl).searchParams.get("VOLFDNR");
     if (!volfdnr || seenVorlagen.has(volfdnr)) continue;
     seenVorlagen.add(volfdnr);
 
-    documents.push({
+    pushDoc({
       docType: "vorlage",
       externalId: volfdnr,
       title: link.text || `Vorlage VOLFDNR ${volfdnr}`,
       sourceUrl,
-      stableSourceUrl: sourceUrl,
     });
+  }
+
+  if (verworfeneDocs > 0) {
+    // LAUT, nicht still: ein stillschweigend greifender Deckel verdeckt genau
+    // den Fehler (oder Angriff), den er melden soll.
+    console.warn(
+      `[AllrisAdapter] Sitzung ${silfdnr}: Obergrenze von ${MAX_DOCS} Dokumenten erreicht, ` +
+        `${verworfeneDocs} weitere Dokument(e)/TOP(s) verworfen. ` +
+        `Die Sitzung ist unvollständig importiert — Seite prüfen.`
+    );
   }
 
   return {
@@ -288,57 +436,118 @@ export function parseTo010(
       title: betreff ?? gremium,
       meetingDate,
       location,
-      sourceUrl: stableSourceUrl,
+      sourceUrl: meetingPageUrl,
     },
     documents,
   };
 }
 
+interface ParsedLink {
+  href: string;
+  text: string;
+  /** Roher Attributstring des <a>-Tags — für id/class-Prüfungen ohne zweiten Scan. */
+  attrs: string;
+}
+
 /**
  * Alle <a>-Elemente mit href. Der Ankertext darf verschachtelte Tags enthalten
  * (ALLRIS setzt z. B. <span class="zusatzinfo"></span> in den Betreff) — deshalb
- * non-greedy über beliebigen Inhalt und anschließend Tags strippen.
+ * bis zum nächsten </a> lesen und anschließend Tags strippen.
+ *
+ * ReDoS: Der Tag-Kopf wird in EINEM Schritt gefasst (`<a\s([^>]*)>`), das href
+ * danach aus dem isolierten Attributstring gezogen. Das Vorgängermuster
+ * `<a\s+[^>]*href="([^"]*)"[^>]*>` hatte zwei unbegrenzte `[^>]*` um eine
+ * Gruppe: an der echten Fixture (115 KB) 16 ms, mit 1200 angehängten
+ * `<a href="x"` (128 KB) 10 643 ms — kubisches Wachstum.
  */
-function matchLinks(html: string): Array<{ href: string; text: string }> {
-  const links: Array<{ href: string; text: string }> = [];
-  const pattern = /<a\s+[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+function matchLinks(html: string): ParsedLink[] {
+  const links: ParsedLink[] = [];
+  const tagPattern = /<a\s([^>]*)>/gi;
   let match: RegExpExecArray | null;
-  while ((match = pattern.exec(html)) !== null) {
-    links.push({ href: match[1], text: stripHtml(match[2]) });
+  while ((match = tagPattern.exec(html)) !== null) {
+    const attrs = match[1];
+    const href = attrs.match(/\bhref="([^"]*)"/i)?.[1];
+    if (href === undefined) continue;
+    const close = html.indexOf("</a", tagPattern.lastIndex);
+    const text = close === -1 ? "" : stripHtml(html.slice(tagPattern.lastIndex, close));
+    links.push({ href, text, attrs });
   }
   return links;
 }
 
-/** TOP-Nummer ("Ö 3.1.1") aus dem Anker id="link_<TOLFDNR>" der Tagesordnungszeile. */
-function extractTopNummer(html: string, tolfdnr: string): string | undefined {
-  const pattern = new RegExp(
-    `<a[^>]*\\bid="link_${escapeRegExp(tolfdnr)}"[^>]*>([\\s\\S]*?)</a>`,
-    "i"
-  );
-  const match = html.match(pattern);
-  if (!match) return undefined;
-  const value = stripHtml(match[1]);
-  return value.length > 0 ? value : undefined;
+/**
+ * TOP-Nummer ("Ö 3.1.1") aus dem Anker id="link_<TOLFDNR>" der Tagesordnungszeile.
+ * Arbeitet auf den bereits geparsten Links — kein zweiter Scan über das HTML.
+ */
+function extractTopNummer(links: ParsedLink[], tolfdnr: string): string | undefined {
+  const idPattern = new RegExp(`\\bid="link_${escapeRegExp(tolfdnr)}"`, "i");
+  for (const link of links) {
+    if (!idPattern.test(link.attrs)) continue;
+    if (link.text.length > 0) return link.text;
+  }
+  return undefined;
 }
 
 /**
  * Überschrift der Inhaltsspalte ("Ortsbeirat Bleidenstadt - 05.04.2017").
  * Das ERSTE <h1> ist der Seitenkopf ("Stadt Taunusstein") und taugt nicht.
+ *
+ * ReDoS: wie oben — Tag-Kopf in einem Schritt, Klassenprüfung auf dem
+ * isolierten Attributstring.
  */
 function extractHeadline(html: string): { gremium?: string; datum?: string } | undefined {
-  const pattern = /<h1[^>]*class="[^"]*\btitle\b[^"]*"[^>]*>([\s\S]*?)<\/h1>/i;
-  const match = html.match(pattern);
-  if (!match) return undefined;
-  const text = stripHtml(match[1]);
-  if (!text) return undefined;
-  const dateMatch = text.match(/(\d{1,2}\.\d{1,2}\.\d{4})/);
-  const gremium = text.replace(/\s*[-–]\s*\d{1,2}\.\d{1,2}\.\d{4}\s*$/, "").trim();
-  return { gremium: gremium || undefined, datum: dateMatch?.[1] };
+  const pattern = /<h1\s([^>]*)>([\s\S]*?)<\/h1>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(html)) !== null) {
+    if (!hasClassWord(match[1], "title")) continue;
+    const text = stripHtml(match[2]);
+    if (!text) continue;
+    const dateMatch = text.match(/(\d{1,2}\.\d{1,2}\.\d{4})/);
+    const gremium = text.replace(/\s*[-–]\s*\d{1,2}\.\d{1,2}\.\d{4}\s*$/, "").trim();
+    return { gremium: gremium || undefined, datum: dateMatch?.[1] };
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
-// to020 (TOP-Detail)
+// to020 (TOP-Detail) — „Hälfte B", STILLGELEGT
 // ---------------------------------------------------------------------------
+//
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║ STILLGELEGT — parseTo020 wird von fetchMeeting NICHT mehr aufgerufen.    ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+//
+// WARUM (an Live-Daten reproduziert, Gate-B):
+//   - Der Panel-Text ist ein WORTPROTOKOLL, kein Beschluss. Er enthält
+//     Änderungsanträge, Wortmeldungen und mehrere Abstimmungen hintereinander.
+//   - Die Stimmenzahlen sind keiner Abstimmung eindeutig zuzuordnen: extractVotes
+//     sammelt „Dafür/Dagegen/Enthaltungen" dokumentweit ein und nimmt je Feld die
+//     letzte Fundstelle — die drei Zahlen können damit aus DREI VERSCHIEDENEN
+//     Abstimmungen stammen.
+//   - Ergebnis im Feldtest: der Digest veröffentlichte die Stimmen eines
+//     ABGELEHNTEN Änderungsantrags (6/27) als Ergebnis des Hauptbeschlusses
+//     (25/8) — namentlich, parteibezogen, automatisch auf Mastodon und Bluesky.
+//     Eine falsche Abstimmungszahl über eine benannte Fraktion ist der teuerste
+//     denkbare Fehler dieser Plattform. Deshalb: lieber keine Aussage als eine
+//     möglicherweise falsche.
+//
+// WAS ZUR REAKTIVIERUNG NÖTIG IST (alle vier Punkte, nicht einzeln):
+//   1. STRUKTURIERTE ÜBERGABE statt Text-Rückparse: `votes`/`beschlussart` müssen
+//      als Felder bis zum Digest durchgereicht werden. Heute serialisiert der
+//      Adapter sie in den bodyText und `extractive_v1.ts` (buildTopStatement,
+//      `bodyText.match(/Abstimmung:\s*(.+)/i)`) parst sie wieder heraus — eine
+//      Textzeile im Beschluss, die zufällig „Abstimmung:" enthält, wird dort zum
+//      amtlichen Ergebnis.
+//   2. Nur der LETZTE `Beschluss:`-Abschnitt des Panels zählt (die maßgebliche
+//      Abstimmung), nicht der gesamte Paneltext.
+//   3. Stimmen nur als TRIPEL aus EINEM gemeinsamen Fundkontext (eine Tabelle,
+//      eine Zeile) — nie drei unabhängige Einzeltreffer. Doppelpunkt ist Pflicht
+//      (`Dafür: 25`), damit Fließtext („dafür 25 Jahre") nicht greift.
+//   4. Unvollständig oder mehrdeutig (fehlendes Feld, mehrere Kandidaten-Tripel)
+//      → `null`. Kein Auffüllen fehlender Werte mit 0.
+//
+// Die Funktion bleibt samt Tests erhalten, weil sie das Parsing dokumentiert und
+// die Grundlage für Punkt 2–4 ist. Sie ist bis dahin ohne Aufrufer im Produktivpfad.
 
 export interface To020Result {
   beschluss?: string;
@@ -358,8 +567,12 @@ export interface To020Result {
  *
  * Es gibt weder <h3>Beschlusstext</h3> noch "Ja-Stimmen:" — die Stimmen stehen
  * als "Dafür/Dagegen/Enthaltungen" in einer Word-Tabelle.
+ *
+ * STILLGELEGT — siehe Kommentarblock oben. Kein Aufrufer im Produktivpfad.
  */
 export function parseTo020(html: string): To020Result {
+  html = capHtml(html, "to020");
+
   // Beschlusstext aus dem Panel "Beschluss"
   const beschlussPanel = extractPanel(html, "Beschluss");
   const beschluss = beschlussPanel ? htmlToText(beschlussPanel) || undefined : undefined;
@@ -396,13 +609,14 @@ export function parseTo020(html: string): To020Result {
  * `id="showHideLink_<key>"` sind die Abschnittsgrenzen.
  */
 function extractPanel(html: string, label: string): string | undefined {
-  const anchorPattern = new RegExp(
-    `<a[^>]*href="#showHideLink_([A-Za-z0-9_]+)"[^>]*>\\s*${escapeRegExp(label)}\\s*</a>`,
-    "i"
+  // ReDoS-sicher: Tag-Kopf in einem Schritt, href danach aus dem isolierten
+  // Attributstring (nicht zwei freie [^>]* um eine Gruppe herum).
+  const labelPattern = new RegExp(`^\\s*${escapeRegExp(label)}\\s*$`, "i");
+  const anchor = matchLinks(html).find(
+    (link) => /^#showHideLink_[A-Za-z0-9_]+$/.test(link.href) && labelPattern.test(link.text)
   );
-  const anchorMatch = html.match(anchorPattern);
-  if (!anchorMatch) return undefined;
-  const key = anchorMatch[1];
+  if (!anchor) return undefined;
+  const key = anchor.href.replace("#showHideLink_", "");
 
   const startPattern = new RegExp(`\\bid="showHideLink_${escapeRegExp(key)}"`);
   const startMatch = startPattern.exec(html);
@@ -418,9 +632,13 @@ function extractPanel(html: string, label: string): string | undefined {
     .replace(/<[^>]*$/, "");
 
   // Innerhalb des Abschnitts nur den Inhaltsteil (docPart) nehmen, damit der
-  // Auf-/Zuklappen-Kopf nicht im Text landet.
-  const docPart = section.match(/<div[^>]*class="[^"]*\bdocPart\b[^"]*"[^>]*>([\s\S]*)$/i);
-  return docPart ? docPart[1] : section;
+  // Auf-/Zuklappen-Kopf nicht im Text landet. Tag-Kopf wieder in EINEM Schritt.
+  const divPattern = /<div\s([^>]*)>/gi;
+  let divMatch: RegExpExecArray | null;
+  while ((divMatch = divPattern.exec(section)) !== null) {
+    if (hasClassWord(divMatch[1], "docPart")) return section.slice(divPattern.lastIndex);
+  }
+  return section;
 }
 
 /** "Dafür: 25 Dagegen: 8 Enthaltungen: 0" — letzte Fundstelle gewinnt. */
@@ -550,43 +768,72 @@ export class AllrisAdapter implements RisAdapter {
     return refs;
   }
 
+  /**
+   * Zahl der Fehler, die beim letzten fetchMeeting-Lauf verschluckt wurden
+   * (fehlgeschlagene PDF-Downloads, verworfene Ziel-URLs). Der Aufrufer
+   * (scripts/ris-import.ts) spiegelt sie in den Exit-Code: ein Import, der
+   * still mit Code 0 endet, obwohl Texte fehlen, ist von einem erfolgreichen
+   * Import nicht zu unterscheiden.
+   */
+  get errorCount(): number {
+    return this.fehler;
+  }
+  private fehler = 0;
+
+  /**
+   * ZWEITE SCHRANKE unmittelbar vor jedem Fetch. Die erste sitzt in parseTo010;
+   * diese hier greift auch für URLs, die über einen anderen Weg hereinkommen —
+   * etwa `ref.sourceUrl` aus der Datenbank, die bei einem früheren Import aus
+   * Fremd-HTML befüllt worden sein kann.
+   */
+  private assertAllowedRisUrl(url: string, kontext: string): void {
+    if (isAllowedRisUrl(url, this.baseUrl)) return;
+    throw new Error(
+      `[AllrisAdapter] Ziel-URL außerhalb der erlaubten ALLRIS-Installation ` +
+        `(${this.baseUrl}${ALLRIS_PATH_PREFIX}) — nicht abgerufen: ${url} (${kontext})`
+    );
+  }
+
   async fetchMeeting(ref: MeetingRef): Promise<FetchedMeeting> {
-    // Sitzungsseite laden
+    this.fehler = 0;
+
+    // Sitzungsseite laden — auch die Einstiegs-URL wird geprüft.
+    this.assertAllowedRisUrl(ref.sourceUrl, `Sitzung ${ref.externalId}`);
     const resp = await this.fetchFn(ref.sourceUrl);
     const html = await resp.text();
 
-    const { meta, documents: rawDocs } = parseTo010(html, this.baseUrl, ref.externalId);
+    const { meta, documents: rawDocs } = parseTo010(html, this.baseUrl, ref.externalId, this.baseUrl);
 
     const enrichedDocs: DocumentRef[] = [];
 
     for (const doc of rawDocs) {
       if (doc.docType === "top") {
-        // to020-Seite laden für Beschlusstext
-        try {
-          const topResp = await this.fetchFn(doc.sourceUrl);
-          const topHtml = await topResp.text();
-          const { beschluss, abstimmung } = parseTo020(topHtml);
-          let bodyText: string | null = null;
-          if (beschluss) {
-            bodyText = beschluss;
-            if (abstimmung) bodyText += `\nAbstimmung: ${abstimmung}`;
-          }
-          const contentHash = bodyText ? sha256Hex(bodyText) : undefined;
-          enrichedDocs.push({ ...doc, bodyText, contentHash });
-        } catch {
-          enrichedDocs.push(doc);
-        }
+        // HÄLFTE B STILLGELEGT: kein to020-Abruf, kein bodyText, kein contentHash.
+        // TOPs sind reine Metadaten (Nummer, Betreff, Link) — siehe der
+        // Kommentarblock bei parseTo020. Das spart nebenbei einen gedrosselten
+        // Request (1,1 s) je TOP gegen den Stadtserver.
+        enrichedDocs.push(doc);
       } else if (this.downloadPdfs && /\.pdf(\?|$)/i.test(doc.sourceUrl)) {
         // PDF laden + Text extrahieren
         // ACHTUNG: doc-IDs bei ALLRIS instabil → immer frisch von Detailseite
         // (vo020 ist eine HTML-Seite, kein PDF — nicht als PDF herunterladen)
         try {
+          this.assertAllowedRisUrl(doc.sourceUrl, `Dokument ${doc.externalId ?? doc.title ?? "?"}`);
           const pdfResp = await this.fetchFn(doc.sourceUrl);
           const buffer = await pdfResp.arrayBuffer();
           const bodyText = await extractPdfText(buffer);
-          const contentHash = bodyText ? sha256Hex(bodyText) : undefined;
-          enrichedDocs.push({ ...doc, bodyText, contentHash });
-        } catch {
+          // KEIN contentHash hier: scripts/ris-import.ts rechnet ihn ohnehin aus
+          // dem bodyText neu — ein zweiter Hash wäre toter Code, der auseinanderlaufen kann.
+          enrichedDocs.push({ ...doc, bodyText });
+        } catch (err) {
+          // NICHT still verschlucken: ein leerer catch löscht beim nächsten
+          // Import den bereits korrekt importierten Text (ris-import schrieb
+          // body_text/content_hash auf NULL), und der Lauf endete mit Code 0.
+          this.fehler++;
+          console.warn(
+            `[AllrisAdapter] Dokument konnte nicht geladen werden: ${doc.sourceUrl} — ` +
+              `${err instanceof Error ? err.message : String(err)}`
+          );
           enrichedDocs.push(doc);
         }
       } else {

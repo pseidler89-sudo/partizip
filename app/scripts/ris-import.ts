@@ -152,6 +152,10 @@ async function main() {
 
   let importedMeetings = 0;
   let importedDocs = 0;
+  // Fehler werden gezählt und im Exit-Code gespiegelt. Ein Lauf, der Texte
+  // verliert, aber mit Code 0 endet, ist von einem erfolgreichen Lauf nicht zu
+  // unterscheiden — genau so bleiben kaputte Importe unbemerkt.
+  let fehler = 0;
 
   for (const ref of toProcess) {
     console.log(`\nSitzung ${ref.externalId}: ${ref.gremium ?? ref.title ?? "?"} (${ref.meetingDate?.toLocaleDateString("de-DE") ?? "kein Datum"})`);
@@ -192,7 +196,16 @@ async function main() {
       fetchedMeeting = await adapter.fetchMeeting(ref);
     } catch (err) {
       console.error(`  Fehler beim Abrufen: ${err instanceof Error ? err.message : err}`);
+      fehler++;
       continue;
+    }
+
+    // Vom Adapter verschluckte Einzelfehler (z. B. fehlgeschlagene PDF-Downloads)
+    // mitzählen — sonst meldet der Import Erfolg, obwohl Texte fehlen.
+    const adapterFehler = (adapter as { errorCount?: number }).errorCount ?? 0;
+    if (adapterFehler > 0) {
+      console.error(`  ${adapterFehler} Dokument(e) konnten nicht geladen werden.`);
+      fehler += adapterFehler;
     }
 
     // Meeting-Metadaten aktualisieren
@@ -234,6 +247,13 @@ async function main() {
 
   console.log(`\nImport abgeschlossen: ${importedMeetings} Sitzungen, ${importedDocs} Dokumente.`);
   await sql.end();
+
+  if (fehler > 0) {
+    console.error(
+      `\n${fehler} Fehler beim Import — Ergebnis ist unvollständig. Exit-Code 1.`
+    );
+    process.exit(1);
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -256,19 +276,28 @@ async function upsertDocument(db: any, meetingId: string, doc: DocumentRef): Pro
     )
     .limit(1);
 
+  // Ein Lauf OHNE Text (Adapter hat keinen geliefert, PDF-Download fehlgeschlagen,
+  // Stadt-Website antwortet 500) darf einen bereits importierten Text NIE
+  // überschreiben: body_text/content_hash würden auf NULL fallen und der Digest
+  // verlöre seine Grundlage — still, mit Exit-Code 0.
+  const textFelder =
+    newHash !== null
+      ? { bodyText: doc.bodyText ?? null, contentHash: newHash }
+      : {};
+
   if (existing.length > 0) {
     if (existing[0].contentHash === newHash && newHash !== null) {
       // Unverändert → überspringen (nur wenn hash vorhanden und gleich)
       return;
     }
-    // Explizites UPDATE (auch wenn hash sich geändert hat oder neu vorhanden)
+    // Explizites UPDATE (auch wenn hash sich geändert hat oder neu vorhanden).
+    // Ohne neuen Text bleiben body_text/content_hash unangetastet.
     await db
       .update(risDocuments)
       .set({
         title: doc.title ?? null,
-        bodyText: doc.bodyText ?? null,
         sourceUrl: doc.sourceUrl,
-        contentHash: newHash,
+        ...textFelder,
         fetchedAt: new Date(),
       })
       .where(eq(risDocuments.id, existing[0].id));
@@ -293,9 +322,8 @@ async function upsertDocument(db: any, meetingId: string, doc: DocumentRef): Pro
       target: [risDocuments.meetingId, risDocuments.docType, risDocuments.externalId],
       set: {
         title: doc.title ?? null,
-        bodyText: doc.bodyText ?? null,
         sourceUrl: doc.sourceUrl,
-        contentHash: newHash,
+        ...textFelder,
         fetchedAt: new Date(),
       },
     });

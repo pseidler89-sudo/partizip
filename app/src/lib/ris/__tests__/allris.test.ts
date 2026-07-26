@@ -13,11 +13,11 @@
  * Die Tests sichern konkrete Werte aus dem echten HTML zu, nicht „nicht leer".
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseTo010, parseTo020, AllrisAdapter } from "../allris.js";
+import { parseTo010, parseTo020, AllrisAdapter, isAllowedRisUrl, MAX_DOCS } from "../allris.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.resolve(__dirname, "../__fixtures__");
@@ -28,6 +28,11 @@ function loadFixture(name: string): string {
 
 const TO010 = loadFixture("allris-to010-real.html");
 const TO020 = loadFixture("allris-to020-real.html");
+const TO010_HOSTILE = loadFixture("allris-to010-hostile.html");
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const BASE = "https://www.taunusstein.de";
 const SILFDNR = "4021";
@@ -167,12 +172,14 @@ describe("parseTo010 — Dokumente und Links", () => {
       "protokoll:niederschrift_oeffentlich",
       "protokoll:niederschrift_nichtoeffentlich",
     ]);
-    // M1(c): stabile Seiten-URL für Digest-Statements
+    // stableSourceUrl entfällt (wie in oparl.ts): `ris_documents` hat keine
+    // Spalte dafür. Der Digest ersetzt instabile Wicket-URLs selbst über
+    // resolveStableUrl(doc, meeting.sourceUrl).
     for (const pdf of pdfs) {
-      expect(pdf.stableSourceUrl).toBe(
-        "https://www.taunusstein.de/allris/to010?SILFDNR=4021"
-      );
+      expect(pdf.stableSourceUrl).toBeUndefined();
     }
+    const { meta } = parseMeeting();
+    expect(meta.sourceUrl).toBe("https://www.taunusstein.de/allris/to010?SILFDNR=4021");
   });
 
   it("ignoriert Navigations-, Anker- und mailto-Links", () => {
@@ -200,10 +207,182 @@ describe("parseTo010 — Dokumente und Links", () => {
 });
 
 // ---------------------------------------------------------------------------
+// SSRF: Ziel-URLs stammen aus Fremd-HTML
+// ---------------------------------------------------------------------------
+
+describe("parseTo010 — SSRF-Schranke (Origin + Pfad + Scheme-Positivliste)", () => {
+  it("verwirft ALLE Links außerhalb der eigenen ALLRIS-Installation", () => {
+    const { documents } = parseTo010(TO010_HOSTILE, BASE, "4021");
+
+    // Es bleibt genau der eine legitime relative Link übrig.
+    expect(documents).toHaveLength(1);
+    expect(documents[0].sourceUrl).toBe(
+      "https://www.taunusstein.de/allris/to020?TOLFDNR=48521&SILFDNR=4021"
+    );
+
+    // Zusicherung als Negativliste über das Ergebnis: nichts Fremdes darf durch.
+    for (const doc of documents) {
+      expect(doc.sourceUrl.startsWith("https://www.taunusstein.de/allris/")).toBe(true);
+    }
+    const urls = documents.map((d) => d.sourceUrl).join(" ");
+    expect(urls).not.toContain("169.254.169.254");
+    expect(urls).not.toContain("attacker.example");
+    expect(urls).not.toContain("javascript:");
+    expect(urls).not.toContain("data:");
+    expect(urls).not.toContain("file:");
+    expect(urls).not.toContain("/intern/");
+  });
+
+  it("ignoriert ein <base href> auf fremder Origin (Fallback <baseUrl>/allris/)", () => {
+    expect(TO010_HOSTILE).toContain('<base href="https://attacker.example/allris/" />');
+
+    const { meta, documents } = parseTo010(TO010_HOSTILE, BASE, "4021");
+    // Der relative href löst gegen die eigene Installation auf, nicht gegen das <base>.
+    expect(documents[0].sourceUrl).toContain("https://www.taunusstein.de/allris/");
+    // Auch die Sitzungs-URL selbst bleibt auf der eigenen Origin.
+    expect(meta.sourceUrl).toBe("https://www.taunusstein.de/allris/to010?SILFDNR=4021");
+  });
+
+  it("isAllowedRisUrl: Positivliste beim Scheme, harte Origin- und Pfadprüfung", () => {
+    const erlaubt = [
+      "https://www.taunusstein.de/allris/to010?SILFDNR=4021",
+      "https://www.taunusstein.de/allris/wicket/resource/org.apache.wicket.Application/doc1.pdf",
+    ];
+    for (const url of erlaubt) expect(isAllowedRisUrl(url, BASE)).toBe(true);
+
+    const verboten = [
+      "http://169.254.169.254/allris/to020?TOLFDNR=1",
+      "https://attacker.example/allris/to020?TOLFDNR=1",
+      "https://www.taunusstein.de.attacker.example/allris/to020",
+      "https://www.taunusstein.de:8443/allris/to020", // anderer Port = andere Origin
+      "http://www.taunusstein.de/allris/to020", // anderes Schema = andere Origin
+      "https://www.taunusstein.de/intern/to020", // außerhalb /allris/
+      "https://www.taunusstein.de/allrisx/to020", // Präfix ohne Trennstrich
+      "javascript:alert(1)",
+      "data:text/html,<h1>x</h1>",
+      "file:///etc/passwd",
+      "gopher://www.taunusstein.de/allris/",
+      "kein-url",
+    ];
+    for (const url of verboten) expect(isAllowedRisUrl(url, BASE)).toBe(false);
+  });
+
+  it("fetchMeeting ruft keine URL außerhalb der Installation ab (zweite Schranke)", async () => {
+    const angefragt: string[] = [];
+    const fetchStub = async (url: string) => {
+      angefragt.push(url);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => TO010_HOSTILE,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    };
+
+    const adapter = new AllrisAdapter({
+      baseUrl: BASE,
+      knownSilfdnrs: ["4021"],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      fetchFn: fetchStub as any,
+      downloadPdfs: true,
+    });
+
+    await adapter.fetchMeeting({
+      externalId: "4021",
+      sourceUrl: "https://www.taunusstein.de/allris/to010?SILFDNR=4021",
+    });
+
+    for (const url of angefragt) {
+      expect(url.startsWith("https://www.taunusstein.de/allris/")).toBe(true);
+    }
+    expect(angefragt.join(" ")).not.toContain("attacker.example");
+  });
+
+  it("fetchMeeting weist auch eine manipulierte Einstiegs-URL ab", async () => {
+    const angefragt: string[] = [];
+    const fetchStub = async (url: string) => {
+      angefragt.push(url);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => TO010,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    };
+
+    const adapter = new AllrisAdapter({
+      baseUrl: BASE,
+      knownSilfdnrs: ["4021"],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      fetchFn: fetchStub as any,
+      downloadPdfs: false,
+    });
+
+    // sourceUrl kommt aus der DB und kann aus einem früheren Import stammen.
+    await expect(
+      adapter.fetchMeeting({
+        externalId: "4021",
+        sourceUrl: "http://169.254.169.254/allris/to010?SILFDNR=4021",
+      })
+    ).rejects.toThrow(/außerhalb der erlaubten ALLRIS-Installation/);
+    expect(angefragt).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ReDoS und Obergrenzen
+// ---------------------------------------------------------------------------
+
+describe("parseTo010 — Robustheit gegen feindlich großes HTML", () => {
+  it("REGRESSION (ReDoS): echte Fixture + 1200 angehängte <a href=\"x\" bleibt < 1 s", () => {
+    // Das Vorgängermuster hatte zwei freie [^>]* um eine Gruppe:
+    // /<a\s+[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi
+    // Gemessen: Fixture allein 16 ms, mit diesem Payload 10 643 ms (kubisch).
+    const payload = TO010 + '<a href="x"'.repeat(1200);
+    const start = performance.now();
+    const { documents } = parseTo010(payload, BASE, SILFDNR);
+    const dauer = performance.now() - start;
+
+    expect(dauer).toBeLessThan(1000);
+    // Und das Parsen bleibt korrekt: die echten Dokumente sind weiterhin da.
+    expect(documents.filter((d) => d.docType === "top")).toHaveLength(9);
+  });
+
+  it("schneidet HTML jenseits der Hartgrenze ab und warnt", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    parseTo010(TO010 + " ".repeat(2_000_000), BASE, SILFDNR);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("abgeschnitten"));
+  });
+
+  it("deckelt die Dokumentzahl bei MAX_DOCS und warnt laut", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    let html = "<html><body>";
+    for (let i = 1; i <= 500; i++) {
+      html += `<a href="/allris/to020?TOLFDNR=${i}">TOP ${i}</a>`;
+    }
+    html += "</body></html>";
+
+    const { documents } = parseTo010(html, BASE, SILFDNR);
+
+    expect(documents).toHaveLength(MAX_DOCS);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(`Obergrenze von ${MAX_DOCS} Dokumenten erreicht`)
+    );
+    expect(warn.mock.calls.flat().join(" ")).toContain("470 weitere");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // parseTo020 (TOP-Details mit Beschluss und Abstimmung)
 // ---------------------------------------------------------------------------
 
-describe("parseTo020 (echte ALLRIS-4-Seite, TOLFDNR 1026743)", () => {
+// HINWEIS: parseTo020 ist STILLGELEGT (kein Aufrufer im Produktivpfad, siehe
+// Kommentarblock in allris.ts). Die folgenden Tests dokumentieren weiterhin das
+// Parsing — sie sind die Grundlage einer späteren, eindeutigen Extraktion. Dass
+// der Adapter das Ergebnis NICHT ausliefert, sichert der Test
+// „liefert für TOPs keinen bodyText" weiter unten zu.
+describe("parseTo020 (echte ALLRIS-4-Seite, TOLFDNR 1026743) — stillgelegt", () => {
   it("parst den Beschlusstext aus dem Word-Export-Panel", () => {
     const { beschluss } = parseTo020(TO020);
     expect(beschluss).toBeDefined();
@@ -313,9 +492,8 @@ describe("AllrisAdapter (Fetch-Stub)", () => {
     const topDocs = result.documents.filter((d) => d.docType === "top");
     expect(topDocs).toHaveLength(9);
     for (const top of topDocs) {
-      expect(top.bodyText).toContain("Haushaltssatzung");
-      expect(top.bodyText).toContain("Abstimmung: Dafür: 25, Dagegen: 8, Enthaltungen: 0");
-      expect(top.contentHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(top.title).toMatch(/^TOP /);
+      expect(top.sourceUrl).toContain("/allris/to020?TOLFDNR=");
     }
   });
 
@@ -347,5 +525,81 @@ describe("AllrisAdapter (Fetch-Stub)", () => {
 
     expect(angefragt.filter((u) => u.includes("/vo020?"))).toHaveLength(0);
     expect(angefragt.filter((u) => u.endsWith(".pdf"))).toHaveLength(5);
+  });
+
+  it("STILLLEGUNG: liefert für TOPs keinen bodyText und ruft to020 nicht ab", async () => {
+    const angefragt: string[] = [];
+    const fetchStub = async (url: string) => {
+      angefragt.push(url);
+      const body = url.includes("/to010?") ? TO010 : TO020;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => body,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    };
+
+    const adapter = new AllrisAdapter({
+      baseUrl: BASE,
+      knownSilfdnrs: ["4021"],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      fetchFn: fetchStub as any,
+      downloadPdfs: false,
+    });
+
+    const result = await adapter.fetchMeeting({
+      externalId: "4021",
+      sourceUrl: "https://www.taunusstein.de/allris/to010?SILFDNR=4021",
+    });
+
+    const topDocs = result.documents.filter((d) => d.docType === "top");
+    expect(topDocs).toHaveLength(9);
+    for (const top of topDocs) {
+      // Kein Beschlusstext, kein Abstimmungsergebnis, kein Hash — solange die
+      // Extraktion nicht beweisbar eindeutig ist, wird nichts veröffentlicht.
+      expect(top.bodyText).toBeUndefined();
+      expect(top.contentHash).toBeUndefined();
+    }
+
+    // Kein einziger to020-Abruf: der Beschlusstext wird gar nicht erst geholt.
+    expect(angefragt.filter((u) => u.includes("/to020?"))).toHaveLength(0);
+    expect(angefragt).toEqual(["https://www.taunusstein.de/allris/to010?SILFDNR=4021"]);
+  });
+
+  it("verschluckt fehlgeschlagene Dokument-Downloads nicht: warnt und zählt", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchStub = async (url: string) => {
+      if (url.endsWith(".pdf")) throw new Error("HTTP 500");
+      return {
+        ok: true,
+        status: 200,
+        text: async () => TO010,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    };
+
+    const adapter = new AllrisAdapter({
+      baseUrl: BASE,
+      knownSilfdnrs: ["4021"],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      fetchFn: fetchStub as any,
+      downloadPdfs: true,
+    });
+
+    const result = await adapter.fetchMeeting({
+      externalId: "4021",
+      sourceUrl: "https://www.taunusstein.de/allris/to010?SILFDNR=4021",
+    });
+
+    // 5 PDFs, alle fehlgeschlagen → 5 Warnungen, errorCount 5.
+    expect(adapter.errorCount).toBe(5);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("HTTP 500"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(".pdf"));
+    // Die Dokumente bleiben als Metadaten erhalten, aber OHNE bodyText —
+    // ris-import darf einen früher importierten Text damit nicht überschreiben.
+    const pdfs = result.documents.filter((d) => d.sourceUrl.endsWith(".pdf"));
+    expect(pdfs).toHaveLength(5);
+    for (const pdf of pdfs) expect(pdf.bodyText).toBeUndefined();
   });
 });
