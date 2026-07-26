@@ -8,7 +8,7 @@
  * Schwelle, ohne Konto. Die Wahl wird gemerkt; „Region ändern" ist später möglich.
  */
 
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   regionAusPlz,
@@ -39,6 +39,24 @@ export function RegionEinstieg({
   onErfolg?: () => void;
 }) {
   const router = useRouter();
+  /**
+   * Eindeutige IDs je Instanz (a11y-Gate, Issue #60). Die Komponente steht auf
+   * der Startseite ZWEIMAL im selben Dokument (Hero + CTA-Wiederholung) und
+   * zusätzlich auf /umfragen sowie im Konto. Mit statischen IDs (`plz`,
+   * `plz-funktion`, …) existierte jede ID doppelt: `duplicate-id-aria`
+   * (Impact critical) plus `form-field-multiple-labels` als Folgefehler.
+   * Real spürbar ist das an der Label-Zuordnung — `<label for="plz">` zeigt
+   * IMMER auf das erste Feld im Dokument; ein Klick auf das Label des unteren
+   * Formulars springt also nach oben, und Screenreader lesen die Beschreibung
+   * des falschen Feldes vor.
+   * `useId()` statt fester Suffixe, weil ein Suffix nur so lange trägt, wie die
+   * Zahl der Instanzen bekannt ist; useId skaliert auf beliebig viele.
+   */
+  const idBasis = useId();
+  const plzId = `${idBasis}-plz`;
+  const funktionId = `${idBasis}-plz-funktion`;
+  const fehlerId = `${idBasis}-plz-fehler`;
+  const hinweisId = `${idBasis}-plz-hinweis`;
   const [plz, setPlz] = useState("");
   const [fehler, setFehler] = useState<string | null>(null);
   const [hinweis, setHinweis] = useState<string | null>(null);
@@ -124,17 +142,17 @@ export function RegionEinstieg({
       }
     >
       <form onSubmit={handlePlzSubmit} noValidate>
-        <label htmlFor="plz" className="block text-sm font-medium" style={{ color: "var(--pz-ink)" }}>
+        <label htmlFor={plzId} className="block text-sm font-medium" style={{ color: "var(--pz-ink)" }}>
           Ihre Postleitzahl
         </label>
         {/* Funktions-Erklärung (P2 §Empf. 7): was die PLZ bewirkt — der Datenschutz-
             Hinweis steht weiterhin unten. */}
-        <p id="plz-funktion" className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
+        <p id={funktionId} className="mt-1 text-xs" style={{ color: "var(--pz-muted)" }}>
           Ihre PLZ bestimmt, welche Abstimmungen Sie sehen.
         </p>
         <div className="mt-2 flex gap-2">
           <input
-            id="plz"
+            id={plzId}
             name="plz"
             inputMode="numeric"
             autoComplete="postal-code"
@@ -144,7 +162,7 @@ export function RegionEinstieg({
             disabled={busy}
             className="w-full rounded-lg border border-[color:var(--pz-line)] bg-pz-surface px-3 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
             style={{ color: "var(--pz-ink)" }}
-            aria-describedby={`plz-funktion${fehler ? " plz-fehler" : hinweis ? " plz-hinweis" : ""}`}
+            aria-describedby={`${funktionId}${fehler ? ` ${fehlerId}` : hinweis ? ` ${hinweisId}` : ""}`}
           />
           <button
             type="submit"
@@ -173,12 +191,12 @@ export function RegionEinstieg({
       </button>
 
       {fehler && (
-        <p id="plz-fehler" className="mt-3 text-sm" style={{ color: "#b42318" }} role="alert">
+        <p id={fehlerId} className="mt-3 text-sm" style={{ color: "#b42318" }} role="alert">
           {fehler}
         </p>
       )}
       {hinweis && (
-        <div id="plz-hinweis" className="mt-3 rounded-lg border border-dashed border-[color:var(--pz-line)] bg-pz-surface p-3">
+        <div id={hinweisId} className="mt-3 rounded-lg border border-dashed border-[color:var(--pz-line)] bg-pz-surface p-3">
           <p className="text-sm" style={{ color: "var(--pz-body)" }}>{hinweis}</p>
           <button
             type="button"
