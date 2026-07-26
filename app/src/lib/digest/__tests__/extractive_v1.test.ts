@@ -9,11 +9,17 @@
  *   - M4: cleanBoilerplate() bereinigt Briefkopf
  *   - M1(c): Wicket-Resource-URLs werden NICHT in sourceUrl persistiert
  *   - Fallback wenn keine TOPs vorhanden
+ *   - RIEGEL: TOP-Dokumente erzeugen KEINE Aussagen (TOP_STATEMENTS_AKTIV)
  *   - LlmV1Generator wirft Fehler (Interface-Stub)
  */
 
 import { describe, it, expect } from "vitest";
-import { ExtractiveV1Generator, GENERATOR_NAME, cleanBoilerplate } from "../extractive_v1.js";
+import {
+  ExtractiveV1Generator,
+  GENERATOR_NAME,
+  cleanBoilerplate,
+  TOP_STATEMENTS_AKTIV,
+} from "../extractive_v1.js";
 import type { MeetingInput, DocumentInput } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -106,9 +112,9 @@ Die Ausbildungsberufe werden bereits ab dem kommenden Schuljahr 2026/27 an den B
 // ---------------------------------------------------------------------------
 
 describe("ExtractiveV1Generator", () => {
-  it("generiert Aussagen aus TOP-Dokumenten", async () => {
+  it("generiert Aussagen aus Vorlagen-Dokumenten", async () => {
     const gen = new ExtractiveV1Generator();
-    const draft = await gen.generate(testMeeting, [topDoc, protokollDoc]);
+    const draft = await gen.generate(testMeeting, [vorlageDoc, protokollDoc]);
 
     expect(draft.statements.length).toBeGreaterThan(0);
     expect(draft.generator).toBe(GENERATOR_NAME);
@@ -116,7 +122,7 @@ describe("ExtractiveV1Generator", () => {
 
   it("jede Aussage hat sourceDocumentId und sourceUrl", async () => {
     const gen = new ExtractiveV1Generator();
-    const draft = await gen.generate(testMeeting, [topDoc, protokollDoc]);
+    const draft = await gen.generate(testMeeting, [vorlageDoc, protokollDoc]);
 
     for (const stmt of draft.statements) {
       expect(stmt.sourceDocumentId).toBeTruthy();
@@ -129,7 +135,7 @@ describe("ExtractiveV1Generator", () => {
 
   it("sourceDocumentId verweist auf existierendes Dokument", async () => {
     const gen = new ExtractiveV1Generator();
-    const docs = [topDoc, protokollDoc];
+    const docs = [vorlageDoc, protokollDoc];
     const draft = await gen.generate(testMeeting, docs);
 
     const docIds = new Set(docs.map((d) => d.id));
@@ -140,7 +146,7 @@ describe("ExtractiveV1Generator", () => {
 
   it("keine Aussage ohne Quelle (sourceDocumentId pflicht)", async () => {
     const gen = new ExtractiveV1Generator();
-    const draft = await gen.generate(testMeeting, [topDoc, protokollDoc]);
+    const draft = await gen.generate(testMeeting, [vorlageDoc, protokollDoc]);
 
     for (const stmt of draft.statements) {
       // Leerzeichen oder leere Strings sind kein gültiger Wert
@@ -149,27 +155,18 @@ describe("ExtractiveV1Generator", () => {
     }
   });
 
-  it("Aussagen enthalten Beschlusstext", async () => {
+  it("Aussagen enthalten den Sachtext der Quelle", async () => {
     const gen = new ExtractiveV1Generator();
-    const draft = await gen.generate(testMeeting, [topDoc]);
+    const draft = await gen.generate(testMeeting, [vorlageDoc]);
 
-    const topStmt = draft.statements.find((s) => s.sourceDocumentId === topDoc.id);
-    expect(topStmt).toBeDefined();
-    expect(topStmt!.text).toContain("Haushaltssatzung");
-  });
-
-  it("Aussagen enthalten Abstimmungsergebnis wenn vorhanden", async () => {
-    const gen = new ExtractiveV1Generator();
-    const draft = await gen.generate(testMeeting, [topDoc]);
-
-    const topStmt = draft.statements.find((s) => s.sourceDocumentId === topDoc.id);
-    expect(topStmt!.text).toContain("Abstimmung");
-    expect(topStmt!.text).toContain("28");
+    const vorlageStmt = draft.statements.find((s) => s.sourceDocumentId === vorlageDoc.id);
+    expect(vorlageStmt).toBeDefined();
+    expect(vorlageStmt!.text).toContain("Haushaltssatzung");
   });
 
   it("Protokoll-Hinweis als letzte Aussage wenn Protokoll vorhanden", async () => {
     const gen = new ExtractiveV1Generator();
-    const draft = await gen.generate(testMeeting, [topDoc, protokollDoc]);
+    const draft = await gen.generate(testMeeting, [vorlageDoc, protokollDoc]);
 
     const lastStmt = draft.statements[draft.statements.length - 1];
     expect(lastStmt.sourceDocumentId).toBe(protokollDoc.id);
@@ -194,7 +191,7 @@ describe("ExtractiveV1Generator", () => {
 
   it("positions sind sequenziell (1, 2, 3, ...)", async () => {
     const gen = new ExtractiveV1Generator();
-    const draft = await gen.generate(testMeeting, [topDoc, protokollDoc]);
+    const draft = await gen.generate(testMeeting, [vorlageDoc, protokollDoc]);
 
     const positions = draft.statements.map((s) => s.position).sort((a, b) => a - b);
     positions.forEach((pos, i) => {
@@ -204,7 +201,7 @@ describe("ExtractiveV1Generator", () => {
 
   it("Titel enthält Gremium und Datum", async () => {
     const gen = new ExtractiveV1Generator();
-    const draft = await gen.generate(testMeeting, [topDoc]);
+    const draft = await gen.generate(testMeeting, [vorlageDoc]);
 
     expect(draft.title).toContain("Kreistag");
     expect(draft.title).toContain("12.05.2026");
@@ -212,7 +209,7 @@ describe("ExtractiveV1Generator", () => {
 
   it("keine Bewertungen oder Meinungen im Text (Neutralitätskodex)", async () => {
     const gen = new ExtractiveV1Generator();
-    const draft = await gen.generate(testMeeting, [topDoc]);
+    const draft = await gen.generate(testMeeting, [vorlageDoc]);
 
     // Einfache Prüfung: keine typischen Bewertungswörter
     const bewertungswoerter = ["gut", "schlecht", "falsch", "richtig", "leider", "zum Glück"];
@@ -227,16 +224,17 @@ describe("ExtractiveV1Generator", () => {
   // M4: Vorlagen-Priorät (ADR-009)
   // ---------------------------------------------------------------------------
 
-  it("M4: Vorlagen-Dokumente werden vor TOPs verarbeitet", async () => {
+  it("M4: Vorlagen-Dokumente stehen vorn — TOPs steuern nichts bei", async () => {
     const gen = new ExtractiveV1Generator();
+    // TOP steht ABSICHTLICH vor der Vorlage in der Eingabe.
     const draft = await gen.generate(testMeeting, [topDoc, vorlageDoc, protokollDoc]);
 
-    // Erste Aussage stammt aus Vorlage (hat position 1)
+    // Erste Aussage stammt aus der Vorlage (position 1)
     const vorlageStmt = draft.statements.find((s) => s.sourceDocumentId === vorlageDoc.id);
     expect(vorlageStmt).toBeDefined();
-    expect(vorlageStmt!.position).toBeLessThan(
-      draft.statements.find((s) => s.sourceDocumentId === topDoc.id)!.position
-    );
+    expect(vorlageStmt!.position).toBe(1);
+    // Der TOP liefert gar keine Aussage mehr (Riegel, siehe eigener Block unten).
+    expect(draft.statements.find((s) => s.sourceDocumentId === topDoc.id)).toBeUndefined();
   });
 
   it("M4: Vorlage-Aussage enthält Vorlage-Titel als Quellenangabe", async () => {
@@ -268,7 +266,7 @@ describe("ExtractiveV1Generator", () => {
   it("M1(c): Wicket-Resource-URLs werden NICHT in sourceUrl persistiert", async () => {
     const gen = new ExtractiveV1Generator();
     // Meeting mit ALLRIS sourceUrl (to010-Seite)
-    const draft = await gen.generate(testMeetingAllris, [topDoc, protokollDocWicket]);
+    const draft = await gen.generate(testMeetingAllris, [vorlageDoc, protokollDocWicket]);
 
     for (const stmt of draft.statements) {
       expect(stmt.sourceUrl).not.toContain("/wicket/resource/");
@@ -277,7 +275,7 @@ describe("ExtractiveV1Generator", () => {
 
   it("M1(c): Protokoll mit Wicket-URL bekommt Meeting-sourceUrl", async () => {
     const gen = new ExtractiveV1Generator();
-    const draft = await gen.generate(testMeetingAllris, [topDoc, protokollDocWicket]);
+    const draft = await gen.generate(testMeetingAllris, [vorlageDoc, protokollDocWicket]);
 
     const protokollStmt = draft.statements.find((s) => s.sourceDocumentId === protokollDocWicket.id);
     expect(protokollStmt).toBeDefined();
@@ -287,12 +285,74 @@ describe("ExtractiveV1Generator", () => {
 
   it("M1(c): Provox getfile-URLs bleiben unverändert (stabil)", async () => {
     const gen = new ExtractiveV1Generator();
-    const draft = await gen.generate(testMeeting, [topDoc, protokollDoc]);
+    const draft = await gen.generate(testMeeting, [vorlageDoc, protokollDoc]);
 
     const protokollStmt = draft.statements.find((s) => s.sourceDocumentId === protokollDoc.id);
     expect(protokollStmt).toBeDefined();
     // Provox getfile-URL ist stabil → direkt verwenden
     expect(protokollStmt!.sourceUrl).toContain("/file/getfile/");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RIEGEL: TOP-Dokumente erzeugen keine Aussagen
+// ---------------------------------------------------------------------------
+//
+// Der eigentliche Regressionstest. Der Schutz hing bisher implizit daran, dass
+// der Adapter für TOPs keinen bodyText liefert. Sobald body_text bei TOPs wieder
+// gefüllt wird (Import-CLI, Restore aus Backup, künftiger Adapter-Fix), muss der
+// LESEPFAD trotzdem gesperrt bleiben — sonst reaktiviert sich still ein Feature,
+// das im Feldtest die Stimmen eines abgelehnten Änderungsantrags als
+// Hauptbeschluss veröffentlicht hätte.
+
+describe("RIEGEL: TOP-Statements sind gesperrt (TOP_STATEMENTS_AKTIV)", () => {
+  const topDocMitStimmen: DocumentInput = {
+    id: "doc-top-wiederbefuellt",
+    docType: "top",
+    title: "TOP 7: Änderungsantrag zum Haushalt",
+    // Genau der Feldtest-Fall: die Stimmen des ABGELEHNTEN Änderungsantrags
+    // stehen im Text, direkt hinter "Abstimmung:".
+    bodyText:
+      "Die Stadtverordnetenversammlung hat den Änderungsantrag beraten.\n" +
+      "Abstimmung: Dafür: 6, Dagegen: 27, Enthaltungen: 0",
+    sourceUrl: "https://www.taunusstein.de/allris/to020?TOLFDNR=1026743",
+    externalId: "1026743",
+  };
+
+  it("Schalter steht auf false", () => {
+    expect(TOP_STATEMENTS_AKTIV).toBe(false);
+  });
+
+  it("TOP MIT gefülltem bodyText erzeugt KEINE Aussage", async () => {
+    const gen = new ExtractiveV1Generator();
+    const draft = await gen.generate(testMeetingAllris, [topDocMitStimmen]);
+
+    expect(draft.statements).toEqual([]);
+  });
+
+  it("keine Stimmenzahl aus einem TOP landet je in einem Statement", async () => {
+    const gen = new ExtractiveV1Generator();
+    // Zusammen mit einer Vorlage, damit Statements entstehen — aber keines davon
+    // darf aus dem TOP stammen oder dessen Zahlen tragen.
+    const draft = await gen.generate(testMeetingAllris, [topDocMitStimmen, vorlageDoc, protokollDoc]);
+
+    expect(draft.statements.length).toBeGreaterThan(0);
+    for (const stmt of draft.statements) {
+      expect(stmt.sourceDocumentId).not.toBe(topDocMitStimmen.id);
+      expect(stmt.text).not.toContain("Dagegen");
+      expect(stmt.text).not.toContain("Dagegen: 27");
+      expect(stmt.text).not.toContain("Abstimmung");
+    }
+  });
+
+  it("TOP mit bodyText blockiert den Tagesordnungs-Fallback nicht", async () => {
+    const gen = new ExtractiveV1Generator();
+    const draft = await gen.generate(testMeeting, [topDocMitStimmen, einladungDoc]);
+
+    // Da der TOP nichts beisteuert, greift der Einladungs-Fallback — statt eines
+    // stillen „Digest ohne Aussagen".
+    expect(draft.statements).toHaveLength(1);
+    expect(draft.statements[0].sourceDocumentId).toBe(einladungDoc.id);
   });
 });
 

@@ -17,7 +17,15 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseTo010, parseTo020, AllrisAdapter, isAllowedRisUrl, MAX_DOCS } from "../allris.js";
+import {
+  parseTo010,
+  parseTo020,
+  AllrisAdapter,
+  isAllowedRisUrl,
+  MAX_DOCS,
+  MAX_HTML_BYTES,
+  MAX_PARSE_MS,
+} from "../allris.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.resolve(__dirname, "../__fixtures__");
@@ -354,6 +362,74 @@ describe("parseTo010 — Robustheit gegen feindlich großes HTML", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("abgeschnitten"));
   });
 
+  // -------------------------------------------------------------------------
+  // Rahmen statt Regex-Chirurgie: Größengrenze + Wall-Clock-Budget
+  // -------------------------------------------------------------------------
+  //
+  // matchLinks (indexOf/slice bis Dateiende je <a>) und extractHeadline
+  // (globales [\s\S]*?) sind in der Eingabegröße quadratisch. Die Muster werden
+  // bewusst NICHT weiter umgebaut; abgesichert wird der Rahmen: 512 KB Grenze
+  // und 5 s Budget, beides mit lautem Abbruch.
+
+  it("MAX_HTML_BYTES liegt bei 512 KB — echte Seiten (~115 KB) haben Faktor 4 Luft", () => {
+    expect(MAX_HTML_BYTES).toBe(512_000);
+    // Gemessen: 468 KB = 77 s. Mit der alten 2-MB-Grenze wären es ~1300 s.
+    expect(TO010.length).toBeLessThan(MAX_HTML_BYTES / 4);
+  });
+
+  it("echte Fixture parst korrekt und weit unter dem Zeitbudget", () => {
+    const start = performance.now();
+    const { meta, documents } = parseTo010(TO010, BASE, SILFDNR);
+    const dauer = performance.now() - start;
+
+    // Korrektheit: dieselben Zusicherungen wie im Normalfall.
+    expect(meta.gremium).toBe("Ortsbeirat Bleidenstadt");
+    expect(meta.meetingDate?.toISOString()).toBe("2017-04-05T17:30:00.000Z");
+    expect(documents).toHaveLength(17);
+    // „Deutlich unter Budget": eine Größenordnung Abstand zu MAX_PARSE_MS.
+    // Real gemessen liegt die Seite im zweistelligen Millisekundenbereich; die
+    // Schwelle ist bewusst großzügig, damit langsame CI-Runner nicht flackern.
+    expect(dauer).toBeLessThan(MAX_PARSE_MS / 10);
+  });
+
+  it("Zeitbudget: bricht LAUT ab, mit Sitzungs-ID, statt unbegrenzt zu parsen", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Budget 0 ms = sofort aufgebraucht. Testet den Abbruchpfad deterministisch,
+    // ohne auf die echten 5 s warten zu müssen.
+    const { meta, documents } = parseTo010(TO010, BASE, SILFDNR, BASE, 0);
+
+    // Kein stiller Abbruch: Warnung nennt Budget UND Sitzung.
+    const gemeldet = warn.mock.calls.flat().join(" ");
+    expect(gemeldet).toContain("Zeitbudget");
+    expect(gemeldet).toContain("abgebrochen");
+    expect(gemeldet).toContain(`to010?SILFDNR=${SILFDNR}`);
+    expect(gemeldet).toContain("unvollständig");
+
+    // Rückgabe ist das bis dahin Ermittelte: keine Link-Dokumente mehr, die
+    // label-basierten Grunddaten (ohne quadratischen Pfad) bleiben.
+    expect(documents).toEqual([]);
+    expect(meta.externalId).toBe(SILFDNR);
+    expect(meta.gremium).toBe("Ortsbeirat Bleidenstadt");
+  });
+
+  it("Zeitbudget warnt genau einmal je Parse-Vorgang, nicht je Schleifendurchlauf", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    parseTo010(TO010, BASE, SILFDNR, BASE, 0);
+    const budgetWarnungen = warn.mock.calls
+      .flat()
+      .filter((arg) => typeof arg === "string" && arg.includes("Zeitbudget"));
+    expect(budgetWarnungen).toHaveLength(1);
+  });
+
+  it("Zeitbudget greift auch in parseTo020 (Panel-Suche über matchLinks)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = parseTo020(TO020, 0);
+
+    expect(warn.mock.calls.flat().join(" ")).toContain("Zeitbudget");
+    expect(result.beschluss).toBeUndefined();
+  });
+
   it("deckelt die Dokumentzahl bei MAX_DOCS und warnt laut", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -498,6 +574,8 @@ describe("AllrisAdapter (Fetch-Stub)", () => {
   });
 
   it("lädt vo020-Seiten nicht als PDF herunter (sie sind HTML)", async () => {
+    // Die PDF-Stubs sind leer → „PDF ohne lesbaren Text"-Warnungen; hier nur Rauschen.
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     const angefragt: string[] = [];
     const fetchStub = async (url: string) => {
       angefragt.push(url);
@@ -565,6 +643,41 @@ describe("AllrisAdapter (Fetch-Stub)", () => {
     // Kein einziger to020-Abruf: der Beschlusstext wird gar nicht erst geholt.
     expect(angefragt.filter((u) => u.includes("/to020?"))).toHaveLength(0);
     expect(angefragt).toEqual(["https://www.taunusstein.de/allris/to010?SILFDNR=4021"]);
+  });
+
+  it("PDF ohne lesbaren Text zählt als Fehler und warnt (extractPdfText wirft nicht)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Der Download GELINGT, das PDF ist nur unlesbar: extractPdfText gibt null
+    // zurück, ohne zu werfen — der catch greift also nie. Vor dem Fix blieb
+    // errorCount 0 und der Import meldete Erfolg mit Exit 0.
+    const fetchStub = async () => ({
+      ok: true,
+      status: 200,
+      text: async () => TO010,
+      // Kein gültiges PDF → pdf-parse scheitert → extractPdfText liefert null.
+      arrayBuffer: async () => new ArrayBuffer(8),
+    });
+
+    const adapter = new AllrisAdapter({
+      baseUrl: BASE,
+      knownSilfdnrs: ["4021"],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      fetchFn: fetchStub as any,
+      downloadPdfs: true,
+    });
+
+    const result = await adapter.fetchMeeting({
+      externalId: "4021",
+      sourceUrl: "https://www.taunusstein.de/allris/to010?SILFDNR=4021",
+    });
+
+    // 5 PDFs geladen, 5-mal kein Text → 5 Fehler, nicht 0.
+    expect(adapter.errorCount).toBe(5);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("PDF ohne lesbaren Text"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(".pdf"));
+    const pdfs = result.documents.filter((d) => d.sourceUrl.endsWith(".pdf"));
+    expect(pdfs).toHaveLength(5);
+    for (const pdf of pdfs) expect(pdf.bodyText ?? null).toBeNull();
   });
 
   it("verschluckt fehlgeschlagene Dokument-Downloads nicht: warnt und zählt", async () => {

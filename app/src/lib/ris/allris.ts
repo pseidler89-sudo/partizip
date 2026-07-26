@@ -48,9 +48,27 @@ export const MAX_DOCS = 30;
 
 /**
  * Obergrenze für die zu parsende HTML-Größe. Die echten ALLRIS-Seiten liegen bei
- * ~115 KB; alles jenseits von 2 MB ist kein Sitzungsdokument mehr, sondern Last.
+ * ~115 KB — 512 KB lassen also den Faktor 4 Luft und schneiden trotzdem alles ab,
+ * was kein Sitzungsdokument mehr ist.
+ *
+ * WARUM so niedrig (und warum ein Budget statt Parser-Chirurgie):
+ * Zwei Parse-Pfade sind in der Eingabegröße QUADRATISCH — `matchLinks` sucht je
+ * <a>-Tag mit `indexOf`/`slice` bis zum Dateiende, und `extractHeadline` läuft
+ * mit einem globalen `[\s\S]*?` über das ganze Dokument. Gemessen: 468 KB
+ * brauchten 77 s; auf die frühere Grenze von 2 MB hochgerechnet rund 1300 s.
+ * Diese Muster werden hier bewusst NICHT weiter umgebaut (Fix-Freeze auf der
+ * Regex-Logik: jede Runde Regex-Chirurgie hat bisher eine neue, schwerere Lücke
+ * erzeugt). Stattdessen ein RAHMEN, der unabhängig von der Musterqualität hält:
+ * harte Größengrenze hier + hartes Zeitbudget (siehe MAX_PARSE_MS).
  */
-export const MAX_HTML_BYTES = 2_000_000;
+export const MAX_HTML_BYTES = 512_000;
+
+/**
+ * Wall-Clock-Budget für EINEN Parse-Vorgang (parseTo010/parseTo020).
+ * Die echte 115-KB-Seite liegt im einstelligen Millisekundenbereich; 5 s sind
+ * also drei Größenordnungen Reserve und greifen nur bei pathologischem Input.
+ */
+export const MAX_PARSE_MS = 5_000;
 
 /**
  * Schneidet übergroßes HTML ab — laut, nicht still: ein stiller Deckel verdeckt
@@ -63,6 +81,41 @@ function capHtml(html: string, kontext: string): string {
       `${MAX_HTML_BYTES} abgeschnitten. Das Ergebnis ist unvollständig.`
   );
   return html.slice(0, MAX_HTML_BYTES);
+}
+
+/**
+ * Zeitbudget als zweiter Rahmen neben MAX_HTML_BYTES.
+ *
+ * Die Größengrenze deckelt den WORST CASE, dieses Budget deckelt den REALFALL:
+ * Es bricht ab, sobald das Parsen einer einzelnen Seite länger dauert als
+ * erlaubt — unabhängig davon, welcher Pfad gerade quadratisch entartet. Der
+ * Abbruch ist LAUT (console.warn mit Sitzungs-/Seiten-Kontext) und liefert das
+ * bis dahin Ermittelte bzw. ein leeres Ergebnis zurück; ein stiller Abbruch wäre
+ * von einer Seite ohne Dokumente nicht zu unterscheiden.
+ */
+export interface Zeitbudget {
+  /** true = Budget aufgebraucht. Warnt beim ersten Mal, danach nicht erneut. */
+  abgelaufen(): boolean;
+}
+
+function startZeitbudget(kontext: string, budgetMs: number = MAX_PARSE_MS): Zeitbudget {
+  const start = Date.now();
+  let gewarnt = false;
+  return {
+    abgelaufen(): boolean {
+      const verstrichen = Date.now() - start;
+      if (verstrichen < budgetMs) return false;
+      if (!gewarnt) {
+        gewarnt = true;
+        console.warn(
+          `[AllrisAdapter] ${kontext}: Zeitbudget von ${budgetMs} ms überschritten ` +
+            `(${verstrichen} ms) — Parsen abgebrochen. Das Ergebnis ist unvollständig; ` +
+            `Seite prüfen.`
+        );
+      }
+      return true;
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -286,14 +339,19 @@ function extractFirstGrunddatum(html: string, labels: string[]): string | undefi
  *   aus der Seite). Jeder Link muss darunter liegen; alles andere wird verworfen.
  *   Default ist `baseUrl`, weil beides in der Praxis dieselbe Quelle ist — der
  *   Parameter macht die Schranke aber explizit und in Tests einzeln setzbar.
+ * @param budgetMs Wall-Clock-Budget für diesen Parse-Vorgang (Default MAX_PARSE_MS).
+ *   In Tests klein setzbar, um den Abbruchpfad ohne 5-Sekunden-Wartezeit zu prüfen.
  */
 export function parseTo010(
   html: string,
   baseUrl: string,
   silfdnr: string,
-  allowedBaseUrl: string = baseUrl
+  allowedBaseUrl: string = baseUrl,
+  budgetMs: number = MAX_PARSE_MS
 ): { meta: Partial<MeetingRef>; documents: DocumentRef[] } {
-  html = capHtml(html, `to010?SILFDNR=${silfdnr}`);
+  const kontext = `to010?SILFDNR=${silfdnr}`;
+  html = capHtml(html, kontext);
+  const budget = startZeitbudget(kontext, budgetMs);
 
   const documents: DocumentRef[] = [];
   let verworfeneDocs = 0;
@@ -308,11 +366,11 @@ export function parseTo010(
   };
 
   const pageBase = resolveBaseHref(html, allowedBaseUrl);
-  const links = matchLinks(html);
+  const links = matchLinks(html, budget);
 
   // Kopfzeile "<Gremium> - <Datum>" als Fallback, falls die Grunddaten fehlen.
   // NICHT das erste <h1> nehmen: das ist der Seitenkopf ("Stadt Taunusstein").
-  const headline = extractHeadline(html);
+  const headline = extractHeadline(html, budget);
 
   // Gremium / Betreff — label-basiert aus den Grunddaten
   const gremium = extractGrunddatum(html, "Gremium") ?? headline?.gremium;
@@ -342,6 +400,7 @@ export function parseTo010(
   // Die Wicket-URL wird in source_url gespeichert und IMMER aktualisiert (UPDATE-Pfad in upsertDocument).
   const seenDocTypes = new Set<string>();
   for (const link of links) {
+    if (budget.abgelaufen()) break;
     if (!/\/wicket\/resource\/org\.apache\.wicket\.Application\/doc\d+\.pdf/i.test(link.href)) continue;
     const sourceUrl = resolveUrl(link.href, pageBase, allowedBaseUrl);
     if (!sourceUrl) continue;
@@ -376,6 +435,7 @@ export function parseTo010(
   // TO-Links (to020?TOLFDNR=…) — TOPs mit Beschlüssen
   const seenTops = new Set<string>();
   for (const link of links) {
+    if (budget.abgelaufen()) break;
     if (!/(?:^|\/)to020\?/i.test(link.href)) continue;
     const sourceUrl = resolveUrl(link.href, pageBase, allowedBaseUrl);
     if (!sourceUrl) continue;
@@ -404,6 +464,7 @@ export function parseTo010(
   // Vorlagen-Links (vo020?VOLFDNR=…)
   const seenVorlagen = new Set<string>();
   for (const link of links) {
+    if (budget.abgelaufen()) break;
     if (!/(?:^|\/)vo020\?/i.test(link.href)) continue;
     const sourceUrl = resolveUrl(link.href, pageBase, allowedBaseUrl);
     if (!sourceUrl) continue;
@@ -459,12 +520,18 @@ interface ParsedLink {
  * `<a\s+[^>]*href="([^"]*)"[^>]*>` hatte zwei unbegrenzte `[^>]*` um eine
  * Gruppe: an der echten Fixture (115 KB) 16 ms, mit 1200 angehängten
  * `<a href="x"` (128 KB) 10 643 ms — kubisches Wachstum.
+ *
+ * BEKANNT QUADRATISCH und bewusst NICHT umgebaut (Fix-Freeze auf der
+ * Regex-Logik): `indexOf`/`slice` suchen je <a>-Tag bis zum Dateiende. Der
+ * Schutz ist der RAHMEN — MAX_HTML_BYTES begrenzt die Länge, das Zeitbudget
+ * bricht die Schleife ab. Abbruch = Teilergebnis + Warnung, nie stilles Nichts.
  */
-function matchLinks(html: string): ParsedLink[] {
+function matchLinks(html: string, budget: Zeitbudget): ParsedLink[] {
   const links: ParsedLink[] = [];
   const tagPattern = /<a\s([^>]*)>/gi;
   let match: RegExpExecArray | null;
   while ((match = tagPattern.exec(html)) !== null) {
+    if (budget.abgelaufen()) break;
     const attrs = match[1];
     const href = attrs.match(/\bhref="([^"]*)"/i)?.[1];
     if (href === undefined) continue;
@@ -494,11 +561,19 @@ function extractTopNummer(links: ParsedLink[], tolfdnr: string): string | undefi
  *
  * ReDoS: wie oben — Tag-Kopf in einem Schritt, Klassenprüfung auf dem
  * isolierten Attributstring.
+ *
+ * BEKANNT QUADRATISCH: das globale `[\s\S]*?` läuft ohne passendes `</h1>` bis
+ * zum Dateiende, und zwar je `<h1`-Kandidat erneut. Auch hier kein Regex-Umbau,
+ * sondern der Rahmen: Größengrenze + Zeitbudget (Abbruch mit Warnung).
  */
-function extractHeadline(html: string): { gremium?: string; datum?: string } | undefined {
+function extractHeadline(
+  html: string,
+  budget: Zeitbudget
+): { gremium?: string; datum?: string } | undefined {
   const pattern = /<h1\s([^>]*)>([\s\S]*?)<\/h1>/gi;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(html)) !== null) {
+    if (budget.abgelaufen()) return undefined;
     if (!hasClassWord(match[1], "title")) continue;
     const text = stripHtml(match[2]);
     if (!text) continue;
@@ -570,11 +645,12 @@ export interface To020Result {
  *
  * STILLGELEGT — siehe Kommentarblock oben. Kein Aufrufer im Produktivpfad.
  */
-export function parseTo020(html: string): To020Result {
+export function parseTo020(html: string, budgetMs: number = MAX_PARSE_MS): To020Result {
   html = capHtml(html, "to020");
+  const budget = startZeitbudget("to020", budgetMs);
 
   // Beschlusstext aus dem Panel "Beschluss"
-  const beschlussPanel = extractPanel(html, "Beschluss");
+  const beschlussPanel = extractPanel(html, "Beschluss", budget);
   const beschluss = beschlussPanel ? htmlToText(beschlussPanel) || undefined : undefined;
 
   // Beschlussart/Ergebnis aus den Grunddaten (Label "Beschluss:")
@@ -583,7 +659,7 @@ export function parseTo020(html: string): To020Result {
   // Abstimmung: bevorzugt das eigene Panel "Abstimmungsergebnis"; sonst die
   // letzte Stimmen-Tabelle im Beschlusstext (mehrere Abstimmungen je TOP möglich —
   // die letzte ist die über den Gesamtbeschluss).
-  const abstimmungPanel = extractPanel(html, "Abstimmungsergebnis");
+  const abstimmungPanel = extractPanel(html, "Abstimmungsergebnis", budget);
   const votesSource = htmlToText(abstimmungPanel ?? beschlussPanel ?? "");
   const votes = extractVotes(votesSource);
 
@@ -608,11 +684,11 @@ export function parseTo020(html: string): To020Result {
  * Label gehört. Panels liegen sequenziell hintereinander; die Anker
  * `id="showHideLink_<key>"` sind die Abschnittsgrenzen.
  */
-function extractPanel(html: string, label: string): string | undefined {
+function extractPanel(html: string, label: string, budget: Zeitbudget): string | undefined {
   // ReDoS-sicher: Tag-Kopf in einem Schritt, href danach aus dem isolierten
   // Attributstring (nicht zwei freie [^>]* um eine Gruppe herum).
   const labelPattern = new RegExp(`^\\s*${escapeRegExp(label)}\\s*$`, "i");
-  const anchor = matchLinks(html).find(
+  const anchor = matchLinks(html, budget).find(
     (link) => /^#showHideLink_[A-Za-z0-9_]+$/.test(link.href) && labelPattern.test(link.text)
   );
   if (!anchor) return undefined;
@@ -770,7 +846,8 @@ export class AllrisAdapter implements RisAdapter {
 
   /**
    * Zahl der Fehler, die beim letzten fetchMeeting-Lauf verschluckt wurden
-   * (fehlgeschlagene PDF-Downloads, verworfene Ziel-URLs). Der Aufrufer
+   * (fehlgeschlagene PDF-Downloads, PDFs ohne extrahierbaren Text, verworfene
+   * Ziel-URLs). Der Aufrufer
    * (scripts/ris-import.ts) spiegelt sie in den Exit-Code: ein Import, der
    * still mit Code 0 endet, obwohl Texte fehlen, ist von einem erfolgreichen
    * Import nicht zu unterscheiden.
@@ -822,6 +899,19 @@ export class AllrisAdapter implements RisAdapter {
           const pdfResp = await this.fetchFn(doc.sourceUrl);
           const buffer = await pdfResp.arrayBuffer();
           const bodyText = await extractPdfText(buffer);
+          // extractPdfText WIRFT NICHT: ein unlesbares oder leeres PDF kommt als
+          // `null` zurück. Der catch unten greift dafür also nie — ohne diese
+          // Prüfung blieb errorCount 0 und der Import meldete „✓ n Dokument(e)
+          // importiert" mit Exit 0, obwohl kein einziger Text angekommen war
+          // (gemessen: 5 PDFs geladen, 5-mal null, Exit 0).
+          if (bodyText === null) {
+            this.fehler++;
+            console.warn(
+              `[AllrisAdapter] PDF ohne lesbaren Text: ${doc.sourceUrl} — ` +
+                `Textextraktion lieferte nichts (unlesbares, leeres oder reines Bild-PDF). ` +
+                `Das Dokument bleibt ohne bodyText.`
+            );
+          }
           // KEIN contentHash hier: scripts/ris-import.ts rechnet ihn ohnehin aus
           // dem bodyText neu — ein zweiter Hash wäre toter Code, der auseinanderlaufen kann.
           enrichedDocs.push({ ...doc, bodyText });
