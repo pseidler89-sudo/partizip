@@ -18,6 +18,46 @@ import type { DigestGenerator, DraftDigest, MeetingInput, DocumentInput, DraftSt
 
 export const GENERATOR_NAME = "extractive_v1";
 
+/**
+ * RIEGEL: Aus TOP-Dokumenten werden KEINE Aussagen erzeugt.
+ *
+ * WARUM GESPERRT
+ * Der ALLRIS-Adapter liefert für TOPs bewusst keinen Beschluss- und keinen
+ * Abstimmungstext mehr (`allris.ts`, „Hälfte B stillgelegt"). Grund: der
+ * to020-Paneltext ist ein Wortprotokoll mit mehreren Abstimmungen hintereinander;
+ * die Extraktion traf die ERSTE statt der maßgeblichen Abstimmung. Im Feldtest
+ * wären dadurch die Stimmen eines ABGELEHNTEN Änderungsantrags (6/27) als
+ * Ergebnis des Hauptbeschlusses (25/8) veröffentlicht worden — namentlich,
+ * parteibezogen, automatisch auf Mastodon und Bluesky. Lieber keine Aussage als
+ * eine möglicherweise falsche.
+ *
+ * WARUM ALS KONSTANTE UND NICHT „bodyText ist ja leer"
+ * Der Schutz hing bisher allein daran, dass ein Feld leer bleibt. Sobald
+ * `body_text` bei TOPs wieder gefüllt wird — durch die Import-CLI, ein Restore
+ * aus einem älteren Backup oder einen künftigen Adapter-Fix —, liefe
+ * `buildTopStatement` samt seinem `bodyText.match(/Abstimmung:\s*(.+)/i)` sofort
+ * wieder mit, ohne dass jemand eine Entscheidung getroffen hätte. Der LESEPFAD
+ * muss deshalb selbst gesperrt sein.
+ *
+ * WAS ZUR REAKTIVIERUNG NÖTIG IST (alle vier Punkte, nicht einzeln)
+ *  1. STRUKTURIERTE ÜBERGABE: `votes`/`beschlussart` müssen als eigene Felder bis
+ *     hierher durchgereicht werden. Kein Text-Rückparse in dieser Datei — eine
+ *     Zeile im Beschlusstext, die zufällig „Abstimmung:" enthält, wird sonst zum
+ *     amtlichen Ergebnis.
+ *  2. Nur der LETZTE `Beschluss:`-Abschnitt zählt (die maßgebliche Abstimmung),
+ *     nicht der gesamte Paneltext.
+ *  3. Stimmen nur als TRIPEL aus EINEM gemeinsamen Fundkontext (eine Tabelle,
+ *     eine Zeile) — nie drei unabhängige Einzeltreffer.
+ *  4. Unvollständig oder mehrdeutig → `null`. Kein Auffüllen fehlender Werte mit 0.
+ *
+ * Erst wenn 1–4 erfüllt sind, wird hier auf `true` gestellt. `buildTopStatement`
+ * bleibt bis dahin erhalten, weil es die Formatierung dokumentiert.
+ */
+// Typ bewusst `boolean` statt des Literaltyps `false`: der Wert ist ein Schalter,
+// kein Beweis für den Compiler. Sonst hält TypeScript den Aktiv-Zweig für toten
+// Code und der Riegel ließe sich nicht mehr sinnvoll testen.
+export const TOP_STATEMENTS_AKTIV: boolean = false;
+
 export class ExtractiveV1Generator implements DigestGenerator {
   async generate(meeting: MeetingInput, documents: DocumentInput[]): Promise<DraftDigest> {
     const gremium = meeting.gremium ?? meeting.title ?? "Das Gremium";
@@ -52,8 +92,12 @@ export class ExtractiveV1Generator implements DigestGenerator {
       }
     }
 
-    // TOP-Dokumente (Beschlusstexte) — Hauptquelle wenn keine Vorlagen
-    const topDocs = documents.filter((d) => d.docType === "top" && d.bodyText);
+    // TOP-Dokumente (Beschlusstexte) — GESPERRT, siehe TOP_STATEMENTS_AKTIV.
+    // Der Riegel steht VOR dem bodyText-Filter: auch ein TOP MIT gefülltem
+    // bodyText (Restore, CLI-Import, künftiger Adapter-Fix) erzeugt nichts.
+    const topDocs = TOP_STATEMENTS_AKTIV
+      ? documents.filter((d) => d.docType === "top" && d.bodyText)
+      : [];
 
     for (const doc of topDocs) {
       if (!doc.bodyText) continue;
