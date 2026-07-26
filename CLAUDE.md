@@ -43,6 +43,7 @@ beider Tenants. Jeder Push braucht grüne CI; main ist geschützt.
 - **Wahlgeheimnis:** die Wahl (`choice`) nie ins Audit; Audit-Einträge bleiben PII-frei (UUID statt E-Mail).
 - **Atomare Statuswechsel:** `UPDATE … WHERE status=<erwartet> RETURNING` und rowCount prüfen; Caps und Races über Transaktion bzw. `pg_advisory_xact_lock`. Best-effort-Nebeneffekte (Mailversand) außerhalb der Transaktion, mit try/catch.
 - **Tests müssen die echten Funktionen aufrufen**, nicht deren Logik nachbauen — sonst schlüpfen Query-Bugs durch. Muster: `src/lib/polls/__tests__/queries.test.ts`.
+- **Fixtures sind eingefangene echte Antworten, nie handgeschriebenes Wunsch-HTML.** Ein erfundenes Fixture lässt die Suite gegen eine Struktur grün laufen, die es draußen nicht gibt — genau das hat den AllRIS-Bug (#61) ermöglicht *und* danach verdeckt: Tests grün, Parser blind. Neues Fixture = echte Antwort speichern, Quelle und Abrufdatum im Kopf vermerken, dann den Parser dagegen schreiben. Fixture anzupassen, damit ein Test grün wird, ist die Fehlerrichtung.
 - **Migrationen laufen gegen alle Tenants**, nicht nur den Pilot. Additiv arbeiten (Expand/Contract); eine Migration muss auch dann durchlaufen, wenn ein Tenant Vorbedingungen nicht erfüllt. Neue Kommune = Eintrag in `db/seeds/regionen.json`.
 - Pfade mit `[tenant]` in Globs quoten.
 
