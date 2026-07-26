@@ -70,6 +70,21 @@
   p {
     text-wrap: pretty;
   }
+  /* Fließtext-Links (WCAG 1.4.1 „Use of Color", axe-Regel `link-in-text-block`,
+     Issue #60): ein Link INNERHALB eines Textblocks darf sich nicht allein durch
+     die Farbe vom umgebenden Text unterscheiden — er braucht ein Nicht-Farb-
+     Merkmal im RUHEZUSTAND. `hover:underline` genügt dafür nicht: wer nicht mit
+     der Maus darüberfährt (Touch, Tastatur, Restsehen), sieht es nie.
+     Deshalb zentral hier statt pro Aufrufer — so schleppt auch der nächste neu
+     geschriebene Fließtext-Link den Verstoß nicht wieder ein.
+     Ausgenommen: Links, die als Button auftreten (.pz-btn) — die tragen Fläche
+     und Rahmen als Nicht-Farb-Merkmal. Utility-Klassen (z. B. `no-underline`)
+     stechen diese Regel weiterhin, weil Tailwind-Utilities in einer späteren
+     Cascade-Layer stehen. */
+  p a:not(.pz-btn) {
+    text-decoration-line: underline;
+    text-underline-offset: 0.2em;
+  }
 }
 
 /* ===========================================================================

@@ -32,7 +32,7 @@
  * Beide Läufe zusammen decken auf den vier geprüften Seiten alle axe-Regeln des
  * Standards WCAG2AA ab, in jeder Impact-Klasse, sowohl `violations` als auch
  * `incomplete` — mit der einen dokumentierten Ausnahme `color-contrast`/`/` aus
- * Punkt 3 und den unten eingefrorenen Altlasten. Was das Gate NICHT sieht:
+ * Punkt 3. Sonst gibt es keine Ausnahme mehr. Was das Gate NICHT sieht:
  * andere Seiten (siehe .pa11yci.js: nur vier anonyme Sichten), alles was
  * Interaktion braucht (Fokus-Reihenfolge, Tastaturbedienung, Live-Regionen nach
  * einer Aktion), und alles, was automatisierte Prüfung grundsätzlich nicht
@@ -58,44 +58,16 @@ const AUSNAHMEN = {
    *   Abbau: nur mit einem einfarbigen Hero-Hintergrund. Kein Ziel für sich —
    *          echte Kontrast-VERSTÖSSE blockt LAUF 1 auf dieser Seite weiterhin.
    *
-   * `duplicate-id-aria` — ALTLAST, eingefroren am 2026-07-26.
-   *   Regel: duplicate-id-aria · Seite: / · Elemente: id="plz" und
-   *          id="plz-funktion" existieren auf der Startseite je zweimal
-   *          (Hero-Formular und zweites Formular weiter unten).
-   *   Grund: 2 belegte Verstöße (Impact critical). Dieser PR baut das GATE und
-   *          ändert bewusst keine UI-Datei; der Fix ist ein eigener PR.
-   *   Abbau: IDs eindeutig machen (z. B. Suffix je Formular-Instanz) und diese
-   *          Ausnahme dann ERSATZLOS entfernen — der Folge-PR nimmt sie mit raus.
-   *
-   * `form-field-multiple-labels` — ALTLAST, eingefroren am 2026-07-26.
-   *   Regel: form-field-multiple-labels · Seite: / · Elemente: dieselben zwei
-   *          PLZ-Felder, die durch die doppelten IDs je zwei <label> einsammeln.
-   *   Grund: Impact moderate, Folgefehler der doppelten IDs. Gleiche Begründung
-   *          wie oben: keine UI-Änderung in diesem PR.
-   *   Abbau: verschwindet mit dem duplicate-id-aria-Fix von selbst; Ausnahme im
-   *          selben Folge-PR ersatzlos entfernen.
+   * Die vier am 2026-07-26 eingefrorenen Altlasten (`duplicate-id-aria` und
+   * `form-field-multiple-labels` auf `/`, `heading-order` auf `/umfragen`,
+   * `link-in-text-block` auf `/anliegen`) sind behoben und ihre Ausnahmen
+   * ersatzlos entfernt — die Regeln blocken jetzt auf allen Seiten hart.
    */
-  "/": ["color-contrast", "duplicate-id-aria", "form-field-multiple-labels"],
+  "/": ["color-contrast"],
 
-  /**
-   * `heading-order` — ALTLAST, eingefroren am 2026-07-26.
-   *   Regel: heading-order · Seite: /umfragen · Element: eine Überschrift
-   *          springt eine Ebene (h2 → h4) statt lückenlos zu staffeln.
-   *   Grund: 1 belegter Verstoß (Impact moderate). Erst durch `includeWarnings`
-   *          in diesem Lauf überhaupt sichtbar geworden. Keine UI-Änderung in
-   *          diesem PR.
-   *   Abbau: Überschriftenebene korrigieren, danach diese Ausnahme ersatzlos
-   *          entfernen.
-   */
-  "/umfragen": ["heading-order"],
+  "/umfragen": [],
 
-  /**
-   * `link-in-text-block` — ALTLAST, eingefroren am 2026-07-26.
-   *   Identisch zur Ausnahme in .pa11yci.js (dort steht die volle Begründung).
-   *   Muss in BEIDEN Configs stehen, weil beide Läufe die Seite prüfen, und im
-   *   selben Folge-PR aus beiden verschwinden.
-   */
-  "/anliegen": ["link-in-text-block"],
+  "/anliegen": [],
 
   "/anmelden": [],
 };

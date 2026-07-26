@@ -155,29 +155,41 @@ function PollKarte({
   );
 }
 
-/** Liste, nach Ebene (Ortsteil/Kommune/Kreis/Land) gruppiert. */
+/**
+ * Liste, nach Ebene (Ortsteil/Kommune/Kreis/Land) gruppiert.
+ *
+ * `ebene` steuert NUR die Überschriften-Ebene der Gruppentitel, nicht ihr
+ * Aussehen (a11y-Gate `heading-order`, Issue #60): in der eingeloggten Sicht
+ * steht die Liste unter einer Sektions-h2 („Für Sie offen") → die Gruppentitel
+ * sind h3. In der anonymen Sicht folgt die Liste direkt auf die Seiten-h1 → dort
+ * wäre h3 ein Ebenensprung (h1 → h3), also h2. Die Optik ist in beiden Fällen
+ * identisch, weil die Klassen dieselben bleiben.
+ */
 function GruppierteListe({
   slug,
   items,
   cta,
   institution,
+  ebene = 3,
 }: {
   slug: string;
   items: PollMitErgebnis[];
   cta: string;
   institution: string;
+  ebene?: 2 | 3;
 }) {
   const gruppen = gruppiereNachEbene(items);
+  const GruppenTitel = ebene === 2 ? "h2" : "h3";
   return (
     <div className="space-y-7">
       {gruppen.map((g) => (
         <div key={g.typ}>
-          <h3
+          <GruppenTitel
             className="mb-2.5 text-xs font-semibold uppercase tracking-wide"
             style={{ color: "var(--pz-muted)" }}
           >
             {g.label}
-          </h3>
+          </GruppenTitel>
           <ul className="space-y-4">
             {g.polls.map((p) => (
               <li key={p.id}>
@@ -321,7 +333,9 @@ export default async function UmfragenListePage({ params }: PageProps) {
         {aktiveMitErgebnis.length === 0 ? (
           <LeerHinweis text="Gerade läuft keine Abstimmung für Ihre Region." />
         ) : (
-          <GruppierteListe slug={slugFromPath} items={aktiveMitErgebnis} cta="Anmelden zum Mitstimmen" institution={institution} />
+          /* Anonyme Sicht: die Gruppentitel folgen direkt auf die Seiten-h1,
+             also h2 statt h3 — sonst Ebenensprung (`heading-order`, Issue #60). */
+          <GruppierteListe slug={slugFromPath} items={aktiveMitErgebnis} cta="Anmelden zum Mitstimmen" institution={institution} ebene={2} />
         )}
 
         {beendeteMitErgebnis.length > 0 && (

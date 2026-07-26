@@ -109,21 +109,8 @@ module.exports = {
       ignore: [],
     },
     {
-      _kommentar_ignore: [
-        "ALTLAST, eingefroren am 2026-07-26 — abzubauen, nicht auszuweiten.",
-        "Regel: link-in-text-block · Seite: /anliegen · Element:",
-        '#main-content > main > p > a → <a href="/<tenant>/konto" ...>Konto unter',
-        "„Meine Anliegen“</a>. Der Link im Fließtext ist nur farblich (--pz-brand-strong)",
-        "vom umgebenden Text unterschieden; 'hover:underline' greift erst beim Hover.",
-        "Grund für die Ausnahme: dieser PR friert den Bestand ein und ändert",
-        "bewusst KEINE UI (Issue #60). Fix gehört in einen eigenen PR (Unterstreichung",
-        "im Ruhezustand oder ausreichender Nicht-Farb-Unterschied); danach diese",
-        "Ausnahme in BEIDEN Configs ersatzlos entfernen.",
-        "Die Ausnahme gilt regel- UND seitengenau: auf allen anderen URLs blockt",
-        "link-in-text-block weiterhin hart.",
-      ],
       url: url("/anliegen"),
-      ignore: ["link-in-text-block"],
+      ignore: [],
     },
     {
       url: url("/anmelden"),
