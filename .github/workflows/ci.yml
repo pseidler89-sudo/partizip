@@ -146,11 +146,20 @@ jobs:
           DATABASE_URL: postgres://partizip:partizip@localhost:5433/partizip_upgrade_test
         run: npm run test:upgrade
 
-  # Eigenständiger Job (Issue #60): prüft das GERENDERTE DOM der Kernseiten mit
-  # axe — Kontraste, Landmarks, Formular-Labels, Heading-Reihenfolge. Das ergänzt
-  # das statische jsx-a11y-Lint-Gate im ci-Job, das genau diese Klasse von
-  # Verstößen prinzipbedingt nicht sehen kann (sie entsteht erst beim Rendern).
-  # Zweck: belastbare BITV-Argumentation gegenüber Kommunen.
+  # Eigenständiger Job (Issue #60): prüft das GERENDERTE DOM von vier
+  # unangemeldet erreichbaren Seiten mit axe — Kontraste, Landmarks,
+  # Formular-Labels, Heading-Reihenfolge. Das ergänzt das statische
+  # jsx-a11y-Lint-Gate im ci-Job, das genau diese Klasse von Verstößen
+  # prinzipbedingt nicht sehen kann (sie entsteht erst beim Rendern).
+  #
+  # REICHWEITE — bitte nicht überdehnen: geprüft werden ausschließlich die
+  # anonymen Sichten /, /umfragen, /anliegen und /anmelden. Die eigentlichen
+  # Beteiligungsflüsse (/umfrage/[id], /mitmachen, /konto, /verifizieren,
+  # Admin) sind NICHT abgedeckt, ebenso wenig Tastaturbedienung, Fokusführung
+  # und alles, was erst nach einer Interaktion entsteht. Gegenüber Kommunen
+  # trägt dieser Job also genau diese vier Seiten und die von axe automatisiert
+  # entscheidbaren Regeln — keine Aussage über die Anwendung als Ganzes.
+  # Ausweitung auf die Kernflüsse ist ein eigener Schritt.
   #
   # Getrennter Job + eigene Service-DB, dem Muster von upgrade-path folgend →
   # bricht die bestehenden Jobs nicht und läuft parallel.
@@ -160,9 +169,18 @@ jobs:
   # HAUPT-Domain und liefert ohne diese Variable die neutrale Landing-Page statt
   # der Tenant-App. Ein a11y-Lauf dagegen wäre grün und wertlos. Der Schritt
   # "a11y-Lauf" ruft deshalb scripts/a11y-preflight.ts VOR pa11y auf: HTTP-Poll
-  # als Readiness (kein sleep), 200-Prüfung aller vier Seiten und eine harte
+  # als Readiness (kein sleep), 200-Prüfung aller vier Seiten, eine harte
   # Assertion, dass /umfragen den Wortlaut einer geseedeten Umfrage aus
-  # db/seeds/polls.json enthält. Schlägt eine davon fehl, bricht der Job ab.
+  # db/seeds/polls.json enthält, und eine ebenso harte Assertion, dass die
+  # Stylesheets der Seiten wirklich ausgeliefert werden (ohne CSS findet axe
+  # keine visuellen Verstöße mehr — der Lauf wäre erneut grün und wertlos).
+  # Schlägt eine davon fehl, bricht der Job ab.
+  #
+  # `npm run a11y` startet danach ZWEI pa11y-ci-Läufe mit unterschiedlichen
+  # Configs. Warum zwei nötig sind — ein einzelner Lauf kann die unentscheidbaren
+  # Kontrastfälle des Verlaufs-Heros nicht dämpfen, ohne gleichzeitig belegte
+  # Verstöße wie duplicate-id-aria stumm zu schalten — steht ausführlich im
+  # Kopfkommentar von app/.pa11yci.js.
   a11y:
     name: a11y (axe) — Kernseiten
     runs-on: ubuntu-latest
@@ -185,8 +203,11 @@ jobs:
     env:
       DATABASE_URL: postgres://partizip:partizip@localhost:5433/partizip_a11y_test
       PILOT_TENANT_SLUG: taunusstein
-      # Port explizit: die URLs in app/.pa11yci.json sind auf 3000 verdrahtet.
+      # A11Y_BASE_URL ist die EINE Quelle: app/.pa11yci.js baut daraus die
+      # pa11y-Ziele, scripts/a11y-preflight.ts importiert dieselbe Konstante.
+      # PORT muss dazu passen — der Standalone-Server liest ihn.
       PORT: "3000"
+      HOSTNAME: 127.0.0.1
       A11Y_BASE_URL: http://127.0.0.1:3000
 
     steps:
@@ -217,16 +238,23 @@ jobs:
         working-directory: app
         run: npm run build
 
+      # `npm run start:standalone` statt `npm run start`: app/next.config.ts setzt
+      # `output: "standalone"`, und Next 16 warnt ausdrücklich, dass `next start`
+      # damit nicht unterstützt ist. Produktion fährt .next/standalone/server.js
+      # (siehe Dockerfile, Stage `runner`) — der a11y-Job prüft damit denselben
+      # Server wie die Kommunen ihn sehen. Das Skript kopiert vorher .next/static
+      # und public neben server.js, genau wie das Dockerfile.
+      #
       # Der Server läuft in einer EIGENEN Prozessgruppe (setsid) und meldet deren
       # PGID selbst. So beendet der Cleanup die ganze Gruppe (npm-Wrapper +
-      # next-server) statt nur des npm-Prozesses; ein `$!` des aufrufenden Shells
+      # node-Server) statt nur des npm-Prozesses; ein `$!` des aufrufenden Shells
       # wäre je nach Job-Control nicht zuverlässig die PGID.
       # Auf Readiness wird hier NICHT gewartet — das macht der Preflight per
       # HTTP-Poll im nächsten Schritt (kein sleep als Synchronisation).
-      - name: Server starten (Pilot-Tenant)
+      - name: Server starten (Pilot-Tenant, Standalone wie in Produktion)
         working-directory: app
         run: |
-          setsid bash -c 'echo $$ > /tmp/a11y-server.pgid; exec npm run start' \
+          setsid bash -c 'echo $$ > /tmp/a11y-server.pgid; exec npm run start:standalone' \
             > /tmp/a11y-server.log 2>&1 < /dev/null &
           for _ in $(seq 1 100); do
             [ -s /tmp/a11y-server.pgid ] && break
@@ -235,7 +263,7 @@ jobs:
           [ -s /tmp/a11y-server.pgid ] || { echo "Server-PGID wurde nicht geschrieben"; exit 1; }
           echo "Server-Prozessgruppe: $(cat /tmp/a11y-server.pgid)"
 
-      - name: a11y-Lauf (Preflight + pa11y-ci)
+      - name: a11y-Lauf (Preflight + beide pa11y-ci-Läufe)
         working-directory: app
         run: npm run a11y
 
