@@ -36,6 +36,7 @@ import { istMusterstadtSeedDigestId } from "@/lib/demo/seed-ids";
 import { getUserRoleTypes, canRedaktion } from "@/lib/auth/roles";
 import { freigebenCore, isSelfApprovalAllowed } from "@/lib/digest/freigabe-core";
 import { veroeffentlichenCore } from "@/lib/digest/veroeffentlichen-core";
+import { verlangeFrischeBestaetigung } from "@/lib/auth/action-context";
 
 // ---------------------------------------------------------------------------
 // Auth-Hilfsfunktionen
@@ -248,6 +249,11 @@ export async function setStatementHighlight(
 // ---------------------------------------------------------------------------
 
 export async function freigeben(digestId: string): Promise<{ ok: boolean; error?: string }> {
+  // Step-up (#59): Die Freigabe entscheidet, was als geprüfter Stand gilt — dafür verlangen wir eine
+  // frische Bestätigung mit dem Einmalcode.
+  const stepUp = await verlangeFrischeBestaetigung();
+  if (!stepUp.ok) return { ok: false, error: stepUp.error };
+
   const ctx = await getAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
 
@@ -276,6 +282,11 @@ export async function freigeben(digestId: string): Promise<{ ok: boolean; error?
 // ---------------------------------------------------------------------------
 
 export async function veroeffentlichen(digestId: string): Promise<{ ok: boolean; error?: string }> {
+  // Step-up (#59): Die Veröffentlichung geht an Kanäle nach außen und ist nicht zurückholbar — dafür verlangen wir eine
+  // frische Bestätigung mit dem Einmalcode.
+  const stepUp = await verlangeFrischeBestaetigung();
+  if (!stepUp.ok) return { ok: false, error: stepUp.error };
+
   const ctx = await getAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
 

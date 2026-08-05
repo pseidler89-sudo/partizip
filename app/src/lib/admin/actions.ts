@@ -20,6 +20,7 @@ import { sha256Hex } from "@/lib/auth/crypto";
 import { getTenantFromHost } from "@/lib/tenant";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getUserRoleTypes } from "@/lib/auth/roles";
+import { verlangeFrischeBestaetigung } from "@/lib/auth/action-context";
 import { isDemoTenant } from "@/lib/demo/config";
 import {
   assignRoleCore,
@@ -84,6 +85,12 @@ const DEMO_ROLLEN_GESPERRT = "Im Demo-Mandanten werden Rollen nicht verändert."
 
 /** Server Action: Rolle zuweisen (auditiert, eskalationsgeschützt). */
 export async function assignRole(input: AssignRoleInput): Promise<RoleActionResult> {
+  // Step-up (#59): Rollenvergabe ist die Aktion, über die sich ein übernommenes
+  // Konto selbst dauerhaft festsetzen könnte. Dafür verlangen wir eine frische
+  // Bestätigung mit dem Einmalcode, nicht nur eine gültige Session.
+  const stepUp = await verlangeFrischeBestaetigung();
+  if (!stepUp.ok) return { ok: false, error: stepUp.error };
+
   const ctx = await getAdminAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_ROLLEN_GESPERRT };
@@ -93,6 +100,12 @@ export async function assignRole(input: AssignRoleInput): Promise<RoleActionResu
 
 /** Server Action: Rolle entziehen (auditiert, letzter-Admin- + eskalationsgeschützt). */
 export async function revokeRole(input: RevokeRoleInput): Promise<RoleActionResult> {
+  // Step-up (#59): Rollenentzug ist die Kehrseite der Vergabe — wer ihn ohne
+  // frische Bestätigung ausführen könnte, könnte den letzten anderen Admin
+  // entfernen. Gleiche Schwelle wie assignRole.
+  const stepUp = await verlangeFrischeBestaetigung();
+  if (!stepUp.ok) return { ok: false, error: stepUp.error };
+
   const ctx = await getAdminAuthContext();
   if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_ROLLEN_GESPERRT };

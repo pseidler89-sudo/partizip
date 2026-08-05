@@ -41,6 +41,7 @@ import {
   getOptionalAuthContext,
   getClientIp,
   requireAdminCtx,
+  requireAdminStepUpCtx,
 } from "@/lib/auth/action-context";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
 import { isDemoTenant } from "@/lib/demo/config";
@@ -785,7 +786,8 @@ export async function pollAktivieren(
   // Transport injizierbar für Tests (Spy); Default createDefaultTransport().
   transport: NotifyTransport = createDefaultTransport()
 ): Promise<{ ok: boolean; error?: string }> {
-  const auth = await requireAdminCtx();
+  // Step-up (#59): Diese Aktion veröffentlicht die Frage — ab hier sehen sie alle Bürgerinnen und Bürger.
+  const auth = await requireAdminStepUpCtx();
   if (!auth.ok) return { ok: false, error: auth.error };
   const { ctx } = auth;
 
@@ -937,7 +939,8 @@ async function notifyPollBestEffort(
 export async function pollSchliessen(
   pollId: string
 ): Promise<{ ok: boolean; error?: string }> {
-  const auth = await requireAdminCtx();
+  // Step-up (#59): Diese Aktion schließt die Abstimmung — der Zustand danach lässt sich nicht zurückdrehen.
+  const auth = await requireAdminStepUpCtx();
   if (!auth.ok) return { ok: false, error: auth.error };
   const { ctx } = auth;
 
@@ -1120,7 +1123,8 @@ export async function pollPruefungAbschliessen(
   },
   transport: NotifyTransport = createDefaultTransport()
 ): Promise<{ ok: boolean; error?: string }> {
-  const auth = await requireAdminCtx();
+  // Step-up (#59): Diese Aktion gibt das Ergebnis frei — die Freigabe ist der Moment, der nach außen zählt.
+  const auth = await requireAdminStepUpCtx();
   if (!auth.ok) return { ok: false, error: auth.error };
   const { ctx } = auth;
 
