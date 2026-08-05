@@ -59,10 +59,14 @@ describe("Beleg-Code Format (Unit)", () => {
     }
   });
 
-  it("streut breit (CSPRNG) — keine Kollisionen über 5000 Codes", () => {
+  // Siehe verification/__tests__/booking.test.ts: geprüft wird die Streuung des
+  // CSPRNG, nicht die Eindeutigkeit — für die sorgt der UNIQUE-Constraint mit
+  // Retry. toBe(5000) wäre bei 40 Bit Entropie im Schnitt alle 88.000 Läufe
+  // grundlos rot geworden (Geburtstagsproblem).
+  it("streut breit (CSPRNG) — praktisch kollisionsfrei über 5000 Codes", () => {
     const set = new Set<string>();
     for (let i = 0; i < 5000; i++) set.add(generateBelegCode());
-    expect(set.size).toBe(5000);
+    expect(set.size).toBeGreaterThanOrEqual(4995);
   });
 });
 
