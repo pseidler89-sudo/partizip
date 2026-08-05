@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import type { RisAdapter, MeetingRef, FetchedMeeting, DocumentRef, FetchFn } from "./types.js";
 import { makeRisGetFn } from "./fetch-wrapper.js";
 import { decodeHtmlEntities } from "../text/html-entities.js";
+import { berlinZeitZuDate } from "./zeitzone";
 
 // ---------------------------------------------------------------------------
 // HTML-Parsing-Hilfsfunktionen (pure, testbar ohne fetch)
@@ -267,13 +268,16 @@ export function sha256Hex(text: string): string {
 // Datum-Parsing
 // ---------------------------------------------------------------------------
 
-/** Parst "DD.MM.YYYY" und optionale Zeit "HH:MM" */
+/**
+ * Parst "DD.MM.YYYY" und optionale Zeit "HH:MM".
+ * Die Angabe ist deutsche Ortszeit — siehe zeitzone.ts.
+ */
 function parseDeutschesDatum(datum: string, zeit?: string): Date | null {
   const match = datum.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
   if (!match) return null;
   const [, d, m, y] = match;
   const [h, min] = (zeit ?? "00:00").split(":").map(Number);
-  return new Date(`${y}-${String(+m).padStart(2, "0")}-${String(+d).padStart(2, "0")}T${String(h ?? 0).padStart(2, "0")}:${String(min ?? 0).padStart(2, "0")}:00+01:00`);
+  return berlinZeitZuDate(Number(y), Number(m), Number(d), h ?? 0, min ?? 0);
 }
 
 /** Parst "Montag, 12. Mai 2026" (deutsches Langdatum) */
@@ -290,7 +294,7 @@ function parseDeutschesLangdatum(datum: string, zeit?: string): Date | null {
   const m = monate[monName];
   if (!m) return null;
   const [h, min] = (zeit ?? "00:00").split(":").map(Number);
-  return new Date(`${y}-${m}-${String(+d).padStart(2, "0")}T${String(h ?? 0).padStart(2, "0")}:${String(min ?? 0).padStart(2, "0")}:00+01:00`);
+  return berlinZeitZuDate(Number(y), Number(m), Number(d), h ?? 0, min ?? 0);
 }
 
 /** Entfernt HTML-Tags und dekodiert Entities */
