@@ -14,6 +14,7 @@ import {
   text,
   boolean,
   integer,
+  bigint,
   numeric,
   timestamp,
   jsonb,
@@ -430,6 +431,29 @@ export const users = pgTable(
     //   notify_reverify         — Erinnerung vor Ablauf der Wohnsitz-Verifizierung.
     notifyAnliegenUpdates: boolean("notify_anliegen_updates").notNull().default(true),
     notifyReverify: boolean("notify_reverify").notNull().default(true),
+    // Block #59: Zwei-Faktor (TOTP) für Admin-Rollen. Additiv+nullable (Migration
+    // 0039), kein Backfill — bestehende Konten haben kein TOTP und laufen in die
+    // Kulanzfrist (s. totp_grace_until).
+    //
+    // totp_secret_enc: AES-256-GCM-Chiffrat des Base32-Secrets (lib/auth/totp.ts).
+    //   NICHT gehasht — das Secret wird zur Prüfung im Klartext gebraucht; deshalb
+    //   verschlüsselt, damit ein DB-Dump allein den zweiten Faktor nicht aushebelt.
+    //   Gesetzt, aber totp_confirmed_at NULL = Einrichtung begonnen, nicht bestätigt.
+    totpSecretEnc: text("totp_secret_enc"),
+    // Erst gesetzt, wenn der Nutzer einen gültigen Code eingegeben hat. NUR dann
+    // gilt TOTP als aktiv — ein angefangenes Setup darf nicht aussperren.
+    totpConfirmedAt: timestamp("totp_confirmed_at", { withTimezone: true }),
+    // Zuletzt eingelöster TOTP-Zeitschritt. Sperrt die Wiederverwendung desselben
+    // Codes innerhalb seines Toleranzfensters (± 30 s). bigint, weil der Zähler
+    // int4 im Jahr ~4000 überliefe — billiger als eine Migration danach.
+    totpLastStep: bigint("totp_last_step", { mode: "number" }),
+    // Ende der Kulanzfrist für Admins ohne TOTP. Wird EINMALIG von Migration 0040
+    // für die zum Rollout vorhandenen Admins gesetzt — zur Laufzeit schreibt sie
+    // niemand. NULL heißt KEINE Kulanz: Wer nach dem Rollout Admin wird, richtet
+    // den zweiten Faktor vor dem ersten Admin-Zugriff ein.
+    // (Zuerst setzte die Anwendung die Frist beim ersten Zugriff selbst — das gab
+    // jedem neuen Admin-Konto dauerhaft 14 freie Tage und war ein Gate-B-BLOCKER.)
+    totpGraceUntil: timestamp("totp_grace_until", { withTimezone: true }),
     // M6: $onUpdate
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`).$onUpdate(() => new Date()),
   },
@@ -769,12 +793,55 @@ export const sessions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
     // NULL = aktiv; gesetzt = revoziert (Logout)
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    // Block #59: Zeitpunkt der letzten TOTP-Prüfung IN DIESER SESSION.
+    // Zwei Aufgaben in einem Feld:
+    //   1. Login-Gate — NULL bei einem Admin mit aktivem TOTP heißt: zweiter
+    //      Faktor steht noch aus, Admin-Flächen bleiben zu.
+    //   2. Step-up — für besonders folgenreiche Aktionen (Rollenvergabe,
+    //      Veröffentlichen/Freigeben) muss der Zeitstempel frisch sein.
+    // Bewusst an der Session und nicht am User: Ein zweiter Browser bekommt keinen
+    // Freifahrtschein, und ein Logout entwertet den Faktor mit.
+    totpVerifiedAt: timestamp("totp_verified_at", { withTimezone: true }),
   },
   (t) => [
     index("idx_sessions_user_id").on(t.userId),
     index("idx_sessions_tenant_id").on(t.tenantId),
     // M4/MIN1: Retention-Cleanup-Index
     index("idx_sessions_expires_at").on(t.expiresAt),
+  ]
+);
+
+// ---------------------------------------------------------------------------
+// totp_recovery_codes — Wiederherstellungscodes für den Verlust des zweiten
+// Faktors (Block #59).
+//
+// code_hash: sha256-hex des normalisierten Codes. Ungesalzen ist hier richtig —
+// die Codes sind 50 Bit Zufall, kein vom Menschen gewähltes Geheimnis (gleiche
+// Begründung wie bei Session-Tokens).
+// Einmalgebrauch über used_at; verbrauchte Codes bleiben stehen, damit ein
+// zweiter Einlöseversuch als Wiederverwendung erkennbar ist.
+// Bei Neu-Einrichtung von TOTP werden alle Codes eines Nutzers ersetzt.
+// ---------------------------------------------------------------------------
+
+export const totpRecoveryCodes = pgTable(
+  "totp_recovery_codes",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    codeHash: text("code_hash").notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (t) => [
+    // Der Lookup läuft immer über (user, hash) — nie über den Hash allein, sonst
+    // könnte ein Code eines fremden Kontos eingelöst werden.
+    uniqueIndex("totp_recovery_codes_user_hash_unique").on(t.userId, t.codeHash),
+    index("idx_totp_recovery_codes_user").on(t.userId),
   ]
 );
 

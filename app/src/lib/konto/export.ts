@@ -51,6 +51,13 @@ export type ExportKonto = {
   // Block J2a (Vorgriff J2c): granulare Opt-outs — gehören zur Art.-15-Auskunft.
   notifyAnliegenUpdates: boolean;
   notifyReverify: boolean;
+  /**
+   * Zeitpunkt der Aktivierung der Zwei-Faktor-Authentisierung (#59), null wenn
+   * nicht eingerichtet. Das Secret selbst gehört NICHT in den Export — es ist ein
+   * Sicherheitsmerkmal, keine Auskunft, und eine Herausgabe würde den zweiten
+   * Faktor entwerten.
+   */
+  totpConfirmedAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -165,6 +172,7 @@ export function buildExportDocument(input: {
       notifyNewPolls: input.user.notifyNewPolls,
       notifyAnliegenUpdates: input.user.notifyAnliegenUpdates,
       notifyReverify: input.user.notifyReverify,
+      totpConfirmedAt: iso(input.user.totpConfirmedAt),
       createdAt: iso(input.user.createdAt),
       updatedAt: iso(input.user.updatedAt),
     },

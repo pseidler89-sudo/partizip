@@ -41,6 +41,8 @@ import {
   getOptionalAuthContext,
   getClientIp,
   requireAdminCtx,
+  requireAdminStepUpCtx,
+  type ZweiFaktorBedarf,
 } from "@/lib/auth/action-context";
 import { computeVoterRefForUser } from "@/lib/polls/voter-ref";
 import { isDemoTenant } from "@/lib/demo/config";
@@ -78,6 +80,26 @@ import {
 } from "@/lib/polls/pruefung-core";
 import { isSelfApprovalAllowed } from "@/lib/digest/freigabe-core";
 import type { TenantRow } from "@/lib/tenant";
+
+/**
+ * Ergebnis der ADMIN-Actions des Umfrage-Lebenszyklus (nicht der Bürger-Actions
+ * — die laufen über requireStufe1Ctx und kennen keine Zwei-Faktor-Pflicht).
+ *
+ * `zweiFaktor` (#59) sagt der UI, dass nicht die Berechtigung fehlt, sondern der
+ * zweite Faktor — und WELCHER Weg hilft ("code" = bestätigen, "einrichten" =
+ * einrichten). Das Feld kommt unverändert aus den Gates in
+ * lib/auth/action-context.ts und wird hier nur DURCHGEREICHT statt verworfen
+ * (Review #59, Befund 2): Aktivieren, Schließen und die Prüf-Entscheidung
+ * verlangen ein Step-up, das mitten in der Arbeit ablaufen kann — ohne das Feld
+ * bliebe der Betreiber vor einem Satz ohne Weg zurück stehen.
+ *
+ * Optional, damit bestehende Aufrufer und Tests unverändert bleiben.
+ */
+export type PollAdminActionResult = {
+  ok: boolean;
+  error?: string;
+  zweiFaktor?: ZweiFaktorBedarf;
+};
 
 // ---------------------------------------------------------------------------
 // abstimmen — die Kern-Action (NUR eingeloggt, Stufe ≥ 1; ADR-014)
@@ -645,9 +667,9 @@ const pollErstellenSchema = z.object({
 
 export async function pollErstellen(
   rawData: unknown
-): Promise<{ ok: boolean; pollId?: string; error?: string }> {
+): Promise<PollAdminActionResult & { pollId?: string }> {
   const auth = await requireAdminCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   const parsed = pollErstellenSchema.safeParse(rawData);
@@ -784,9 +806,10 @@ export async function pollAktivieren(
   pollId: string,
   // Transport injizierbar für Tests (Spy); Default createDefaultTransport().
   transport: NotifyTransport = createDefaultTransport()
-): Promise<{ ok: boolean; error?: string }> {
-  const auth = await requireAdminCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+): Promise<PollAdminActionResult> {
+  // Step-up (#59): Diese Aktion veröffentlicht die Frage — ab hier sehen sie alle Bürgerinnen und Bürger.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   const idParsed = z.string().uuid().safeParse(pollId);
@@ -936,9 +959,10 @@ async function notifyPollBestEffort(
  */
 export async function pollSchliessen(
   pollId: string
-): Promise<{ ok: boolean; error?: string }> {
-  const auth = await requireAdminCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+): Promise<PollAdminActionResult> {
+  // Step-up (#59): Diese Aktion schließt die Abstimmung — der Zustand danach lässt sich nicht zurückdrehen.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   const idParsed = z.string().uuid().safeParse(pollId);
@@ -1003,9 +1027,9 @@ export async function pollSchliessen(
  */
 export async function pollEntwurfLoeschen(
   pollId: string
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<PollAdminActionResult> {
   const auth = await requireAdminCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   const idParsed = z.string().uuid().safeParse(pollId);
@@ -1119,9 +1143,10 @@ export async function pollPruefungAbschliessen(
     istOverride?: boolean;
   },
   transport: NotifyTransport = createDefaultTransport()
-): Promise<{ ok: boolean; error?: string }> {
-  const auth = await requireAdminCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+): Promise<PollAdminActionResult> {
+  // Step-up (#59): Diese Aktion gibt das Ergebnis frei — die Freigabe ist der Moment, der nach außen zählt.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   const parsed = pollPruefungSchema.safeParse(raw);

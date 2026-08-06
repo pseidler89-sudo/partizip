@@ -28,7 +28,13 @@ import {
   pollSchliessen,
   pollEntwurfLoeschen,
   pollPruefungAbschliessen,
+  type PollAdminActionResult,
 } from "@/lib/polls/actions";
+// #59: Aktivieren, Schließen und die Prüf-Entscheidung verlangen ein Step-up
+// (frische Bestätigung mit dem Einmalcode). Läuft es während der Arbeit ab,
+// trägt das Action-Ergebnis ein `zweiFaktor`-Feld — der Hinweis macht daraus den
+// Weg zurück in die Bestätigung. Ohne das Feld rendert er nichts.
+import ZweiFaktorHinweis, { type ZweiFaktorErgebnis } from "@/components/ZweiFaktorHinweis";
 import BestaetigungsDialog from "../../BestaetigungsDialog";
 
 type Status = "entwurf" | "aktiv" | "geschlossen" | "in_pruefung";
@@ -112,6 +118,10 @@ export default function PollAdminActions({
   const router = useRouter();
   const [busy, setBusy] = useState<null | Op | "pruefung">(null);
   const [error, setError] = useState<string | null>(null);
+  // Letztes Action-Ergebnis, nur für den Zwei-Faktor-Hinweis. Wird bei jedem
+  // neuen Versuch zusammen mit `error` zurückgesetzt, damit der Hinweis nicht
+  // stehen bleibt, nachdem die Bestätigung nachgeholt wurde.
+  const [ergebnis, setErgebnis] = useState<ZweiFaktorErgebnis | null>(null);
   const [confirm, setConfirm] = useState<Op | null>(null);
 
   // Prüf-Panel-Zustand (nur im Status in_pruefung genutzt).
@@ -142,7 +152,7 @@ export default function PollAdminActions({
     return DIALOG[op].label;
   }
 
-  const AKTIONEN: Record<Op, () => Promise<{ ok: boolean; error?: string }>> = {
+  const AKTIONEN: Record<Op, () => Promise<PollAdminActionResult>> = {
     aktivieren: () => pollAktivieren(pollId),
     schliessen: () => pollSchliessen(pollId),
     loeschen: () => pollEntwurfLoeschen(pollId),
@@ -150,11 +160,19 @@ export default function PollAdminActions({
 
   async function run(op: Op) {
     setError(null);
+    setErgebnis(null);
     setBusy(op);
     try {
       const result = await AKTIONEN[op]();
       if (!result.ok) {
         setError(result.error ?? "Die Aktion ist fehlgeschlagen.");
+        setErgebnis(result);
+        // #59: Der Dialog bleibt bei gewöhnlichen Fehlern bewusst offen (der
+        // Nutzer soll es direkt erneut versuchen können). Beim Zwei-Faktor-Fall
+        // muss er weichen: BestaetigungsDialog ist modal und hält den Fokus
+        // fest — der Hinweis samt Link läge sonst dahinter und wäre weder
+        // sichtbar noch per Tastatur erreichbar.
+        if (result.zweiFaktor) setConfirm(null);
         return;
       }
       setConfirm(null);
@@ -168,6 +186,7 @@ export default function PollAdminActions({
 
   async function runPruefung(verdict: "neutral" | "angehalten") {
     setError(null);
+    setErgebnis(null);
     // Client-Vorprüfung (Server validiert erneut): Begründung Pflicht; verletzte
     // Regel Pflicht beim Anhalten.
     if (begruendung.trim().length === 0) {
@@ -189,6 +208,10 @@ export default function PollAdminActions({
       });
       if (!result.ok) {
         setError(result.error ?? "Die Prüfung ist fehlgeschlagen.");
+        setErgebnis(result);
+        // Modaler Dialog + Fokusfalle — siehe run(): beim Zwei-Faktor-Fall
+        // schließen, damit der Hinweis erreichbar ist.
+        if (result.zweiFaktor) setPruefConfirm(null);
         return;
       }
       setPruefConfirm(null);
@@ -273,6 +296,8 @@ export default function PollAdminActions({
           </div>
 
           {error && <p className="mt-2 text-sm" style={{ color: "var(--pz-danger)" }}>{error}</p>}
+          {/* Bringt seine eigene role="alert"-Region mit und rendert ohne Feld nichts. */}
+          <ZweiFaktorHinweis ergebnis={ergebnis} />
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
@@ -356,6 +381,7 @@ export default function PollAdminActions({
       </div>
 
       {error && <p className="mt-2 text-sm" style={{ color: "var(--pz-danger)" }}>{error}</p>}
+      <ZweiFaktorHinweis ergebnis={ergebnis} />
 
       <BestaetigungsDialog
         offen={confirm !== null}

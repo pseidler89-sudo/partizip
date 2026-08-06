@@ -17,10 +17,9 @@
 
 "use server";
 
-import { cookies, headers } from "next/headers";
 import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
-import { createDb, type Db } from "@/db/client";
+import { type Db } from "@/db/client";
 import {
   anliegen,
   anliegenEvents,
@@ -28,92 +27,33 @@ import {
   anliegenMatches,
   auditEvents,
   ortsteile,
-  sessions,
-  users,
 } from "@/db/schema";
-import { sha256Hex } from "@/lib/auth/crypto";
-import { getTenantFromHost } from "@/lib/tenant";
-import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getStufe } from "@/lib/eligibility/stufe";
-import { getUserRoleTypes, isAdmin } from "@/lib/auth/roles";
+import {
+  getClientIp,
+  getOptionalAuthContext,
+  requireAdminCtx,
+} from "@/lib/auth/action-context";
 import { computeCreatorRef } from "@/lib/anliegen/creator-ref";
 import { getAnliegenFollowerEmails } from "@/lib/anliegen/follower-recipients";
 import { generateUniqueTrackingCode } from "@/lib/anliegen/tracking-code";
 import { checkAnliegenRateLimit } from "@/lib/anliegen/rate-limit";
-import { clientIpFromForwardedFor } from "@/lib/client-ip";
 import { notifyFollowersStatusChanged, sendTrackingCodeEmail } from "@/lib/anliegen/notify";
 import type { NotifyTransport } from "@/lib/anliegen/notify";
 import { FEATURE_ANLIEGEN_EINREICHEN } from "@/lib/features";
 import { isDemoTenant } from "@/lib/demo/config";
 
 // ---------------------------------------------------------------------------
-// Auth-Hilfsfunktionen (nach Muster aus digest/actions.ts)
+// Auth: AUSSCHLIESSLICH über @/lib/auth/action-context
+//
+// KEIN EIGENER SESSION-RESOLVER (Gate-B 2026-08-06, BLOCKER): Diese Datei hatte
+// eine eigene Kopie des Session-Lookups plus ein lokales `requireAdmin` und kam
+// damit an der Zwei-Faktor-Pflicht (#59) vorbei. Jetzt gilt:
+//   - Bürger-Actions (createAnliegen, zurueckziehenAnliegen): getOptionalAuthContext
+//     — Stufe bzw. Ownership prüft die Action wie bisher selbst.
+//   - Admin-Actions: requireAdminCtx — dort sitzt die Zwei-Faktor-Pflicht.
+// Wächter: lib/auth/__tests__/kein-eigener-session-resolver.test.ts.
 // ---------------------------------------------------------------------------
-
-async function getAuthContext() {
-  const headerStore = await headers();
-  const host = headerStore.get("host") ?? "localhost";
-  const tenant = await getTenantFromHost(host);
-  if (!tenant) return null;
-
-  const cookieStore = await cookies();
-  const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-  if (!rawToken) return null;
-
-  const tokenHash = sha256Hex(rawToken);
-  const databaseUrl =
-    process.env.DATABASE_URL ??
-    "postgres://partizip:partizip@127.0.0.1:5433/partizip";
-  const db = createDb(databaseUrl);
-
-  const now = new Date();
-  const sessionRows = await db
-    .select()
-    .from(sessions)
-    .where(
-      and(
-        eq(sessions.tokenHash, tokenHash),
-        eq(sessions.tenantId, tenant.id),
-      )
-    )
-    .limit(1);
-
-  const session = sessionRows[0];
-  if (!session || session.revokedAt || session.expiresAt < now) return null;
-
-  // User für Stufen-Check laden
-  const userRows = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.id, session.userId), eq(users.tenantId, tenant.id)))
-    .limit(1);
-
-  const user = userRows[0];
-  if (!user) return null;
-
-  return { tenant, userId: session.userId, user, db };
-}
-
-/**
- * Admin-Check über den zentralen Rollen-Helper (H1/M2).
- * Ersetzt das früher lokale `hasAdminRole` für Konsistenz mit dem Rest des Codes.
- */
-async function requireAdmin(
-  db: Db,
-  tenantId: string,
-  userId: string
-): Promise<boolean> {
-  return isAdmin(await getUserRoleTypes(db, tenantId, userId));
-}
-
-/**
- * Liest die Client-IP aus den Request-Headern — LETZTES x-forwarded-for-
- * Element (Proxy-Semantik, siehe lib/client-ip.ts; Projekt-Review P1-2).
- */
-async function getClientIp(): Promise<string | null> {
-  const headerStore = await headers();
-  return clientIpFromForwardedFor(headerStore.get("x-forwarded-for"));
-}
 
 // ---------------------------------------------------------------------------
 // Zod-Schemas
@@ -153,8 +93,10 @@ export async function createAnliegen(
     return { ok: false, error: "Diese Funktion ist derzeit nicht aktiv." };
   }
 
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // Bürger-Action (kein Admin-Gate): der zentrale Resolver liefert Tenant +
+  // Session + volle user-Zeile; die Stufe prüft die Action direkt darunter.
+  const ctx = await getOptionalAuthContext();
+  if (!ctx || !ctx.userId || !ctx.user) return { ok: false, error: "Nicht authentifiziert." };
 
   // Stufe-Prüfung: Anliegen einreichen erfordert einen bestätigten Wohnsitz
   // (Stufe 2). getStufe auf der vollen user-row (kein Client-Trust). Fail-closed.
@@ -318,13 +260,12 @@ export async function changeAnliegenStatus(
   rawData: unknown,
   transport?: NotifyTransport
 ): Promise<{ ok: boolean; error?: string }> {
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
-
-  const admin = await requireAdmin(ctx.db, ctx.tenant.id, ctx.userId);
-  if (!admin) {
-    return { ok: false, error: "Keine Berechtigung (kommune_admin oder super_admin erforderlich)." };
-  }
+  // KEIN Step-up: Der Statuswechsel ist redaktionelle Alltagsarbeit und in beide
+  // Richtungen korrigierbar; er vergibt keine Rechte. Die Follower-Mail geht nur
+  // an bereits eingetragene Follower, nicht an die Öffentlichkeit.
+  const auth = await requireAdminCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   const parsed = changeStatusSchema.safeParse(rawData);
   if (!parsed.success) {
@@ -451,13 +392,11 @@ export async function confirmMatch(
   matchId: string,
   createEvent: boolean = false
 ): Promise<{ ok: boolean; error?: string }> {
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
-
-  const admin = await requireAdmin(ctx.db, ctx.tenant.id, ctx.userId);
-  if (!admin) {
-    return { ok: false, error: "Keine Berechtigung (kommune_admin oder super_admin erforderlich)." };
-  }
+  // KEIN Step-up: Ein bestätigter RIS-Treffer verknüpft ein Anliegen mit einem
+  // ohnehin öffentlichen Ratsdokument — keine Rechtevergabe, korrigierbar.
+  const auth = await requireAdminCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   const now = new Date();
 
@@ -554,13 +493,11 @@ export async function confirmMatch(
 export async function rejectMatch(
   matchId: string
 ): Promise<{ ok: boolean; error?: string }> {
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
-
-  const admin = await requireAdmin(ctx.db, ctx.tenant.id, ctx.userId);
-  if (!admin) {
-    return { ok: false, error: "Keine Berechtigung (kommune_admin oder super_admin erforderlich)." };
-  }
+  // KEIN Step-up: Das Verwerfen eines Treffer-Vorschlags ist die harmlosere
+  // Richtung von confirmMatch — es entsteht gar nichts.
+  const auth = await requireAdminCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   const now = new Date();
 
@@ -643,13 +580,11 @@ export async function verbergenAnliegen(
   anliegenId: string,
   grund: string
 ): Promise<{ ok: boolean; error?: string }> {
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
-
-  const admin = await requireAdmin(ctx.db, ctx.tenant.id, ctx.userId);
-  if (!admin) {
-    return { ok: false, error: "Keine Berechtigung (kommune_admin oder super_admin erforderlich)." };
-  }
+  // KEIN Step-up: Verbergen ist Moderation und umkehrbar
+  // (wiederherstellenAnliegen); der Text bleibt in der Zeile erhalten.
+  const auth = await requireAdminCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   const parsed = verbergenSchema.safeParse({ anliegenId, grund });
   if (!parsed.success) {
@@ -696,13 +631,10 @@ export async function verbergenAnliegen(
 export async function wiederherstellenAnliegen(
   anliegenId: string
 ): Promise<{ ok: boolean; error?: string }> {
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
-
-  const admin = await requireAdmin(ctx.db, ctx.tenant.id, ctx.userId);
-  if (!admin) {
-    return { ok: false, error: "Keine Berechtigung (kommune_admin oder super_admin erforderlich)." };
-  }
+  // KEIN Step-up: die wiederherstellende Richtung von verbergenAnliegen.
+  const auth = await requireAdminCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   const idParsed = z.string().uuid().safeParse(anliegenId);
   if (!idParsed.success) {
@@ -765,8 +697,10 @@ const WITHDRAWABLE_STATES = [
 export async function zurueckziehenAnliegen(
   anliegenId: string
 ): Promise<{ ok: boolean; error?: string }> {
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // Bürger-Action (kein Admin-Gate): Die Berechtigung ist die OWNERSHIP über das
+  // Pseudonym creator_ref, nicht eine Rolle — siehe unten.
+  const ctx = await getOptionalAuthContext();
+  if (!ctx || !ctx.userId) return { ok: false, error: "Nicht authentifiziert." };
 
   const idParsed = z.string().uuid().safeParse(anliegenId);
   if (!idParsed.success) {

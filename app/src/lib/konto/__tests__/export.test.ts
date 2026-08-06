@@ -41,6 +41,11 @@ const user: UserRow = {
   notifyNewPolls: true,
   notifyAnliegenUpdates: true,
   notifyReverify: true,
+  // Zwei-Faktor (#59): für einen einfachen Nutzer ohne Admin-Rolle immer leer.
+  totpSecretEnc: null,
+  totpConfirmedAt: null,
+  totpLastStep: null,
+  totpGraceUntil: null,
   updatedAt: T0,
 };
 

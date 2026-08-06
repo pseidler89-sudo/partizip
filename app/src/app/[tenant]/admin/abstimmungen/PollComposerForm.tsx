@@ -18,6 +18,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { pollErstellen } from "@/lib/polls/actions";
+// #59: pollErstellen läuft über das Admin-Gate. Fehlt einem Admin die
+// Zwei-Faktor-Einrichtung (Kulanzfrist mitten in der Sitzung abgelaufen), trägt
+// das Ergebnis ein `zweiFaktor`-Feld — der Hinweis macht daraus den Weg dorthin.
+// Ohne das Feld rendert er nichts. Kein modaler Dialog im Spiel: Das Formular
+// sendet direkt, der Hinweis steht sichtbar und fokussierbar darunter.
+import ZweiFaktorHinweis, { type ZweiFaktorErgebnis } from "@/components/ZweiFaktorHinweis";
 
 /** Serialisierte Form eines Ziel-Gebiets aus erlaubteZielGebiete (Server). */
 interface ZielGebietOption {
@@ -86,11 +92,15 @@ export default function PollComposerForm({ gebiete, demo = false }: Props) {
   const [closesAt, setClosesAt] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Letztes Action-Ergebnis, nur für den Zwei-Faktor-Hinweis (bei jedem neuen
+  // Versuch zusammen mit `error` zurückgesetzt).
+  const [ergebnis, setErgebnis] = useState<ZweiFaktorErgebnis | null>(null);
   const [success, setSuccess] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setErgebnis(null);
     setSuccess(false);
 
     if (keineGebiete) {
@@ -141,6 +151,7 @@ export default function PollComposerForm({ gebiete, demo = false }: Props) {
 
       if (!result.ok) {
         setError(result.error ?? "Die Abstimmung konnte nicht angelegt werden.");
+        setErgebnis(result);
         return;
       }
 
@@ -416,6 +427,8 @@ export default function PollComposerForm({ gebiete, demo = false }: Props) {
           {error}
         </div>
       )}
+      {/* Bringt seine eigene role="alert"-Region mit und rendert ohne Feld nichts. */}
+      <ZweiFaktorHinweis ergebnis={ergebnis} />
       {success && (
         <div className="mt-5 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
           Abstimmung als Entwurf gespeichert. Sie finden sie unten unter „Entwürfe&ldquo;.
