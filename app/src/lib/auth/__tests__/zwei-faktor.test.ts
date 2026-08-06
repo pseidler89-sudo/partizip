@@ -79,27 +79,25 @@ describe("bewerteZweiFaktor — Admin mit aktivem TOTP", () => {
 });
 
 describe("bewerteZweiFaktor — Admin ohne TOTP (Kulanzfrist)", () => {
-  it("fordert beim ersten Zugriff das Setzen der Frist", () => {
+  // Der Kern des Gate-B-Blockers: Ohne eingetragene Frist gibt es KEINE Kulanz.
+  // Vorher setzte die Anwendung hier beim ersten Zugriff eine neue 14-Tage-Frist
+  // — damit hätte jedes neu ernannte Admin-Konto zwei Wochen ohne zweiten Faktor
+  // bekommen, beliebig oft wiederholbar über weitere Konten.
+  it("sperrt ein Admin-Konto ohne eingetragene Frist sofort", () => {
     const lage = bewerteZweiFaktor({
       istAdmin: true,
       user: ohneTotp,
       session: { totpVerifiedAt: null },
       jetzt: JETZT,
     });
-    expect(lage.status).toBe("frist_setzen");
-    if (lage.status === "frist_setzen") {
-      expect(lage.vorschlag).toEqual(tage(TOTP_KULANZ_TAGE));
-    }
+    expect(lage).toEqual({ status: "einrichtung_erzwungen", frist: null });
+    expect(zugangErlaubt(lage)).toBe(false);
   });
 
-  it("sperrt beim Setzen der Frist nicht aus", () => {
-    const lage = bewerteZweiFaktor({
-      istAdmin: true,
-      user: ohneTotp,
-      session: { totpVerifiedAt: null },
-      jetzt: JETZT,
-    });
-    expect(zugangErlaubt(lage)).toBe(true);
+  it("die Kulanzlänge ist eine reine Migrations-Konstante", () => {
+    // Sie wird nur noch von Migration 0040 benutzt; die Richtlinie selbst rechnet
+    // keine Frist mehr aus.
+    expect(TOTP_KULANZ_TAGE).toBe(14);
   });
 
   it("lässt den Zugang offen, solange die Frist läuft", () => {
@@ -205,10 +203,20 @@ describe("stepUpErfuellt", () => {
     ).toBe(true);
   });
 
-  it("ist ohne TOTP erfüllt, solange noch keine Frist gesetzt wurde", () => {
+  // Gate-B-Blocker, zweite Hälfte: Vorher galt „keine Frist gesetzt" als erfüllt.
+  // Ein Admin, der ausschließlich Server Actions aufruft und nie eine
+  // /admin-Seite lädt, hätte damit nie eine Frist bekommen — und wäre dauerhaft
+  // ohne zweiten Faktor an Rollenvergabe und Veröffentlichung gekommen.
+  it("ist ohne TOTP und ohne eingetragene Frist NICHT erfüllt", () => {
     expect(
       stepUpErfuellt({ user: ohneTotp, session: { totpVerifiedAt: null }, jetzt: JETZT })
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("hilft auch eine geprüfte Session ohne eingetragene Frist nicht", () => {
+    expect(
+      stepUpErfuellt({ user: ohneTotp, session: { totpVerifiedAt: minuten(-1) }, jetzt: JETZT })
+    ).toBe(false);
   });
 
   it("ist ohne TOTP nach Fristende nicht mehr erfüllt", () => {
@@ -233,5 +241,49 @@ describe("stepUpErfuellt", () => {
 
   it("wertet einen Zeitstempel aus der Zukunft nicht als frisch", () => {
     expect(stepUpErfuellt({ user: aktiv, session: { totpVerifiedAt: minuten(5) }, jetzt: JETZT })).toBe(false);
+  });
+});
+
+describe("Demo-Mandant (ADR-020)", () => {
+  // Die Demo vergibt jedem Besucher auf Knopfdruck ein ephemeres
+  // kommune_admin-Konto. Unter die Pflicht gestellt, müsste er eine
+  // Authenticator-App einrichten, um sich eine Demo anzusehen — der
+  // Verwaltungs-Rundgang wäre tot. Die Ausnahme ist Absicht und wird hier
+  // festgehalten, damit sie niemand versehentlich wegoptimiert.
+  it("nimmt Admin-Konten des Demo-Mandanten von der Pflicht aus", () => {
+    const lage = bewerteZweiFaktor({
+      istAdmin: true,
+      user: ohneTotp,
+      session: { totpVerifiedAt: null },
+      demoMandant: true,
+      jetzt: JETZT,
+    });
+    expect(lage).toEqual({ status: "nicht_noetig" });
+    expect(zugangErlaubt(lage)).toBe(true);
+  });
+
+  it("erfüllt auf dem Demo-Mandanten auch das Step-up", () => {
+    expect(
+      stepUpErfuellt({
+        user: ohneTotp,
+        session: { totpVerifiedAt: null },
+        demoMandant: true,
+        jetzt: JETZT,
+      })
+    ).toBe(true);
+  });
+
+  it("sperrt dasselbe Konto ohne das Demo-Flag weiterhin", () => {
+    // Gegenprobe: Die Ausnahme hängt am Flag, nicht am Kontozustand.
+    const lage = bewerteZweiFaktor({
+      istAdmin: true,
+      user: ohneTotp,
+      session: { totpVerifiedAt: null },
+      jetzt: JETZT,
+    });
+    expect(zugangErlaubt(lage)).toBe(false);
+    expect(
+      stepUpErfuellt({ user: ohneTotp, session: { totpVerifiedAt: null }, jetzt: JETZT })
+    ).toBe(false);
   });
 });

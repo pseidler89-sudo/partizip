@@ -77,6 +77,14 @@ docker compose --profile tools run --rm tools npm run db:migrate
      nie mehr ändern** (er verankert den Doppelstimmen-Schutz) und **separat
      vom Datenbank-Backup sichern** — ein Restore ohne identischen Salt macht
      alle pseudonymen Referenzen wertlos.
+   - `TOTP_ENC_KEY` — Schlüssel für die Zwei-Faktor-Secrets der Admin-Konten,
+     ebenfalls `openssl rand -base64 32`. **Pflicht**: Ohne ihn schlägt die
+     Zwei-Faktor-Einrichtung in Produktion fehl (fail-closed), und nach Ablauf
+     der Einrichtungsfrist kommt kein Admin mehr in die Verwaltung.
+     **Nach dem Start nie mehr ändern** — ein anderer Schlüssel macht alle
+     eingerichteten Authenticator unbrauchbar; Rückweg wäre dann nur
+     `app/scripts/totp-reset.ts` für jedes betroffene Konto einzeln. Wie
+     `ANLIEGEN_REF_SALT` separat vom Datenbank-Backup sichern.
    - `APP_BASE_URL`, `TENANT_BASE_DOMAIN` — öffentliche URL bzw. Basis-Domain
      (z. B. `https://partizip.online` / `partizip.online`).
    - `PILOT_TENANT_SLUG` — gesetzt läuft die ganze App single-domain auf diesem

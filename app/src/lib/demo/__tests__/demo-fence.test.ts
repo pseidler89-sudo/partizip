@@ -121,16 +121,32 @@ describe("demo/side-effect-fence (Integration, echte Actions)", () => {
   /** Dummy-Transport für pollAktivieren (Default-Transport braucht SMTP-env). */
   const dummyTransport = { sendMail: async () => ({}) };
 
-  /** Setzt Tenant-Mock + gültige Admin-Session für diesen Tenant. */
+  /**
+   * Setzt Tenant-Mock + gültige Admin-Session für diesen Tenant.
+   *
+   * ZWEI-FAKTOR (#59): Die Session wird so gebaut, wie sie im Betrieb nach einer
+   * vollständigen Admin-Anmeldung aussieht — mit bestätigtem TOTP und einer
+   * FRISCHEN Prüfung in dieser Session. Ohne das käme keine der geprüften Actions
+   * mehr bis zu ihrem Side-Effect-Fence: Das Zwei-Faktor-Gate (bzw. Step-up bei
+   * veroeffentlichen/pollAktivieren/einladen/assignRole) schlüge vorher zu, und
+   * dieser Test prüfte nur noch das Gate statt der Fences. Die Fixture wird
+   * angepasst, das Gate NICHT abgeschwächt.
+   */
   async function loginAlsAdmin(tenant: { id: string; slug: string; name: string }) {
     mockTenantRow = tenant;
     const adminId = adminByTenant.get(tenant.id)!;
     const rawToken = `tok-${Date.now()}-${++counter}`;
+    const jetzt = new Date();
+    await db
+      .update(users)
+      .set({ totpSecretEnc: "fence-test-secret", totpConfirmedAt: jetzt })
+      .where(eq(users.id, adminId));
     await db.insert(sessions).values({
       tenantId: tenant.id,
       userId: adminId,
       tokenHash: sha256Hex(rawToken),
       expiresAt: new Date(Date.now() + 3_600_000),
+      totpVerifiedAt: jetzt,
     });
     mockSessionToken = rawToken;
   }

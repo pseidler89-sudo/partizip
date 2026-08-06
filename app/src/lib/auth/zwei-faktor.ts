@@ -7,15 +7,30 @@
  * ändert sie hier — und die Tests in __tests__/zwei-faktor.test.ts sagen, was
  * dabei kaputtgeht.
  *
- * ENTSCHEIDUNG SANFTE ERZWINGUNG (Owner, 2026-08-05): Bestehende Admins werden
- * nicht sofort ausgesperrt. Beim ersten Admin-Zugriff nach dem Rollout beginnt
- * eine Kulanzfrist; bis zu deren Ablauf sind die Admin-Flächen offen, aber die
- * Einrichtung wird angeboten. Danach ist sie zwingend. Grund: Es gibt genau einen
- * Admin (den Betreiber), und ein Fehler in der Einrichtung hätte ihn aus seiner
- * eigenen Plattform ausgesperrt.
+ * ENTSCHEIDUNG SANFTE ERZWINGUNG (Owner, 2026-08-05): Admins, die es beim Rollout
+ * schon gab, werden nicht sofort ausgesperrt. Für sie setzt Migration 0039 eine
+ * Kulanzfrist; bis zu deren Ablauf sind die Admin-Flächen offen, die Einrichtung
+ * wird aber angeboten. Danach ist sie zwingend. Grund: Es gibt genau einen Admin
+ * (den Betreiber), und ein Fehler in der Einrichtung hätte ihn aus seiner eigenen
+ * Plattform ausgesperrt.
+ *
+ * DIE FRIST IST EIN MIGRATIONSZUSTAND, KEINE KONTO-EIGENSCHAFT.
+ * Gate-B 2026-08-05, BLOCKER: Zuerst war sie so gebaut, dass sie beim ersten
+ * Admin-Zugriff gesetzt wird. Folge wäre gewesen, dass JEDES neu ernannte
+ * Admin-Konto vierzehn Tage ohne zweiten Faktor bekommt — und dass ein Admin sich
+ * diese Frist über ein neues Konto beliebig oft verlängern kann. Aus der
+ * Zwei-Faktor-Pflicht wäre eine Zwei-Faktor-Pflicht-in-zwei-Wochen geworden.
+ *
+ * Jetzt gilt: `totp_grace_until = NULL` heißt KEINE Frist. Wer nach dem Rollout
+ * Admin wird, richtet den zweiten Faktor vor dem ersten Admin-Zugriff ein; die
+ * Einrichtungsseite liegt außerhalb von /admin und ist dafür jederzeit erreichbar.
  */
 
-/** Länge der Kulanzfrist ab dem ersten Admin-Zugriff nach dem Rollout. */
+/**
+ * Länge der Kulanzfrist. Wird ausschließlich von Migration 0039 verwendet, um
+ * die zum Rollout vorhandenen Admins einmalig einzutragen — zur Laufzeit setzt
+ * niemand mehr eine Frist.
+ */
 export const TOTP_KULANZ_TAGE = 14;
 
 /**
@@ -38,7 +53,7 @@ export interface ZweiFaktorSession {
 }
 
 export type ZweiFaktorLage =
-  /** Keine Admin-Rolle — die Pflicht greift nicht. */
+  /** Keine Admin-Rolle (oder Demo-Mandant) — die Pflicht greift nicht. */
   | { status: "nicht_noetig" }
   /** TOTP aktiv und in dieser Session bereits geprüft. */
   | { status: "erfuellt"; geprueftAm: Date }
@@ -46,10 +61,8 @@ export type ZweiFaktorLage =
   | { status: "code_faellig" }
   /** Kein TOTP, Frist läuft noch — Zugang offen, Einrichtung anbieten. */
   | { status: "einrichtung_offen"; frist: Date }
-  /** Kein TOTP und Frist abgelaufen — Zugang zu, bis eingerichtet ist. */
-  | { status: "einrichtung_erzwungen"; frist: Date }
-  /** Kein TOTP und noch keine Frist gesetzt — Aufrufer muss sie setzen. */
-  | { status: "frist_setzen"; vorschlag: Date };
+  /** Kein TOTP und keine (oder abgelaufene) Frist — Zugang zu, bis eingerichtet ist. */
+  | { status: "einrichtung_erzwungen"; frist: Date | null };
 
 /** TOTP gilt erst als aktiv, wenn ein Code bestätigt wurde. */
 export function totpAktiv(user: ZweiFaktorUser): boolean {
@@ -64,24 +77,35 @@ export function bewerteZweiFaktor(params: {
   istAdmin: boolean;
   user: ZweiFaktorUser;
   session: ZweiFaktorSession;
+  /**
+   * Demo-Mandant (ADR-020). Dort vergibt die Anwendung an JEDEN Besucher auf
+   * Knopfdruck ein ephemeres kommune_admin-Konto, damit er die Verwaltung
+   * anschauen kann — ohne Magic-Link, ohne echte Daten, mit Seiteneffekt-Fence.
+   *
+   * Diese Konten unter die Zwei-Faktor-Pflicht zu stellen, hieße: Der Besucher
+   * müsste eine Authenticator-App einrichten, um sich eine Demo anzusehen. Damit
+   * wäre der Verwaltungs-Rundgang — das Kernstück der Akquise-Spielwiese — tot.
+   * Die Ausnahme ist deshalb Absicht und steht hier, damit sie sichtbar ist statt
+   * irgendwo als Sonderfall zu verschwinden.
+   *
+   * WARNUNG: DEMO_TENANT_SLUG darf niemals auf einen echten Mandanten zeigen —
+   * das schaltete dort die Zwei-Faktor-Pflicht ab. Dieselbe Bedingung schützt
+   * schon heute den Mailversand und die Rollen-Mutationen (lib/demo/config.ts).
+   */
+  demoMandant?: boolean;
   jetzt?: Date;
 }): ZweiFaktorLage {
   const jetzt = params.jetzt ?? new Date();
-  if (!params.istAdmin) return { status: "nicht_noetig" };
+  if (!params.istAdmin || params.demoMandant) return { status: "nicht_noetig" };
 
   if (totpAktiv(params.user)) {
     const geprueft = params.session.totpVerifiedAt;
     return geprueft ? { status: "erfuellt", geprueftAm: geprueft } : { status: "code_faellig" };
   }
 
-  // Ab hier: Admin ohne aktives TOTP.
+  // Ab hier: Admin ohne aktives TOTP. Keine Frist = keine Kulanz (s. Kopf).
   const frist = params.user.totpGraceUntil;
-  if (!frist) {
-    return {
-      status: "frist_setzen",
-      vorschlag: new Date(jetzt.getTime() + TOTP_KULANZ_TAGE * 24 * 60 * 60 * 1000),
-    };
-  }
+  if (!frist) return { status: "einrichtung_erzwungen", frist: null };
   return jetzt < frist
     ? { status: "einrichtung_offen", frist }
     : { status: "einrichtung_erzwungen", frist };
@@ -92,9 +116,7 @@ export function zugangErlaubt(lage: ZweiFaktorLage): boolean {
   return (
     lage.status === "nicht_noetig" ||
     lage.status === "erfuellt" ||
-    lage.status === "einrichtung_offen" ||
-    // Die Frist wird beim Zugriff gesetzt; sie darf ihn nicht selbst verhindern.
-    lage.status === "frist_setzen"
+    lage.status === "einrichtung_offen"
   );
 }
 
@@ -117,14 +139,20 @@ export function zugangErlaubt(lage: ZweiFaktorLage): boolean {
 export function stepUpErfuellt(params: {
   user: ZweiFaktorUser;
   session: ZweiFaktorSession;
+  /** Demo-Mandant: keine Pflicht, gleiche Begründung wie in bewerteZweiFaktor. */
+  demoMandant?: boolean;
   jetzt?: Date;
 }): boolean {
   const jetzt = params.jetzt ?? new Date();
+  if (params.demoMandant) return true;
 
   if (!totpAktiv(params.user)) {
-    // Frist noch nicht gesetzt (erster Admin-Zugriff): offen — der Aufrufer setzt
-    // sie im selben Durchlauf.
-    if (!params.user.totpGraceUntil) return true;
+    // Keine Frist = keine Kulanz. Vorher stand hier `return true` für den Fall
+    // „Frist noch nicht gesetzt" — das war die zweite Hälfte des Gate-B-Blockers:
+    // Ein Admin, der nur Server Actions aufruft und nie eine /admin-Seite lädt,
+    // hätte nie eine Frist bekommen und wäre damit DAUERHAFT ohne zweiten Faktor
+    // an Rollenvergabe und Veröffentlichung gekommen.
+    if (!params.user.totpGraceUntil) return false;
     return jetzt < params.user.totpGraceUntil;
   }
 

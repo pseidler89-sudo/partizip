@@ -15,9 +15,12 @@
  * WAS ES NICHT TUT: Es umgeht keine Anmeldung. Ohne Zugriff auf das E-Mail-Postfach
  * des Kontos nützt die Rücksetzung nichts.
  *
- * AUFRUF (im Deployment-Verzeichnis):
- *   DATABASE_URL=... npx tsx scripts/totp-reset.ts --tenant <slug> --email <adresse>
- *   Zusätzlich --ja, sonst wird nur angezeigt, was passieren würde.
+ * AUFRUF (im Deployment-Verzeichnis, über den tools-Container — die App-Container
+ * haben kein tsx und keine Dev-Abhängigkeiten):
+ *   cd /srv/docker/partizip-prod
+ *   docker compose --profile tools run --rm tools \
+ *     npx tsx scripts/totp-reset.ts --tenant <slug> --email <adresse>
+ *   Ohne --ja passiert nichts; der Lauf zeigt nur, was er täte.
  */
 
 import { and, eq, isNull } from "drizzle-orm";
@@ -90,7 +93,11 @@ async function main() {
   }
 
   const jetzt = new Date();
-  const neueFrist = new Date(jetzt.getTime() + 14 * 24 * 60 * 60 * 1000);
+  // Kurze Frist, bewusst nicht die 14 Tage des Rollouts (Gate-B 2026-08-05):
+  // Wer hier zurücksetzt, sitzt gerade vor dem Problem und richtet sofort neu
+  // ein. Und wenn der Anlass eine Kontoübernahme war, wären zwei Wochen Zugang
+  // mit reinem Magic-Link genau das falsche Signal.
+  const neueFrist = new Date(jetzt.getTime() + 24 * 60 * 60 * 1000);
 
   await db
     .update(users)
@@ -120,7 +127,7 @@ async function main() {
   });
 
   console.log("\nZurückgesetzt.");
-  console.log(`Neue Frist zur Einrichtung: ${neueFrist.toISOString()}`);
+  console.log(`Neue Frist zur Einrichtung: ${neueFrist.toISOString()} (24 Stunden)`);
   console.log("Der Nutzer meldet sich per Anmeldelink an und richtet die Bestätigung neu ein.");
   process.exit(0);
 }

@@ -1,18 +1,26 @@
 /**
  * invitation-actions.ts — Server Actions für den Einladungs-Flow (Gate B).
  *
- * Dünne "use server"-Wrapper: lösen den Auth-Kontext auf (Session-Cookie →
- * Tenant + Caller-UserId + Caller-Rollen) und delegieren dann in die testbare
- * Kern-Logik (invitation-core.ts). Der Mailversand (Roh-Token nur in der URL)
- * passiert hier — die Cores geben den Roh-Token GENAU EINMAL zurück.
+ * Dünne "use server"-Wrapper: lösen den Auth-Kontext über das ZENTRALE Gate auf
+ * (@/lib/auth/action-context) und delegieren dann in die testbare Kern-Logik
+ * (invitation-core.ts). Der Mailversand (Roh-Token nur in der URL) passiert
+ * hier — die Cores geben den Roh-Token GENAU EINMAL zurück.
+ *
+ * KEIN EIGENER SESSION-RESOLVER (Gate-B 2026-08-06, BLOCKER): Diese Datei hatte
+ * eine eigene Kopie des Session-Lookups und kam damit an der Zwei-Faktor-Pflicht
+ * (#59) vorbei — ausgerechnet hier, wo `einladen` eine kommune_admin-Rolle über
+ * eine zweite Tür vergibt. Der Kontext kommt jetzt ausschließlich aus den
+ * require*Ctx-Gates; der Wächter-Test
+ * lib/auth/__tests__/kein-eigener-session-resolver.test.ts hält das fest.
  *
  * Gate-B: Jede Server Action ist ein eigenständiger Endpoint → prüft Auth +
  * Rolle + Tenant-Isolierung + Eskalationsgrenze ERNEUT (Defense in Depth; die
  * UI-Filterung ist nur Komfort).
  *
  * Autorisierung:
- *   - einladen/zurückziehen/erneutSenden: NUR Admin (kommune_admin/super_admin),
- *     serverseitig hart; die konkrete Ziel-Rolle zusätzlich über canManageRole
+ *   - einladen/zurückziehen/erneutSenden: NUR Admin (kommune_admin/super_admin)
+ *     MIT frischer Zwei-Faktor-Bestätigung (requireAdminStepUpCtx), serverseitig
+ *     hart; die konkrete Ziel-Rolle zusätzlich über canManageRole
  *     (Eskalationsgrenze) in den Cores.
  *   - annehmen: der/die Eingeladene, per Magic-Link authentifiziert (Konto muss
  *     existieren + eingeloggt sein); die E-Mail-Bindung erzwingt der Core.
@@ -20,18 +28,14 @@
 
 "use server";
 
-import { cookies, headers } from "next/headers";
-import { and, eq } from "drizzle-orm";
+import { headers } from "next/headers";
 import { z } from "zod";
-import { createDb, type Db } from "@/db/client";
-import { sessions } from "@/db/schema";
 import { SCOPE_INPUT_LEVELS } from "@/lib/region/ebenen";
-import { sha256Hex } from "@/lib/auth/crypto";
-import { getTenantFromHost } from "@/lib/tenant";
-import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isDemoTenant } from "@/lib/demo/config";
-import { getUserRoleTypes } from "@/lib/auth/roles";
-import { getOptionalAuthContext } from "@/lib/auth/action-context";
+import {
+  getOptionalAuthContext,
+  requireAdminStepUpCtx,
+} from "@/lib/auth/action-context";
 import { sendInvitationEmail } from "@/lib/auth/mail";
 import {
   einladenCore,
@@ -53,46 +57,13 @@ const ROLE_LABELS: Record<string, string> = {
   land_admin: "Land-Admin",
 };
 
-type AdminAuthContext = {
-  tenant: { id: string; slug: string; name: string };
-  userId: string;
-  roleTypes: string[];
-  db: Db;
-  host: string;
-};
-
-async function getAdminAuthContext(): Promise<AdminAuthContext | null> {
+/**
+ * Request-Host für die Einladungs-URL. BEWUSST kein Auth-Belang: Der Tenant kommt
+ * aus dem Gate (dort aus dem Host aufgelöst), hier wird nur der Link gebaut.
+ */
+async function requestHost(): Promise<string> {
   const headerStore = await headers();
-  const host = headerStore.get("host") ?? "localhost";
-  const tenant = await getTenantFromHost(host);
-  if (!tenant) return null;
-
-  const cookieStore = await cookies();
-  const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-  if (!rawToken) return null;
-
-  const databaseUrl =
-    process.env.DATABASE_URL ?? "postgres://partizip:partizip@127.0.0.1:5433/partizip";
-  const db = createDb(databaseUrl);
-
-  const tokenHash = sha256Hex(rawToken);
-  const now = new Date();
-  const sessionRows = await db
-    .select()
-    .from(sessions)
-    .where(and(eq(sessions.tokenHash, tokenHash), eq(sessions.tenantId, tenant.id)))
-    .limit(1);
-  const session = sessionRows[0];
-  if (!session || session.revokedAt || session.expiresAt < now) return null;
-
-  const roleTypes = await getUserRoleTypes(db, tenant.id, session.userId);
-  return {
-    tenant: { id: tenant.id, slug: tenant.slug, name: tenant.name },
-    userId: session.userId,
-    roleTypes,
-    db,
-    host,
-  };
+  return headerStore.get("host") ?? "localhost";
 }
 
 function buildInviteUrl(host: string, slug: string, rawToken: string): string {
@@ -112,8 +83,13 @@ const einladenSchema = z.object({
 
 /** Server Action: Einladung erstellen/erneut versenden (auditiert, eskalationsgeschützt). */
 export async function einladen(rawInput: EinladenInput): Promise<InvitationActionResult> {
-  const ctx = await getAdminAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // STEP-UP (#59): Die Einladung ist die ZWEITE TÜR zur Rollenvergabe — wer sie
+  // ohne frische Bestätigung auslösen könnte, käme über den Umweg „einladen +
+  // annehmen" an genau das, wofür assignRole längst Step-up verlangt (bis hin zu
+  // kommune_admin). Gleiche Schwelle wie assignRole, sonst wäre sie umgehbar.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   // SIDE-EFFECT-FENCE (Demo-Spielwiese, fail-closed): ephemere Demo-Admins
   // dürfen KEINE echten E-Mails auslösen — sonst wäre der Einladungs-Flow ein
@@ -139,7 +115,7 @@ export async function einladen(rawInput: EinladenInput): Promise<InvitationActio
     return { ok: false, error: result.error ?? "Einladung fehlgeschlagen." };
   }
 
-  const inviteUrl = buildInviteUrl(ctx.host, ctx.tenant.slug, result.rawToken);
+  const inviteUrl = buildInviteUrl(await requestHost(), ctx.tenant.slug, result.rawToken);
   const roleLabel = ROLE_LABELS[result.roleType ?? ""] ?? result.roleType ?? "Mitwirkende:r";
   await sendInvitationEmail(result.email, inviteUrl, roleLabel, ctx.tenant.name);
 
@@ -153,8 +129,12 @@ export async function einladen(rawInput: EinladenInput): Promise<InvitationActio
 
 /** Server Action: offene Einladung zurückziehen. */
 export async function einladungZurueckziehen(invitationId: string): Promise<InvitationActionResult> {
-  const ctx = await getAdminAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // STEP-UP (#59): Kehrseite der Vergabe (wie revokeRole). Das Zurückziehen
+  // entzieht eine bereits zugesagte Rolle, bevor sie angenommen wurde — es kann
+  // gezielt die Aufnahme einer zweiten, kontrollierenden Person verhindern.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   const idParsed = z.string().uuid().safeParse(invitationId);
   if (!idParsed.success) return { ok: false, error: "Ungültige Einladungs-ID." };
@@ -171,8 +151,13 @@ export async function einladungZurueckziehen(invitationId: string): Promise<Invi
 
 /** Server Action: offene Einladung mit neuem Link erneut versenden. */
 export async function einladungErneutSenden(invitationId: string): Promise<InvitationActionResult> {
-  const ctx = await getAdminAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // STEP-UP (#59): prägt einen NEUEN gültigen Rollen-Token und schickt ihn nach
+  // außen — beides Step-up-Kriterien (Rollenvergabe + Außenwirkung). Ohne diese
+  // Schwelle wäre `einladen` umgehbar: eine alte, offene Einladung ließe sich
+  // ohne frische Bestätigung zu einem frischen Link machen.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   // SIDE-EFFECT-FENCE (Demo-Spielwiese): wie einladen() — keine Mail nach außen.
   if (isDemoTenant(ctx.tenant.slug)) {
@@ -194,7 +179,7 @@ export async function einladungErneutSenden(invitationId: string): Promise<Invit
     return { ok: false, error: result.error ?? "Erneutes Senden fehlgeschlagen." };
   }
 
-  const inviteUrl = buildInviteUrl(ctx.host, ctx.tenant.slug, result.rawToken);
+  const inviteUrl = buildInviteUrl(await requestHost(), ctx.tenant.slug, result.rawToken);
   const roleLabel = ROLE_LABELS[result.roleType ?? ""] ?? result.roleType ?? "Mitwirkende:r";
   await sendInvitationEmail(result.email, inviteUrl, roleLabel, ctx.tenant.name);
 

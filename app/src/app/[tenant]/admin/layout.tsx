@@ -7,11 +7,19 @@
  * Unterverzeichnis genau einmal zu vergessen — und diese eine Lücke wäre das
  * ganze Feature. Das Layout läuft für jede Route darunter, auch für künftige.
  *
- * Das Gate ist BEWUSST schmal: Es prüft ausschließlich den zweiten Faktor.
- * Anmeldung und Rollen bleiben Sache der Seiten (die sie serverseitig ohnehin
- * prüfen), und die Server Actions sind unabhängig davon über requireAdminCtx
- * abgesichert. Ein Layout allein wäre kein ausreichender Schutz — es ist die
- * äußere von zwei Schichten, nicht die einzige.
+ * DIESES LAYOUT IST NICHT DER SCHUTZ, SONDERN NUR SEINE SICHTBARE SEITE.
+ * Ein Layout wird beim RENDERN ausgewertet — ein Server-Action-POST führt die
+ * Aktion aus, bevor irgendein Layout rendert, und ein `redirect()` hier käme
+ * nach der Mutation. Der eigentliche Schutz sitzt deshalb in den Gates
+ * (`requireAdminCtx` / `requireAdminStepUpCtx` in lib/auth/action-context.ts),
+ * durch die JEDE mutierende Admin-Action laufen muss.
+ *
+ * Der Gate-B-Review vom 2026-08-05 hat genau hier einen BLOCKER gefunden: An
+ * dieser Stelle stand, die Server Actions seien „unabhängig davon abgesichert" —
+ * für rund die Hälfte stimmte das nicht, weil sie eigene Kopien des
+ * Session-Lookups mitbrachten. Diese Kopien sind entfernt; ein Wächter-Test
+ * (lib/auth/__tests__/kein-eigener-session-resolver.test.ts) verhindert, dass
+ * die nächste neue Action-Datei die Lücke wieder aufreißt.
  *
  * Nur ADMINS werden erfasst. `beobachter` haben eine reine Lesesicht auf das
  * Dashboard und fallen nicht unter die Pflicht aus #59.
@@ -22,13 +30,7 @@ import { getOptionalAuthContext, zweiFaktorLage } from "@/lib/auth/action-contex
 import { getUserRoleTypes, isAdmin } from "@/lib/auth/roles";
 import { zugangErlaubt } from "@/lib/auth/zwei-faktor";
 
-interface LayoutProps {
-  children: React.ReactNode;
-  params: Promise<{ tenant: string }>;
-}
-
-export default async function AdminLayout({ children, params }: LayoutProps) {
-  const { tenant: slug } = await params;
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getOptionalAuthContext();
 
   // Kein Tenant oder nicht eingeloggt: durchreichen. Die Seiten darunter werfen
@@ -39,8 +41,12 @@ export default async function AdminLayout({ children, params }: LayoutProps) {
   const admin = isAdmin(await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId));
   if (!admin) return <>{children}</>;
 
-  const lage = await zweiFaktorLage(ctx, true);
+  const lage = zweiFaktorLage(ctx, true);
   if (!zugangErlaubt(lage)) {
+    // Slug aus dem aufgelösten Tenant, NICHT aus dem Pfadsegment: Beide stimmen
+    // im Pilotbetrieb überein, aber der Tenant der Prüfung kommt aus dem Host —
+    // weichen sie ab, führte eine Umleitung auf das Pfadsegment ins Leere.
+    const slug = ctx.tenant.slug;
     redirect(
       lage.status === "code_faellig"
         ? `/${slug}/anmelden/bestaetigen?weiter=/${slug}/admin`

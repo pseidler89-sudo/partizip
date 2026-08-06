@@ -24,59 +24,24 @@
 
 "use server";
 
-import { cookies, headers } from "next/headers";
 import { eq, and, isNull, sql } from "drizzle-orm";
-import { createDb, type Db } from "@/db/client";
-import { digests, digestStatements, sessions, auditEvents } from "@/db/schema";
-import { sha256Hex } from "@/lib/auth/crypto";
-import { getTenantFromHost } from "@/lib/tenant";
-import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
+import { type Db } from "@/db/client";
+import { digests, digestStatements, auditEvents } from "@/db/schema";
 import { isDemoTenant } from "@/lib/demo/config";
 import { istMusterstadtSeedDigestId } from "@/lib/demo/seed-ids";
-import { getUserRoleTypes, canRedaktion } from "@/lib/auth/roles";
 import { freigebenCore, isSelfApprovalAllowed } from "@/lib/digest/freigabe-core";
 import { veroeffentlichenCore } from "@/lib/digest/veroeffentlichen-core";
-import { verlangeFrischeBestaetigung } from "@/lib/auth/action-context";
+import { requireAdminStepUpCtx, requireRedaktionCtx } from "@/lib/auth/action-context";
 
 // ---------------------------------------------------------------------------
-// Auth-Hilfsfunktionen
+// Auth — AUSSCHLIESSLICH über @/lib/auth/action-context
+//
+// KEIN EIGENER SESSION-RESOLVER (Gate-B 2026-08-06, BLOCKER): Diese Datei hatte
+// eine eigene Kopie des Session-Lookups und kam damit an der Zwei-Faktor-Pflicht
+// (#59) vorbei. Wächter:
+// lib/auth/__tests__/kein-eigener-session-resolver.test.ts.
 // ---------------------------------------------------------------------------
 
-async function getAuthContext() {
-  const headerStore = await headers();
-  const host = headerStore.get("host") ?? "localhost";
-  const tenant = await getTenantFromHost(host);
-  if (!tenant) return null;
-
-  const cookieStore = await cookies();
-  const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-  if (!rawToken) return null;
-
-  const tokenHash = sha256Hex(rawToken);
-  const databaseUrl =
-    process.env.DATABASE_URL ??
-    "postgres://partizip:partizip@127.0.0.1:5433/partizip";
-  const db = createDb(databaseUrl);
-
-  const now = new Date();
-  const sessionRows = await db
-    .select()
-    .from(sessions)
-    .where(
-      and(
-        eq(sessions.tokenHash, tokenHash),
-        eq(sessions.tenantId, tenant.id),
-      )
-    )
-    .limit(1);
-
-  const session = sessionRows[0];
-  if (!session || session.revokedAt || session.expiresAt < now) return null;
-
-  return { tenant, userId: session.userId, db };
-}
-
-// Rollen-Logik liegt jetzt zentral in @/lib/auth/roles (canRedaktion / canFreigeben).
 
 // N1: Content-Hash über alle Statements — liegt jetzt (mit der gesamten
 // Freigabe-Kern-Logik) testbar in @/lib/digest/freigabe-core.
@@ -89,11 +54,12 @@ export async function setStatementGeprueft(
   statementId: string,
   geprueft: boolean,
 ): Promise<{ ok: boolean; error?: string }> {
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
-
-  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
-  if (!canRedaktion(roleTypes)) return { ok: false, error: "Keine Berechtigung (Redakteur oder Admin erforderlich)." };
+  // KEIN Step-up: Das Prüf-Häkchen ist der laufende Redaktionsschritt (Dutzende
+  // pro Sitzung) und in beide Richtungen umkehrbar; nach außen geht nichts. Die
+  // folgenreiche Stelle ist die Freigabe — dort sitzt das Step-up.
+  const auth = await requireRedaktionCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   // Sicherheitsprüfung: Statement gehört zu einem Digest dieses Tenants und ist im Status 'entwurf'
   // Join: digestStatements → digests → Tenant-Bindung
@@ -131,11 +97,11 @@ export async function setStatementGeprueft(
 export async function setAlleStatementsGeprueft(
   digestId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
-
-  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
-  if (!canRedaktion(roleTypes)) return { ok: false, error: "Keine Berechtigung (Redakteur oder Admin erforderlich)." };
+  // KEIN Step-up: Sammel-Variante von setStatementGeprueft — dieselbe Wirkung in
+  // einem Zug, dieselbe Umkehrbarkeit, keine Außenwirkung.
+  const auth = await requireRedaktionCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   // Digest-Prüfung: existiert und gehört zu diesem Tenant, Status muss 'entwurf' sein
   const digestRows = await ctx.db
@@ -189,11 +155,12 @@ export async function setStatementHighlight(
   statementId: string,
   istHighlight: boolean,
 ): Promise<{ ok: boolean; error?: string }> {
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
-
-  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
-  if (!canRedaktion(roleTypes)) return { ok: false, error: "Keine Berechtigung (Redakteur oder Admin erforderlich)." };
+  // KEIN Step-up: redaktionelle Gewichtung im Entwurf, nach außen wird nichts
+  // sichtbar (der Digest ist noch nicht veröffentlicht). Die SoD-Spur
+  // (highlighted_by) trägt die Verantwortung, nicht ein zweiter Faktor.
+  const auth = await requireRedaktionCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   // Sicherheitsprüfung: Statement gehört zu einem Digest dieses Tenants und ist im Status 'entwurf'
   const rows = await ctx.db
@@ -249,13 +216,13 @@ export async function setStatementHighlight(
 // ---------------------------------------------------------------------------
 
 export async function freigeben(digestId: string): Promise<{ ok: boolean; error?: string }> {
-  // Step-up (#59): Die Freigabe entscheidet, was als geprüfter Stand gilt — dafür verlangen wir eine
-  // frische Bestätigung mit dem Einmalcode.
-  const stepUp = await verlangeFrischeBestaetigung();
-  if (!stepUp.ok) return { ok: false, error: stepUp.error };
-
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // STEP-UP (#59): Die Freigabe entscheidet, was als geprüfter Stand gilt, und ist
+  // die Vorbedingung der Veröffentlichung — dafür verlangen wir eine frische
+  // Bestätigung mit dem Einmalcode. Freigeben ist ohnehin admin-only
+  // (canFreigeben), das Admin-Gate ändert an der Berechtigung nichts.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   // Seed-Schutz (Demo-Spielwiese): der kuratierte Beispiel-Digest ist der
   // Anschauungs-Moment des Rundgangs und bleibt unverändert — rein defensiv
@@ -264,15 +231,14 @@ export async function freigeben(digestId: string): Promise<{ ok: boolean; error?
     return { ok: false, error: "Dieser Beispiel-Digest gehört zum Demo-Rundgang und bleibt unverändert." };
   }
 
-  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
-
   // Gesamte Kern-Logik (Rolle, Vollständigkeit, Vier-Augen-Sperre/SoD atomar im
   // Status-UPDATE, Audit) liegt testbar in freigabe-core.ts. Die Pilot-
-  // Überbrückung kommt AUSSCHLIESSLICH aus der Env (fail-closed).
+  // Überbrückung kommt AUSSCHLIESSLICH aus der Env (fail-closed). Die Rollen
+  // kommen aus dem Gate (ctx.roleTypes) — kein zweiter Lookup.
   return freigebenCore(ctx.db, ctx.tenant.id, {
     digestId,
     callerUserId: ctx.userId,
-    callerRoleTypes: roleTypes,
+    callerRoleTypes: ctx.roleTypes,
     allowSelfApproval: isSelfApprovalAllowed(),
   });
 }
@@ -282,21 +248,18 @@ export async function freigeben(digestId: string): Promise<{ ok: boolean; error?
 // ---------------------------------------------------------------------------
 
 export async function veroeffentlichen(digestId: string): Promise<{ ok: boolean; error?: string }> {
-  // Step-up (#59): Die Veröffentlichung geht an Kanäle nach außen und ist nicht zurückholbar — dafür verlangen wir eine
-  // frische Bestätigung mit dem Einmalcode.
-  const stepUp = await verlangeFrischeBestaetigung();
-  if (!stepUp.ok) return { ok: false, error: stepUp.error };
-
-  const ctx = await getAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // STEP-UP (#59): Die Veröffentlichung geht an Kanäle nach außen (Mastodon,
+  // Bluesky, RSS) und ist nicht zurückholbar — dafür verlangen wir eine frische
+  // Bestätigung mit dem Einmalcode. Admin-only wie freigeben (canFreigeben).
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const { ctx } = auth;
 
   // Seed-Schutz (Demo-Spielwiese): analog freigeben() — der Beispiel-Digest
   // des Rundgangs bleibt für alle Besucher unverändert.
   if (isDemoTenant(ctx.tenant.slug) && istMusterstadtSeedDigestId(ctx.tenant.slug, digestId)) {
     return { ok: false, error: "Dieser Beispiel-Digest gehört zum Demo-Rundgang und bleibt unverändert." };
   }
-
-  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
 
   // Gesamte Veröffentlichungs-Logik (Rolle, approved_at/N1-Hash, atomarer CAS,
   // Demo-Side-Effect-Fence, best-effort Kanal-Versand) liegt testbar und
@@ -305,7 +268,7 @@ export async function veroeffentlichen(digestId: string): Promise<{ ok: boolean;
   return veroeffentlichenCore(ctx.db, ctx.tenant.id, {
     digestId,
     callerUserId: ctx.userId,
-    callerRoleTypes: roleTypes,
+    callerRoleTypes: ctx.roleTypes,
     tenantSlug: ctx.tenant.slug,
   });
 }
@@ -315,11 +278,12 @@ export async function veroeffentlichen(digestId: string): Promise<{ ok: boolean;
 // ---------------------------------------------------------------------------
 
 export async function loadDigestForAdmin(digestId: string) {
-  const ctx = await getAuthContext();
-  if (!ctx) return null;
-
-  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
-  if (!canRedaktion(roleTypes)) return null;
+  // REIN LESEND — kein Step-up. Gate trotzdem, weil die Antwort den Entwurf
+  // enthält: gleiche Schwelle wie die übrigen Redaktions-Actions (inkl.
+  // Zwei-Faktor-Pflicht für Admins).
+  const auth = await requireRedaktionCtx();
+  if (!auth.ok) return null;
+  const { ctx } = auth;
 
   const digestRows = await ctx.db
     .select()

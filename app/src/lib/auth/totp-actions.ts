@@ -15,9 +15,13 @@
  *   - Der zweite Faktor wird an der SESSION vermerkt, nicht am Nutzer.
  *   - Wiederherstellungscodes werden per CAS entwertet (UPDATE … WHERE used_at
  *     IS NULL RETURNING), damit zwei parallele Einlösungen nicht beide gewinnen.
+ *   - Gerätewechsel (zweitFaktorNeuEinrichten) verlangt eine FRISCHE Bestätigung
+ *     dieser Session — Begründung am Kopf der Action.
+ *   - Jede Änderung am zweiten Faktor geht als Info-Mail an die Kontoadresse
+ *     (best effort, ohne Codes/Secret/Link).
  */
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, isNotNull, or, lt } from "drizzle-orm";
 import { users, sessions, totpRecoveryCodes, auditEvents } from "@/db/schema";
 import { getOptionalAuthContext, getClientIp, type OptionalAuthContext } from "@/lib/auth/action-context";
 import {
@@ -29,8 +33,10 @@ import {
   generateRecoveryCodes,
   hashRecoveryCode,
 } from "@/lib/auth/totp";
-import { totpAktiv } from "@/lib/auth/zwei-faktor";
+import { totpAktiv, stepUpErfuellt, STEP_UP_MAX_ALTER_MINUTEN } from "@/lib/auth/zwei-faktor";
 import { writeTotpRateLimitEvents, checkTotpRateLimit } from "@/lib/auth/rate-limit";
+import { sendZweiFaktorAenderungEmail, type ZweiFaktorEreignis } from "@/lib/auth/mail";
+import { ANBIETER } from "@/lib/legal/anbieter";
 
 type Fehler = { ok: false; error: string };
 
@@ -71,18 +77,35 @@ export async function starteEinrichtung(): Promise<
   const { ctx } = vor;
 
   if (totpAktiv(ctx.user)) {
+    // Der Weg zum Gerätewechsel führt über zweitFaktorNeuEinrichten() — dort
+    // steht die frische Bestätigung als Bedingung. Der Text sagt genau das und
+    // verspricht keinen Ablauf, den es nicht gibt (Review #59, Befund 1).
     return {
       ok: false,
       error:
-        "Die Zwei-Faktor-Authentisierung ist bereits aktiv. Zum Wechsel des Geräts bitte zuerst die vorhandene Bestätigung eingeben.",
+        "Die Zwei-Faktor-Authentisierung ist bereits aktiv. Für einen Gerätewechsel setzen Sie sie zuerst unter Gerät wechseln zurück.",
     };
   }
 
+  // Auch die Secret-Erzeugung braucht ein Limit: Sie schreibt in users und war
+  // vorher die einzige Action hier ohne Deckel (Gate-B, MINOR).
+  const grenze = await rateLimitPruefen(ctx);
+  if (grenze) return grenze;
+
   const secret = generateTotpSecret();
-  await ctx.db
+  const gesetzt = await ctx.db
     .update(users)
     .set({ totpSecretEnc: encryptTotpSecret(secret), totpConfirmedAt: null, totpLastStep: null })
-    .where(and(eq(users.id, ctx.user.id), eq(users.tenantId, ctx.tenant.id), isNull(users.totpConfirmedAt)));
+    .where(and(eq(users.id, ctx.user.id), eq(users.tenantId, ctx.tenant.id), isNull(users.totpConfirmedAt)))
+    .returning({ id: users.id });
+
+  // Traf das UPDATE keine Zeile, wurde parallel bestätigt. Dann darf der QR-Code
+  // NICHT ausgeliefert werden — er zeigte ein Secret, das nirgends gespeichert ist.
+  if (gesetzt.length === 0) {
+    return { ok: false, error: "Die Zwei-Faktor-Authentisierung ist bereits aktiv." };
+  }
+
+  await protokoll(ctx, "auth.totp_einrichtung_gestartet");
 
   return {
     ok: true,
@@ -124,13 +147,29 @@ export async function bestaetigeEinrichtung(
   const jetzt = new Date();
   const codes = generateRecoveryCodes();
 
-  await ctx.db
+  // isNull(totpConfirmedAt) als CAS: Zwischen der Lese-Prüfung oben und hier
+  // könnte ein paralleler Aufruf bereits bestätigt haben. Dann gewinnt der erste,
+  // und der zweite bekommt keine zweite Garnitur Wiederherstellungscodes.
+  const aktiviert = await ctx.db
     .update(users)
     .set({ totpConfirmedAt: jetzt, totpLastStep: pruefung.step, totpGraceUntil: null })
-    .where(and(eq(users.id, ctx.user.id), eq(users.tenantId, ctx.tenant.id)));
+    .where(
+      and(
+        eq(users.id, ctx.user.id),
+        eq(users.tenantId, ctx.tenant.id),
+        isNull(users.totpConfirmedAt)
+      )
+    )
+    .returning({ id: users.id });
+
+  if (aktiviert.length === 0) {
+    return { ok: false, error: "Die Zwei-Faktor-Authentisierung ist bereits aktiv." };
+  }
 
   // Frühere Codes eines abgebrochenen Versuchs verfallen mit der Neu-Einrichtung.
-  await ctx.db.delete(totpRecoveryCodes).where(eq(totpRecoveryCodes.userId, ctx.user.id));
+  await ctx.db
+    .delete(totpRecoveryCodes)
+    .where(and(eq(totpRecoveryCodes.userId, ctx.user.id), eq(totpRecoveryCodes.tenantId, ctx.tenant.id)));
   await ctx.db.insert(totpRecoveryCodes).values(
     codes.map((c) => ({
       userId: ctx.user.id,
@@ -144,9 +183,10 @@ export async function bestaetigeEinrichtung(
   await ctx.db
     .update(sessions)
     .set({ totpVerifiedAt: jetzt })
-    .where(eq(sessions.id, ctx.session.id));
+    .where(and(eq(sessions.id, ctx.session.id), eq(sessions.tenantId, ctx.tenant.id)));
 
   await protokoll(ctx, "auth.totp_aktiviert");
+  await benachrichtige(ctx, "aktiviert", jetzt);
 
   return { ok: true, wiederherstellungscodes: codes };
 }
@@ -178,14 +218,34 @@ export async function bestaetigeCode(code: string): Promise<{ ok: true } | Fehle
   const jetzt = new Date();
   // Der Zeitschritt wird gesperrt, BEVOR die Session als geprüft gilt: Fällt der
   // zweite Schreibvorgang aus, ist der Code verbraucht statt weiter gültig.
-  await ctx.db
+  //
+  // CAS statt schlichtem UPDATE (Gate-B 2026-08-05, MAJOR): Der gelesene
+  // totp_last_step stammt vom Anfang des Requests. Ohne Bedingung auf den
+  // erwarteten Vorzustand könnten zwei gleichzeitige Requests mit DEMSELBEN Code
+  // beide bestehen — genau der Replay, den die Sperre verhindern soll. Nur wer
+  // die Zeile wirklich von "kleiner" auf diesen Schritt dreht, hat den Code
+  // eingelöst; der Verlierer bekommt 0 Zeilen zurück.
+  const gesperrt = await ctx.db
     .update(users)
     .set({ totpLastStep: pruefung.step })
-    .where(and(eq(users.id, ctx.user.id), eq(users.tenantId, ctx.tenant.id)));
+    .where(
+      and(
+        eq(users.id, ctx.user.id),
+        eq(users.tenantId, ctx.tenant.id),
+        or(isNull(users.totpLastStep), lt(users.totpLastStep, pruefung.step))
+      )
+    )
+    .returning({ id: users.id });
+
+  if (gesperrt.length === 0) {
+    await protokoll(ctx, "auth.totp_fehlversuch", { grund: "wiederverwendet" });
+    return { ok: false, error: codeFehlertext("wiederverwendet") };
+  }
+
   await ctx.db
     .update(sessions)
     .set({ totpVerifiedAt: jetzt })
-    .where(eq(sessions.id, ctx.session.id));
+    .where(and(eq(sessions.id, ctx.session.id), eq(sessions.tenantId, ctx.tenant.id)));
 
   await protokoll(ctx, "auth.totp_bestaetigt");
   return { ok: true };
@@ -234,15 +294,111 @@ export async function loeseWiederherstellungscodeEin(
   await ctx.db
     .update(sessions)
     .set({ totpVerifiedAt: jetzt })
-    .where(eq(sessions.id, ctx.session.id));
+    .where(and(eq(sessions.id, ctx.session.id), eq(sessions.tenantId, ctx.tenant.id)));
 
   const offen = await ctx.db
     .select({ id: totpRecoveryCodes.id })
     .from(totpRecoveryCodes)
-    .where(and(eq(totpRecoveryCodes.userId, ctx.user.id), isNull(totpRecoveryCodes.usedAt)));
+    .where(
+      and(
+        eq(totpRecoveryCodes.userId, ctx.user.id),
+        eq(totpRecoveryCodes.tenantId, ctx.tenant.id),
+        isNull(totpRecoveryCodes.usedAt)
+      )
+    );
 
   await protokoll(ctx, "auth.totp_wiederherstellung", { verbleibend: offen.length });
+  await benachrichtige(ctx, "wiederherstellungscode", jetzt);
   return { ok: true, verbleibend: offen.length };
+}
+
+/**
+ * Gerätewechsel: entfernt den vorhandenen zweiten Faktor, damit der Nutzer ihn
+ * anschließend regulär über starteEinrichtung/bestaetigeEinrichtung neu
+ * einrichten kann (Review #59, Befund 1).
+ *
+ * WARUM ES DIESEN WEG BRAUCHT: Ohne ihn endet ein Handywechsel in einer
+ * Sackgasse. Der Nutzer löst einen Wiederherstellungscode ein, ist angemeldet —
+ * aber TOTP zeigt weiter auf das tote Gerät. Die zehn Codes sind dann eine
+ * schrumpfende Ressource ohne Nachschub, und danach hilft nur noch
+ * scripts/totp-reset.ts mit Serverzugriff.
+ *
+ * WARUM ES NICHTS SCHWÄCHT: Bedingung ist eine FRISCHE Bestätigung dieser
+ * Session (stepUpErfuellt, höchstens STEP_UP_MAX_ALTER_MINUTEN alt). Wer sie
+ * hat, hat gerade einen gültigen Einmalcode ODER einen Wiederherstellungscode
+ * geliefert — er besitzt den zweiten Faktor bereits. Ihn wechseln zu lassen,
+ * gibt einem Angreifer nichts, was er nicht schon hätte. Ohne frische
+ * Bestätigung geht es nicht: Eine übernommene, alte Session darf den zweiten
+ * Faktor NICHT ersetzen können.
+ *
+ * `totp_grace_until` bleibt bewusst unangetastet: Ein Admin ohne Frist ist ab
+ * hier bis zum Abschluss der Neu-Einrichtung von den Admin-Flächen ausgesperrt.
+ * Das ist gewollt — die Einrichtungsseite liegt außerhalb von /admin, der Weg
+ * zurück ist zwei Minuten lang, und eine frisch geschenkte Kulanzfrist wäre
+ * genau die Lücke, die die Zwei-Faktor-Pflicht aushebelt.
+ */
+export async function zweitFaktorNeuEinrichten(): Promise<{ ok: true } | Fehler> {
+  const vor = await eingeloggt();
+  if (!vor.ok) return vor;
+  const { ctx } = vor;
+
+  // Ohne aktiven zweiten Faktor gibt es nichts zurückzusetzen — dann ist der
+  // normale Einrichtungsweg der richtige (und stepUpErfuellt wäre hier über die
+  // Kulanzfrist erfüllbar, ohne dass je ein Code vorlag).
+  if (!totpAktiv(ctx.user)) {
+    return {
+      ok: false,
+      error:
+        "Für dieses Konto ist keine Zwei-Faktor-Authentisierung eingerichtet. Sie können sie direkt einrichten.",
+    };
+  }
+
+  if (!stepUpErfuellt({ user: ctx.user, session: ctx.session })) {
+    return {
+      ok: false,
+      error: `Bitte bestätigen Sie zuerst Ihre Anmeldung mit einem Einmalcode oder einem Wiederherstellungscode. Die Bestätigung darf höchstens ${STEP_UP_MAX_ALTER_MINUTEN} Minuten alt sein.`,
+    };
+  }
+
+  const grenze = await rateLimitPruefen(ctx);
+  if (grenze) return grenze;
+
+  // CAS auf isNotNull(totpConfirmedAt): Nur wer die Zeile wirklich von „aktiv"
+  // auf „nicht eingerichtet" dreht, hat zurückgesetzt. Zwei parallele Aufrufe
+  // löschen so nicht zweimal, und ein Aufruf, dem ein anderer Weg (CLI-Reset)
+  // zuvorgekommen ist, meldet ehrlich, dass nichts mehr zu tun war.
+  const zurueckgesetzt = await ctx.db
+    .update(users)
+    .set({ totpSecretEnc: null, totpConfirmedAt: null, totpLastStep: null })
+    .where(
+      and(
+        eq(users.id, ctx.user.id),
+        eq(users.tenantId, ctx.tenant.id),
+        isNotNull(users.totpConfirmedAt)
+      )
+    )
+    .returning({ id: users.id });
+
+  if (zurueckgesetzt.length === 0) {
+    return { ok: false, error: "Die Zwei-Faktor-Authentisierung ist bereits zurückgesetzt." };
+  }
+
+  // Die alten Wiederherstellungscodes gehören zum alten Secret und verfallen
+  // mit ihm — sonst blieben sie als Zweitschlüssel zu einem Konto liegen,
+  // dessen zweiter Faktor längst ein anderer ist.
+  await ctx.db
+    .delete(totpRecoveryCodes)
+    .where(
+      and(
+        eq(totpRecoveryCodes.userId, ctx.user.id),
+        eq(totpRecoveryCodes.tenantId, ctx.tenant.id)
+      )
+    );
+
+  await protokoll(ctx, "auth.totp_neu_einrichtung");
+  await benachrichtige(ctx, "neu_eingerichtet", new Date());
+
+  return { ok: true };
 }
 
 // --- interne Helfer (keine Actions nach außen) -----------------------------
@@ -270,6 +426,31 @@ function codeFehlertext(grund: "format" | "falsch" | "wiederverwendet"): string 
       return "Dieser Code wurde bereits verwendet. Bitte warten Sie auf den nächsten.";
     default:
       return "Der Code stimmt nicht. Prüfen Sie die Uhrzeit Ihres Geräts und versuchen Sie es erneut.";
+  }
+}
+
+/**
+ * Sicherheits-Benachrichtigung an die Kontoadresse (Review #59, Befund 3).
+ *
+ * BEST EFFORT: Ein fehlgeschlagener Versand darf die Aktion selbst nicht
+ * scheitern lassen — der zweite Faktor ist zu diesem Zeitpunkt bereits gesetzt
+ * bzw. entfernt, ein Fehler hier würde dem Nutzer nur einen Abbruch vorspielen,
+ * den es nicht gibt (CLAUDE.md: Nebeneffekte mit try/catch).
+ *
+ * Die Fehlermeldung wird NICHT ausgegeben: SMTP-Bibliotheken zitieren gern die
+ * Empfängeradresse. Geloggt wird nur die Fehlerklasse — keine Adresse, kein
+ * Konto (gleiche Regel wie in konto/email-change-actions.ts).
+ */
+async function benachrichtige(
+  ctx: EingeloggterCtx,
+  ereignis: ZweiFaktorEreignis,
+  zeitpunkt: Date
+): Promise<void> {
+  try {
+    await sendZweiFaktorAenderungEmail(ctx.user.email, ereignis, zeitpunkt, ANBIETER.email);
+  } catch (fehler) {
+    const klasse = fehler instanceof Error ? fehler.name : typeof fehler;
+    console.error(`totp: Benachrichtigung fehlgeschlagen (${ereignis}, ${klasse})`);
   }
 }
 

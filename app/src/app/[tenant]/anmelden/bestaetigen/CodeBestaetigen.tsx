@@ -63,8 +63,13 @@ export default function CodeBestaetigen({
         }
         // Kurz stehen lassen, damit die Restanzahl gelesen werden kann; der
         // Knopf daneben führt sofort weiter.
+        //
+        // Bei knappem Restbestand NICHT automatisch weiterleiten (Review #59,
+        // Befund 1): Dann steht dort der Hinweis auf den Gerätewechsel, und die
+        // Session ist gerade frisch bestätigt — genau jetzt ist er möglich. Ihn
+        // nach fünf Sekunden wegzuschieben, wäre die schlechteste Sekunde dafür.
         setVerbleibend(r.verbleibend);
-        setTimeout(weiter, 5000);
+        if (r.verbleibend > 2) setTimeout(weiter, 5000);
       } catch {
         setFehler("Verbindungsfehler — bitte versuchen Sie es erneut.");
       }
@@ -76,17 +81,30 @@ export default function CodeBestaetigen({
     return (
       <div role="status" aria-live="polite">
         <p className="text-base font-semibold" style={{ color: "var(--pz-ink)" }}>
-          Bestätigt — Sie werden weitergeleitet …
+          {verbleibend > 2 ? "Bestätigt — Sie werden weitergeleitet …" : "Bestätigt"}
         </p>
         <p className="mt-2 text-sm" style={{ color: "var(--pz-body)" }}>
           Dieser Wiederherstellungscode ist jetzt verbraucht. Ihnen{" "}
           {verbleibend === 1 ? "bleibt noch 1 Code" : `bleiben noch ${verbleibend} Codes`}.
-          {verbleibend <= 2 &&
-            " Richten Sie Ihre Authenticator-App zeitnah neu ein, damit Ihnen die Codes nicht ausgehen."}
         </p>
-        <button type="button" onClick={weiter} className="pz-btn pz-btn-primary mt-4">
-          Weiter
-        </button>
+        {verbleibend <= 2 && (
+          <p className="mt-2 text-sm" style={{ color: "var(--pz-body)" }}>
+            Ihre Codes gehen zur Neige, und Nachschub gibt es nur über eine neue Einrichtung.
+            Wechseln Sie jetzt das Gerät: Sie richten Ihre Authenticator-App neu ein und erhalten
+            dabei zehn frische Wiederherstellungscodes. Die Bestätigung dafür haben Sie gerade
+            erledigt — sie gilt 15 Minuten.
+          </p>
+        )}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" onClick={weiter} className="pz-btn pz-btn-primary">
+            Weiter
+          </button>
+          {verbleibend <= 2 && (
+            <Link href={`/${tenantSlug}/konto/zwei-faktor`} className="pz-btn pz-btn-secondary">
+              Gerät wechseln
+            </Link>
+          )}
+        </div>
       </div>
     );
   }

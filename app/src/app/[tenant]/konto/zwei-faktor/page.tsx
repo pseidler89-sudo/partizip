@@ -8,10 +8,14 @@
  * liegt in der Client-Komponente daneben — er braucht Zustand über mehrere
  * Schritte und ruft die Server Actions aus lib/auth/totp-actions.ts auf.
  *
- * Der Aktiv-Zustand bietet BEWUSST keine Neu-Einrichtung an: Ein aktiver zweiter
- * Faktor darf nicht durch einen Klick in einer übernommenen Session ersetzt
- * werden. Gerätewechsel läuft über den Betreiber (Wiederherstellungscode bzw.
- * Zurücksetzen), nicht über diese Seite.
+ * GERÄTEWECHSEL (Review #59, Befund 1): Der Aktiv-Zustand bietet ihn an, aber
+ * NUR mit frisch bestätigter Session (stepUpErfuellt). Wer gerade einen gültigen
+ * Einmalcode oder Wiederherstellungscode geliefert hat, besitzt den zweiten
+ * Faktor bereits — ihn wechseln zu lassen, schwächt nichts. Eine übernommene
+ * alte Session hat diese Bestätigung nicht und sieht statt des Knopfes den Weg
+ * zur Bestätigungsseite. Vorher gab es diesen Weg gar nicht: Nach einem
+ * Handywechsel zeigte TOTP dauerhaft auf das tote Gerät, und die zehn
+ * Wiederherstellungscodes waren eine schrumpfende Ressource ohne Nachschub.
  */
 
 import type { Metadata } from "next";
@@ -19,8 +23,9 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { ShieldCheck, ShieldAlert } from "lucide-react";
 import { getOptionalAuthContext } from "@/lib/auth/action-context";
-import { totpAktiv } from "@/lib/auth/zwei-faktor";
+import { totpAktiv, stepUpErfuellt } from "@/lib/auth/zwei-faktor";
 import ZweiFaktorEinrichtung from "./ZweiFaktorEinrichtung";
+import GeraetWechseln from "./GeraetWechseln";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +59,12 @@ export default async function ZweiFaktorPage({ params, searchParams }: PageProps
   const rohPflicht = Array.isArray(pflicht) ? pflicht[0] : pflicht;
   const istPflicht = rohPflicht === "1";
   const frist = ctx.user.totpGraceUntil;
+
+  // Frisch bestätigt? Entscheidet, ob der Gerätewechsel angeboten wird. Bei
+  // aktivem TOTP heißt „frisch": Einmalcode oder Wiederherstellungscode in
+  // dieser Session, höchstens STEP_UP_MAX_ALTER_MINUTEN her.
+  const frischBestaetigt =
+    ctx.session !== null && stepUpErfuellt({ user: ctx.user, session: ctx.session });
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-12">
@@ -109,9 +120,34 @@ export default async function ZweiFaktorPage({ params, searchParams }: PageProps
               </p>
               <p className="mt-3 text-sm" style={{ color: "var(--pz-muted)" }}>
                 Haben Sie Ihr Telefon verloren, melden Sie sich mit einem Ihrer
-                Wiederherstellungscodes an. Sind auch die weg, wenden Sie sich an den Betreiber —
-                aus Sicherheitsgründen lässt sich der zweite Faktor hier nicht einfach ersetzen.
+                Wiederherstellungscodes an und wechseln Sie danach hier das Gerät. Sind auch die
+                Codes weg, wenden Sie sich an den Betreiber.
               </p>
+
+              {frischBestaetigt ? (
+                <GeraetWechseln />
+              ) : (
+                <div className="mt-6 border-t pt-5" style={{ borderColor: "var(--pz-line)" }}>
+                  <p className="text-base font-semibold" style={{ color: "var(--pz-ink)" }}>
+                    Gerät wechseln
+                  </p>
+                  <p className="mt-1 text-sm" style={{ color: "var(--pz-body)" }}>
+                    Dafür brauchen wir zuerst eine frische Bestätigung: Geben Sie einen Einmalcode
+                    aus Ihrer App oder einen Wiederherstellungscode ein. Danach kehren Sie
+                    hierher zurück.
+                  </p>
+                  <p className="mt-3 text-sm">
+                    <Link
+                      href={`/${slug}/anmelden/bestaetigen?weiter=${encodeURIComponent(
+                        `/${slug}/konto/zwei-faktor`
+                      )}`}
+                      style={{ color: "var(--pz-brand-strong)" }}
+                    >
+                      Anmeldung bestätigen
+                    </Link>
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         ) : (
