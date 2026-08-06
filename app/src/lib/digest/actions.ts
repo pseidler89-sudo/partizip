@@ -31,7 +31,30 @@ import { isDemoTenant } from "@/lib/demo/config";
 import { istMusterstadtSeedDigestId } from "@/lib/demo/seed-ids";
 import { freigebenCore, isSelfApprovalAllowed } from "@/lib/digest/freigabe-core";
 import { veroeffentlichenCore } from "@/lib/digest/veroeffentlichen-core";
-import { requireAdminStepUpCtx, requireRedaktionCtx } from "@/lib/auth/action-context";
+import {
+  requireAdminStepUpCtx,
+  requireRedaktionCtx,
+  type ZweiFaktorBedarf,
+} from "@/lib/auth/action-context";
+
+/**
+ * Ergebnis der Redaktions-Actions.
+ *
+ * `zweiFaktor` (#59) sagt der UI, dass nicht die Berechtigung fehlt, sondern der
+ * zweite Faktor — und WELCHER Weg hilft ("code" = bestätigen, "einrichten" =
+ * einrichten). Das Feld kommt unverändert aus den Gates in
+ * lib/auth/action-context.ts; hier wird es nur DURCHGEREICHT statt verworfen.
+ * Ohne die Weitergabe sieht ein Admin, dessen Step-up nach 15 Minuten abläuft,
+ * nur „frische Bestätigung erforderlich" — ohne Link, ohne Knopf.
+ *
+ * Optional, damit bestehende Aufrufer (u. a. die Betreiber-CLI und die Tests
+ * gegen die *Core-Funktionen) unverändert bleiben.
+ */
+export type DigestActionResult = {
+  ok: boolean;
+  error?: string;
+  zweiFaktor?: ZweiFaktorBedarf;
+};
 
 // ---------------------------------------------------------------------------
 // Auth — AUSSCHLIESSLICH über @/lib/auth/action-context
@@ -53,12 +76,17 @@ import { requireAdminStepUpCtx, requireRedaktionCtx } from "@/lib/auth/action-co
 export async function setStatementGeprueft(
   statementId: string,
   geprueft: boolean,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<DigestActionResult> {
   // KEIN Step-up: Das Prüf-Häkchen ist der laufende Redaktionsschritt (Dutzende
   // pro Sitzung) und in beide Richtungen umkehrbar; nach außen geht nichts. Die
   // folgenreiche Stelle ist die Freigabe — dort sitzt das Step-up.
+  //
+  // Das Signal wird trotzdem durchgereicht: requireRedaktionCtx blockt einen
+  // ADMIN, dessen Kulanzfrist mitten in der Sitzung abläuft ("einrichten"). Das
+  // Layout-Gate unter /admin fängt das erst beim nächsten Rendern ab — der Klick
+  // hier passiert vorher.
   const auth = await requireRedaktionCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   // Sicherheitsprüfung: Statement gehört zu einem Digest dieses Tenants und ist im Status 'entwurf'
@@ -96,11 +124,12 @@ export async function setStatementGeprueft(
 
 export async function setAlleStatementsGeprueft(
   digestId: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<DigestActionResult> {
   // KEIN Step-up: Sammel-Variante von setStatementGeprueft — dieselbe Wirkung in
-  // einem Zug, dieselbe Umkehrbarkeit, keine Außenwirkung.
+  // einem Zug, dieselbe Umkehrbarkeit, keine Außenwirkung. Zwei-Faktor-Signal
+  // wie dort durchgereicht.
   const auth = await requireRedaktionCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   // Digest-Prüfung: existiert und gehört zu diesem Tenant, Status muss 'entwurf' sein
@@ -154,12 +183,13 @@ export async function setAlleStatementsGeprueft(
 export async function setStatementHighlight(
   statementId: string,
   istHighlight: boolean,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<DigestActionResult> {
   // KEIN Step-up: redaktionelle Gewichtung im Entwurf, nach außen wird nichts
   // sichtbar (der Digest ist noch nicht veröffentlicht). Die SoD-Spur
   // (highlighted_by) trägt die Verantwortung, nicht ein zweiter Faktor.
+  // Zwei-Faktor-Signal wie bei setStatementGeprueft durchgereicht.
   const auth = await requireRedaktionCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   // Sicherheitsprüfung: Statement gehört zu einem Digest dieses Tenants und ist im Status 'entwurf'
@@ -215,13 +245,17 @@ export async function setStatementHighlight(
 // Action: Digest freigeben
 // ---------------------------------------------------------------------------
 
-export async function freigeben(digestId: string): Promise<{ ok: boolean; error?: string }> {
+export async function freigeben(digestId: string): Promise<DigestActionResult> {
   // STEP-UP (#59): Die Freigabe entscheidet, was als geprüfter Stand gilt, und ist
   // die Vorbedingung der Veröffentlichung — dafür verlangen wir eine frische
   // Bestätigung mit dem Einmalcode. Freigeben ist ohnehin admin-only
   // (canFreigeben), das Admin-Gate ändert an der Berechtigung nichts.
+  //
+  // Das `zweiFaktor`-Signal WEITERREICHEN, nicht verwerfen (Review #59, Befund 2):
+  // Genau hier — nach 20 Minuten Redaktionsarbeit — läuft das Step-up ab, und
+  // ohne das Feld bleibt der Nutzer mit einem Satz ohne Weg zurück.
   const auth = await requireAdminStepUpCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   // Seed-Schutz (Demo-Spielwiese): der kuratierte Beispiel-Digest ist der
@@ -247,12 +281,13 @@ export async function freigeben(digestId: string): Promise<{ ok: boolean; error?
 // Action: Digest veröffentlichen
 // ---------------------------------------------------------------------------
 
-export async function veroeffentlichen(digestId: string): Promise<{ ok: boolean; error?: string }> {
+export async function veroeffentlichen(digestId: string): Promise<DigestActionResult> {
   // STEP-UP (#59): Die Veröffentlichung geht an Kanäle nach außen (Mastodon,
   // Bluesky, RSS) und ist nicht zurückholbar — dafür verlangen wir eine frische
   // Bestätigung mit dem Einmalcode. Admin-only wie freigeben (canFreigeben).
+  // Signal durchreichen — siehe freigeben().
   const auth = await requireAdminStepUpCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   // Seed-Schutz (Demo-Spielwiese): analog freigeben() — der Beispiel-Digest

@@ -20,6 +20,14 @@
  * SIDE-EFFECT-FENCE (Muster Block I): auf dem Demo-Mandanten sind alle
  * Konto-Mutationen gesperrt — der ephemere Demo-Admin darf keine persistenten
  * Konten sperren/offboarden oder deren Sitzungen beenden. Fail-closed.
+ *
+ * ZWEI-FAKTOR-SIGNAL (Review #59, Befund 2): Jede Action reicht das Feld
+ * `zweiFaktor` des Gates UNVERÄNDERT weiter, statt nur `error` zu übernehmen.
+ * Sonst liest der Admin „Diese Aktion verlangt eine frische Bestätigung mit
+ * Ihrem Einmalcode." ohne Link und ohne Knopf — er müsste den Pfad raten. Die
+ * Rollen-Seite rendert daraus components/ZweiFaktorHinweis. An der
+ * Sicherheitslogik ändert die Weitergabe nichts: Das Signal entsteht in den
+ * Gates, hier wird es nur nicht mehr weggeworfen.
  */
 
 "use server";
@@ -59,7 +67,7 @@ export async function sessionsBeenden(
   // neue Anmeldung — die betroffene Person kommt mit ihrem Magic-Link sofort
   // wieder herein. Umkehrbar, deshalb reicht das Basis-Gate.
   const auth = await requireAdminCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_KONTO_GESPERRT };
@@ -81,7 +89,7 @@ export async function kontoSperren(
   // (getUserRoleTypes filtert auf account_status='active') — ein übernommenes
   // Konto könnte damit den legitimen Admin entrechten und allein zurückbleiben.
   const auth = await requireAdminStepUpCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_KONTO_GESPERRT };
@@ -99,11 +107,15 @@ export async function kontoSperren(
 export async function kontoEntsperren(
   rawInput: KontoSicherheitInput,
 ): Promise<KontoSicherheitResult> {
-  // KEIN Step-up: Entsperren ist die WIEDERHERSTELLENDE Richtung — es gibt einem
-  // Konto seine Rechte zurück, statt sie zu nehmen. Eine zusätzliche Hürde hier
-  // erschwerte ausgerechnet die Korrektur eines Fehlgriffs.
-  const auth = await requireAdminCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  // Step-up (#59): Entsperren wurde zuerst OHNE Step-up gebaut, mit dem Argument,
+  // es sei die wiederherstellende Richtung. Gate-B hat das zu Recht gedreht:
+  // getUserRoleTypes filtert auf account_status='active', ein Entsperren gibt dem
+  // Konto also SCHLAGARTIG alle Rollen zurück — es ist rechtevergebend, genau wie
+  // assignRole. Ein Angreifer mit übernommener Session könnte sonst ein zuvor per
+  // Offboarding gesperrtes Admin-Konto reaktivieren, ohne einen frischen Code zu
+  // liefern. Die Kosten für den legitimen Fall sind sechs Ziffern.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_KONTO_GESPERRT };
@@ -125,7 +137,7 @@ export async function offboarding(
   // assignRole, nur in einem Zug. Damit ließe sich der legitime Admin
   // entrechten; gleiche Schwelle wie revokeRole.
   const auth = await requireAdminStepUpCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_KONTO_GESPERRT };
@@ -151,7 +163,7 @@ export async function kontoSperrenPerEmail(
   // Adressierung — sie darf nicht die niedrigere Hürde sein, sonst wäre das
   // Step-up von kontoSperren über diesen Weg umgehbar.
   const auth = await requireAdminStepUpCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_KONTO_GESPERRT };

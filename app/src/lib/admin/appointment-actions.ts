@@ -21,6 +21,12 @@
  *
  * SIDE-EFFECT-FENCE (Muster Block I): auf dem Demo-Mandanten sind Rollen-
  * Mutationen gesperrt — gleicher Wortlaut wie actions.ts. Fail-closed.
+ *
+ * ZWEI-FAKTOR-SIGNAL (Review #59, Befund 2): Alle drei Actions reichen das Feld
+ * `zweiFaktor` des Gates UNVERÄNDERT weiter, statt nur `error` zu übernehmen —
+ * sonst endet die Bestätigung eines Vorschlags in einem Satz ohne Weg zurück.
+ * Die Weitergabe ändert nichts an der Sicherheitslogik; das Signal entsteht in
+ * den Gates, hier wird es nur nicht mehr weggeworfen.
  */
 
 "use server";
@@ -69,7 +75,7 @@ export async function verifierErnennungVorschlagen(
   // den nach dem Vier-Augen-Prinzip eine zweite Person entscheiden muss. Die
   // Rolle entsteht erst dort, und dort sitzt auch das Step-up.
   const auth = await requireAdminCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_ROLLEN_GESPERRT };
@@ -97,7 +103,7 @@ export async function verifierErnennungEntscheiden(
   // Gleiche Schwelle wie assignRole; das Vier-Augen-Prinzip ersetzt sie nicht
   // (ALLOW_SELF_APPROVAL kann es im Pilot überbrücken).
   const auth = await requireAdminStepUpCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_ROLLEN_GESPERRT };
@@ -121,7 +127,7 @@ export async function verifierErnennungZurueckziehen(
   // entstanden ist — es vergibt und entzieht nichts. Die Wirkung ist, dass alles
   // beim Alten bleibt.
   const auth = await requireAdminCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_ROLLEN_GESPERRT };

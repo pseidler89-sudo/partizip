@@ -447,9 +447,12 @@ export const users = pgTable(
     // Codes innerhalb seines Toleranzfensters (± 30 s). bigint, weil der Zähler
     // int4 im Jahr ~4000 überliefe — billiger als eine Migration danach.
     totpLastStep: bigint("totp_last_step", { mode: "number" }),
-    // Ende der Kulanzfrist für Admins ohne TOTP. Wird beim ersten Admin-Zugriff
-    // nach dem Rollout gesetzt; danach ist die Einrichtung zwingend. NULL = noch
-    // nie als Admin angemeldet oder TOTP bereits aktiv.
+    // Ende der Kulanzfrist für Admins ohne TOTP. Wird EINMALIG von Migration 0040
+    // für die zum Rollout vorhandenen Admins gesetzt — zur Laufzeit schreibt sie
+    // niemand. NULL heißt KEINE Kulanz: Wer nach dem Rollout Admin wird, richtet
+    // den zweiten Faktor vor dem ersten Admin-Zugriff ein.
+    // (Zuerst setzte die Anwendung die Frist beim ersten Zugriff selbst — das gab
+    // jedem neuen Admin-Konto dauerhaft 14 freie Tage und war ein Gate-B-BLOCKER.)
     totpGraceUntil: timestamp("totp_grace_until", { withTimezone: true }),
     // M6: $onUpdate
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`).$onUpdate(() => new Date()),

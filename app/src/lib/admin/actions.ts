@@ -45,7 +45,11 @@ export async function assignRole(input: AssignRoleInput): Promise<RoleActionResu
   // Konto selbst dauerhaft festsetzen könnte. Dafür verlangen wir eine frische
   // Bestätigung mit dem Einmalcode, nicht nur eine gültige Session.
   const auth = await requireAdminStepUpCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  // Das `zweiFaktor`-Signal des Gates WEITERREICHEN, nicht verwerfen: Sonst
+  // erscheint nur der Satz „frische Bestätigung erforderlich" ohne Weg dorthin
+  // (Review #59, Befund 2). Die UI macht daraus einen Link auf die
+  // Bestätigungsseite; an der Sicherheitslogik ändert das nichts.
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_ROLLEN_GESPERRT };
@@ -59,7 +63,8 @@ export async function revokeRole(input: RevokeRoleInput): Promise<RoleActionResu
   // frische Bestätigung ausführen könnte, könnte den letzten anderen Admin
   // entfernen. Gleiche Schwelle wie assignRole.
   const auth = await requireAdminStepUpCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  // Signal durchreichen — siehe assignRole.
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_ROLLEN_GESPERRT };

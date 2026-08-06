@@ -8,7 +8,7 @@
  * dabei kaputtgeht.
  *
  * ENTSCHEIDUNG SANFTE ERZWINGUNG (Owner, 2026-08-05): Admins, die es beim Rollout
- * schon gab, werden nicht sofort ausgesperrt. Für sie setzt Migration 0039 eine
+ * schon gab, werden nicht sofort ausgesperrt. Für sie setzt Migration 0040 eine
  * Kulanzfrist; bis zu deren Ablauf sind die Admin-Flächen offen, die Einrichtung
  * wird aber angeboten. Danach ist sie zwingend. Grund: Es gibt genau einen Admin
  * (den Betreiber), und ein Fehler in der Einrichtung hätte ihn aus seiner eigenen
@@ -25,13 +25,6 @@
  * Admin wird, richtet den zweiten Faktor vor dem ersten Admin-Zugriff ein; die
  * Einrichtungsseite liegt außerhalb von /admin und ist dafür jederzeit erreichbar.
  */
-
-/**
- * Länge der Kulanzfrist. Wird ausschließlich von Migration 0039 verwendet, um
- * die zum Rollout vorhandenen Admins einmalig einzutragen — zur Laufzeit setzt
- * niemand mehr eine Frist.
- */
-export const TOTP_KULANZ_TAGE = 14;
 
 /**
  * Höchstalter einer TOTP-Prüfung für besonders folgenreiche Aktionen (Step-up).

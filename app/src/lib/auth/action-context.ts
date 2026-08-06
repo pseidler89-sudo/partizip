@@ -265,40 +265,6 @@ export async function requireAdminCtx(): Promise<
   return { ok: true, ctx: { ...ctx, userId: ctx.userId, roleTypes } };
 }
 
-/**
- * Eigenständiges Step-up-Gate für Actions, die ihren Kontext bereits auf einem
- * anderen Weg auflösen (Digest- und Rollen-Actions haben eigene Resolver).
- *
- * Bewusst als Zusatz-Zeile am Anfang der Action und nicht als Umbau ihrer
- * Kontext-Auflösung: Der Eingriff bleibt sichtbar und einzeln überprüfbar, und
- * die bestehende Autorisierungslogik bleibt unangetastet.
- *
- * Ist der Aufrufer kein Admin, greift das Gate NICHT — dann entscheidet die
- * ohnehin vorhandene Rollenprüfung der Action.
- */
-export async function verlangeFrischeBestaetigung(): Promise<
-  { ok: true } | { ok: false; error: string; zweiFaktor: ZweiFaktorBedarf }
-> {
-  const ctx = await getOptionalAuthContext();
-  if (!ctx || !ctx.userId || !ctx.user || !ctx.session) return { ok: true };
-  const admin = isAdmin(await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId));
-  if (!admin) return { ok: true };
-
-  if (
-    stepUpErfuellt({
-      user: ctx.user,
-      session: ctx.session,
-      demoMandant: isDemoTenant(ctx.tenant.slug),
-    })
-  ) {
-    return { ok: true };
-  }
-  return {
-    ok: false,
-    error: "Diese Aktion verlangt eine frische Bestätigung mit Ihrem Einmalcode.",
-    zweiFaktor: ctx.user.totpSecretEnc && ctx.user.totpConfirmedAt ? "code" : "einrichten",
-  };
-}
 
 /**
  * Wie requireAdminCtx, verlangt zusätzlich eine FRISCHE TOTP-Prüfung (Step-up).

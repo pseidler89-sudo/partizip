@@ -41,6 +41,7 @@ import { canManageRole, isAdmin, type RoleType } from "@/lib/auth/roles";
 import { istPgFehler, PG_UNIQUE_VIOLATION } from "@/lib/db/pg-errors";
 import { resolveRegionIdForScope } from "@/lib/region/scope";
 import { normalizeEmail } from "@/lib/auth/email";
+import type { ZweiFaktorBedarf } from "@/lib/auth/action-context";
 
 type ScopeLevel = "ortsteil" | "stadt" | "kreis" | "land";
 const VALID_SCOPE_LEVELS: readonly string[] = ["ortsteil", "stadt", "kreis", "land"];
@@ -53,6 +54,13 @@ export type ErnennungResult = {
   error?: string;
   message?: string;
   appointmentId?: string;
+  /**
+   * #59: Gesetzt, wenn nicht die BERECHTIGUNG fehlt, sondern der zweite Faktor.
+   * Die Kern-Logik hier setzt es nie — die "use server"-Wrapper reichen es aus
+   * dem Gate durch (Details: konto-sicherheit-core.ts). Optional, damit
+   * bestehende Aufrufer unverändert bleiben.
+   */
+  zweiFaktor?: ZweiFaktorBedarf;
 };
 
 const SOD_FEHLER =

@@ -24,6 +24,13 @@
  *     (Eskalationsgrenze) in den Cores.
  *   - annehmen: der/die Eingeladene, per Magic-Link authentifiziert (Konto muss
  *     existieren + eingeloggt sein); die E-Mail-Bindung erzwingt der Core.
+ *
+ * ZWEI-FAKTOR-SIGNAL (Review #59, Befund 2): einladen/zurückziehen/erneut senden
+ * reichen das Feld `zweiFaktor` des Gates UNVERÄNDERT weiter, statt nur `error`
+ * zu übernehmen — sonst steht der Admin vor „frische Bestätigung erforderlich"
+ * ohne Weg dorthin. `annehmen` bleibt außen vor: Es läuft über
+ * getOptionalAuthContext (die eingeladene Person ist kein Admin) und hat gar
+ * kein Zwei-Faktor-Gate, das ein Signal setzen könnte.
  */
 
 "use server";
@@ -35,6 +42,7 @@ import { isDemoTenant } from "@/lib/demo/config";
 import {
   getOptionalAuthContext,
   requireAdminStepUpCtx,
+  type ZweiFaktorBedarf,
 } from "@/lib/auth/action-context";
 import { sendInvitationEmail } from "@/lib/auth/mail";
 import {
@@ -71,7 +79,17 @@ function buildInviteUrl(host: string, slug: string, rawToken: string): string {
   return `${proto}://${host}/${slug}/einladung?token=${encodeURIComponent(rawToken)}`;
 }
 
-export type InvitationActionResult = { ok: boolean; error?: string; message?: string };
+export type InvitationActionResult = {
+  ok: boolean;
+  error?: string;
+  message?: string;
+  /**
+   * #59: Gesetzt, wenn nicht die Berechtigung fehlt, sondern der zweite Faktor —
+   * unverändert aus dem Gate durchgereicht, damit die UI den Weg zur Bestätigung
+   * anbieten kann. Optional, damit bestehende Aufrufer unverändert bleiben.
+   */
+  zweiFaktor?: ZweiFaktorBedarf;
+};
 
 const einladenSchema = z.object({
   email: z.string().email("Bitte eine gültige E-Mail-Adresse angeben."),
@@ -88,7 +106,7 @@ export async function einladen(rawInput: EinladenInput): Promise<InvitationActio
   // annehmen" an genau das, wofür assignRole längst Step-up verlangt (bis hin zu
   // kommune_admin). Gleiche Schwelle wie assignRole, sonst wäre sie umgehbar.
   const auth = await requireAdminStepUpCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   // SIDE-EFFECT-FENCE (Demo-Spielwiese, fail-closed): ephemere Demo-Admins
@@ -133,7 +151,7 @@ export async function einladungZurueckziehen(invitationId: string): Promise<Invi
   // entzieht eine bereits zugesagte Rolle, bevor sie angenommen wurde — es kann
   // gezielt die Aufnahme einer zweiten, kontrollierenden Person verhindern.
   const auth = await requireAdminStepUpCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   const idParsed = z.string().uuid().safeParse(invitationId);
@@ -156,7 +174,7 @@ export async function einladungErneutSenden(invitationId: string): Promise<Invit
   // Schwelle wäre `einladen` umgehbar: eine alte, offene Einladung ließe sich
   // ohne frische Bestätigung zu einem frischen Link machen.
   const auth = await requireAdminStepUpCtx();
-  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
   const { ctx } = auth;
 
   // SIDE-EFFECT-FENCE (Demo-Spielwiese): wie einladen() — keine Mail nach außen.

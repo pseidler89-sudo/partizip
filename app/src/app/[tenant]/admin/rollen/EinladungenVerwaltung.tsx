@@ -21,6 +21,13 @@ import {
   einladungZurueckziehen,
   einladungErneutSenden,
 } from "@/lib/admin/invitation-actions";
+// #59: Einladen/Zurückziehen/Erneut senden verlangen ein Step-up (frische
+// Bestätigung mit dem Einmalcode). Läuft es während der Arbeit ab, trägt das
+// Action-Ergebnis ein `zweiFaktor`-Feld — der Hinweis macht daraus den Weg
+// zurück in die Bestätigung. Ohne das Feld rendert er nichts. Hier ist kein
+// modaler Dialog im Spiel (die Aktionen laufen direkt am Knopf), der Hinweis
+// steht also sofort sichtbar und fokussierbar auf der Seite.
+import ZweiFaktorHinweis, { type ZweiFaktorErgebnis } from "@/components/ZweiFaktorHinweis";
 
 const ROLE_LABELS: Record<string, string> = {
   user: "Bürger:in",
@@ -78,8 +85,12 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
   const [email, setEmail] = useState("");
   const [roleType, setRoleType] = useState(erlaubteRollen[0] ?? "user");
   const [scopeLevel, setScopeLevel] = useState<ScopeLevel>("stadt");
-  const [formMsg, setFormMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [rowError, setRowError] = useState<Record<string, string>>({});
+  const [formMsg, setFormMsg] = useState<
+    ({ ok: boolean; text: string } & ZweiFaktorErgebnis) | null
+  >(null);
+  const [rowError, setRowError] = useState<
+    Record<string, { text: string } & ZweiFaktorErgebnis>
+  >({});
 
   function handleEinladen(e: React.FormEvent) {
     e.preventDefault();
@@ -87,7 +98,11 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
     startTransition(async () => {
       const result = await einladen({ email, roleType, scopeLevel });
       if (!result.ok) {
-        setFormMsg({ ok: false, text: result.error ?? "Einladung fehlgeschlagen." });
+        setFormMsg({
+          ok: false,
+          text: result.error ?? "Einladung fehlgeschlagen.",
+          zweiFaktor: result.zweiFaktor,
+        });
         return;
       }
       setFormMsg({ ok: true, text: result.message ?? "Einladung versendet." });
@@ -109,7 +124,13 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
     startTransition(async () => {
       const result = await einladungZurueckziehen(id);
       if (!result.ok) {
-        setRowError((prev) => ({ ...prev, [id]: result.error ?? "Zurückziehen fehlgeschlagen." }));
+        setRowError((prev) => ({
+          ...prev,
+          [id]: {
+            text: result.error ?? "Zurückziehen fehlgeschlagen.",
+            zweiFaktor: result.zweiFaktor,
+          },
+        }));
         return;
       }
       router.refresh();
@@ -121,7 +142,13 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
     startTransition(async () => {
       const result = await einladungErneutSenden(id);
       if (!result.ok) {
-        setRowError((prev) => ({ ...prev, [id]: result.error ?? "Erneut senden fehlgeschlagen." }));
+        setRowError((prev) => ({
+          ...prev,
+          [id]: {
+            text: result.error ?? "Erneut senden fehlgeschlagen.",
+            zweiFaktor: result.zweiFaktor,
+          },
+        }));
         return;
       }
       router.refresh();
@@ -207,10 +234,18 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
             </div>
 
             {formMsg && (
-              <p className="text-sm" style={{ color: formMsg.ok ? "var(--pz-success)" : "var(--pz-danger)" }}>
+              <p
+                className="text-sm"
+                role={formMsg.ok ? undefined : "alert"}
+                style={{ color: formMsg.ok ? "var(--pz-success)" : "var(--pz-danger)" }}
+              >
                 {formMsg.text}
               </p>
             )}
+
+            {/* Ergänzt die Fehlermeldung um den Weg zur Bestätigung; bringt seine
+                eigene role="alert"-Region mit und rendert ohne Feld nichts. */}
+            <ZweiFaktorHinweis ergebnis={formMsg} />
 
             <button
               type="submit"
@@ -286,7 +321,12 @@ export function EinladungenVerwaltung({ erlaubteRollen, einladungen }: Props) {
                   )}
 
                   {rowError[e.id] && (
-                    <p className="mt-2 text-sm" style={{ color: "var(--pz-danger)" }}>{rowError[e.id]}</p>
+                    <>
+                      <p className="mt-2 text-sm" role="alert" style={{ color: "var(--pz-danger)" }}>
+                        {rowError[e.id].text}
+                      </p>
+                      <ZweiFaktorHinweis ergebnis={rowError[e.id]} />
+                    </>
                   )}
                 </div>
               );

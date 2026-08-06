@@ -4,7 +4,6 @@ import {
   zugangErlaubt,
   stepUpErfuellt,
   totpAktiv,
-  TOTP_KULANZ_TAGE,
   STEP_UP_MAX_ALTER_MINUTEN,
   type ZweiFaktorUser,
 } from "../zwei-faktor";
@@ -92,12 +91,6 @@ describe("bewerteZweiFaktor — Admin ohne TOTP (Kulanzfrist)", () => {
     });
     expect(lage).toEqual({ status: "einrichtung_erzwungen", frist: null });
     expect(zugangErlaubt(lage)).toBe(false);
-  });
-
-  it("die Kulanzlänge ist eine reine Migrations-Konstante", () => {
-    // Sie wird nur noch von Migration 0040 benutzt; die Richtlinie selbst rechnet
-    // keine Frist mehr aus.
-    expect(TOTP_KULANZ_TAGE).toBe(14);
   });
 
   it("lässt den Zugang offen, solange die Frist läuft", () => {

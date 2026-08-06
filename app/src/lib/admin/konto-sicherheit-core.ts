@@ -48,9 +48,23 @@ import { users, roles, sessions, auditEvents, roleAppointments, invitations } fr
 import { ADMIN_ROLES, canManageRole, isAdmin } from "@/lib/auth/roles";
 import { normalizeEmail } from "@/lib/auth/email";
 import { identitaetPiiEntfernenWennKeinRollentraeger } from "@/lib/identity/pii-cleanup";
+import type { ZweiFaktorBedarf } from "@/lib/auth/action-context";
 
 /** Einheitliches, serialisierbares Ergebnis aller Konto-Sicherheits-Aktionen. */
-export type KontoSicherheitResult = { ok: boolean; error?: string; message?: string };
+export type KontoSicherheitResult = {
+  ok: boolean;
+  error?: string;
+  message?: string;
+  /**
+   * #59: Gesetzt, wenn nicht die BERECHTIGUNG fehlt, sondern der zweite Faktor.
+   * Die Kern-Logik hier setzt es nie — die "use server"-Wrapper reichen es aus
+   * dem Gate durch, damit die UI (components/ZweiFaktorHinweis) den Weg zur
+   * Bestätigung zeigen kann. Optional: bestehende Aufrufer bleiben unverändert.
+   * Nur ein TYP-Import — `action-context` ist ein Server-Modul, `import type`
+   * wird restlos wegkompiliert.
+   */
+  zweiFaktor?: ZweiFaktorBedarf;
+};
 
 // ---------------------------------------------------------------------------
 // Interne Guards (gemeinsam für alle vier Aktionen)
