@@ -89,6 +89,18 @@ export default async function AufgabenPage({ params }: PageProps) {
           {tenant.name} — wählen Sie eine Funktion. Über &bdquo;Ansicht&ldquo; oben
           wechseln Sie jederzeit zurück zur Bürger-Ansicht.
         </p>
+        {/* Anleitung als Text-Link statt als weitere Kachel: die Kacheln spiegeln
+            exakt die Server-Guards (lib/aufgaben/kacheln.ts) — eine Kachel ohne
+            Rechte-Bezug würde diese Invariante aufweichen. */}
+        <p className="mt-2 text-sm">
+          <Link
+            href={`/${slugFromPath}/anleitung/aufgaben`}
+            className="font-medium underline-offset-4 hover:underline rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
+            style={{ color: "var(--pz-brand-strong)" }}
+          >
+            Anleitung: was jede Aufgabe umfasst <span aria-hidden>→</span>
+          </Link>
+        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

@@ -306,6 +306,17 @@ function TenantLayoutInner({
             Transparenz
           </Link>
           <span aria-hidden>·</span>
+          {/* Die Anleitung steht bewusst VOR der FAQ: sie ist der ausführliche
+              Einstieg („was mache ich hier?"), die FAQ die Kurzform. Beide sind
+              dauerhaft nur über den Footer erreichbar — die Landing verschwindet
+              mit dem Region-Cookie. */}
+          <Link
+            href={`/${slugFromPath}/anleitung`}
+            className="hover:text-pz-ink transition-colors"
+          >
+            Anleitung
+          </Link>
+          <span aria-hidden>·</span>
           <Link
             href={`/${slugFromPath}/faq`}
             className="hover:text-pz-ink transition-colors"
