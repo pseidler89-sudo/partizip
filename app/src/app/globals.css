@@ -250,3 +250,47 @@
     @apply rounded-full;
   }
 }
+/* ===========================================================================
+ * Druckbild der Lese-Seiten (Anleitung, FAQ, Rechtstexte).
+ *
+ * Warum überhaupt: Die Verifizierer-Anleitung als Ausdruck neben dem Tresen im
+ * Bürgerbüro ist ein realistischer Nutzen — genau der, den eine Folienmechanik
+ * nie liefert. Deshalb greifen die Regeln global für lange Textseiten und nicht
+ * nur für eine Route.
+ *
+ * Was hier NICHT steht: Ausblenden von Kopf-/Fußzeile. Das entscheiden die
+ * Seiten selbst über die Tailwind-Variante `print:hidden` an den Elementen, die
+ * im Ausdruck nichts beitragen (z. B. „← Alle Anleitungen").
+ * =========================================================================== */
+@media print {
+  /* Karten sind im Ausdruck Textblöcke: kein Schatten, kein Seitenumbruch mitten
+     durch einen Schritt. */
+  .pz-card {
+    box-shadow: none;
+    break-inside: avoid;
+  }
+
+  /* Aufklappbare Fragen im Ausdruck vollständig zeigen — sonst druckt man eine
+     Liste von Überschriften ohne Antworten. Zwei Wege, weil die Browser den
+     Inhalt unterschiedlich verstecken: `::details-content` (neuere Chromium-
+     Versionen) und der direkte Kind-Selektor (ältere Umsetzungen). Wo beides
+     nicht greift, bleibt der Ausdruck trotzdem vollständig lesbar — die
+     Kernaussagen stehen in den immer sichtbaren Abschnitten. */
+  details > summary {
+    list-style: none;
+  }
+  details::details-content {
+    content-visibility: visible;
+    block-size: auto;
+  }
+  details:not([open]) > *:not(summary) {
+    display: block;
+  }
+
+  /* Überschriften nicht allein am Seitenfuß stehen lassen. */
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+}

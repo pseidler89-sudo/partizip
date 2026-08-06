@@ -34,6 +34,19 @@ export default async function FaqPage({
           Kurz beantwortet — ohne Fachsprache. Ihre Frage fehlt? Schreiben Sie uns
           über die Angaben im Impressum.
         </p>
+        {/* Diese Seite ist die Kurzform. Wer den ganzen Ablauf sucht (oder eine
+            Rolle in der Kommune hat), ist in der Anleitung richtig — verlinkt
+            statt dupliziert, damit es EINE Quelle je Aussage bleibt. */}
+        <p className="mt-3 text-sm" style={{ color: "var(--pz-body)" }}>
+          <Link
+            href={`/${slug}/anleitung`}
+            className="font-semibold underline-offset-4 hover:underline rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pz-brand)]"
+            style={{ color: "var(--pz-brand-strong)" }}
+          >
+            Zur ausführlichen Anleitung
+          </Link>{" "}
+          — Schritt für Schritt fürs Mitmachen und für Aufgaben in der Kommune.
+        </p>
       </header>
 
       <div className="mt-8 space-y-3">
