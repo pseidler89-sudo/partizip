@@ -60,10 +60,19 @@ describe("Termin-Code Format (Unit)", () => {
       expect(c.replace(/^TERMIN-/, "")).not.toMatch(/[ILOU]/);
     }
   });
-  it("streut breit (keine Kollision über 5000)", () => {
+  // Prüft die STREUUNG des Generators, nicht die Eindeutigkeit der Codes — die
+  // garantiert nicht er, sondern UNIQUE + Retry in booking-core.ts (fünf
+  // Versuche mit onConflictDoNothing auf den Code-Constraint).
+  //
+  // toBe(5000) war deshalb die falsche Erwartung und dazu flaky: Bei 40 Bit
+  // Entropie liegt die Kollisionswahrscheinlichkeit über 5000 Ziehungen bei
+  // rund 1:88.000 pro Lauf (Geburtstagsproblem) — der Test wäre im Schnitt alle
+  // 88.000 Läufe grundlos rot geworden. Die Schranke lässt einzelne Kollisionen
+  // zu und schlägt trotzdem an, wenn die Streuung wirklich zusammenbricht.
+  it("streut breit (praktisch kollisionsfrei über 5000 Codes)", () => {
     const set = new Set<string>();
     for (let i = 0; i < 5000; i++) set.add(generateBookingCode());
-    expect(set.size).toBe(5000);
+    expect(set.size).toBeGreaterThanOrEqual(4995);
   });
 });
 
