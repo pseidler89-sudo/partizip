@@ -73,3 +73,60 @@ describe("buildAnonymizePayload", () => {
     expect(p.deletedAt.getTime()).toBeLessThanOrEqual(after);
   });
 });
+
+/**
+ * Wächter gegen genau den Fehler, der beim Zwei-Faktor-Block (#59) passiert ist:
+ * Eine neue Spalte in `users` kam dazu, der Export wurde angefasst — die
+ * Anonymisierung nicht. Der bestehende Test blieb grün, weil er nur die Felder
+ * prüfte, die er kannte.
+ *
+ * Dieser Test dreht die Richtung um: Er geht vom SCHEMA aus und verlangt, dass
+ * jede Spalte entweder bewusst aufgeführt ist (erhalten oder nicht-PII) oder im
+ * Anonymisierungs-Payload vorkommt. Eine neue Spalte bricht ihn, bis jemand
+ * entschieden hat, wohin sie gehört.
+ */
+describe("Vollständigkeit gegen das Schema", () => {
+  // Spalten, die eine Löschung bewusst ÜBERLEBEN, je mit Grund.
+  const bewusstErhalten: Record<string, string> = {
+    id: "Primärschlüssel — die Zeile bleibt als Tombstone bestehen",
+    tenantId: "Mandantenzuordnung; ohne sie wäre die Zeile nicht mehr auffindbar",
+    createdAt: "Anlagezeitpunkt ohne Personenbezug nach Anonymisierung",
+    updatedAt: "technischer Zeitstempel",
+    email: "wird durch die Tombstone-Adresse ERSETZT (nicht genullt)",
+    verificationStatus: "wird auf 'pending' zurückgesetzt (nicht genullt)",
+    accountStatus: "wird auf 'deleted' gesetzt",
+    deletedAt: "ist der Nachweis der Löschung",
+    notifyAnliegenUpdates: "Opt-out-Flag ohne Personenbezug; Versand ist über notifyNewPolls=false und account_status gesperrt",
+    notifyReverify: "wie notifyAnliegenUpdates",
+    reverifyReminderSentAt: "Versandmarke ohne Personenbezug",
+  };
+
+  it("führt jede users-Spalte entweder im Payload oder in der Ausnahmeliste", async () => {
+    const { users } = await import("@/db/schema");
+    const payload = buildAnonymizePayload("abcdef01-0000-0000-0000-000000000000");
+    const imPayload = new Set(Object.keys(payload));
+
+    const vergessen = Object.keys(users)
+      // Drizzle hängt an das Tabellenobjekt interne Symbole/Helfer; nur echte
+      // Spalten haben einen `name`.
+      .filter((k) => {
+        const spalte = (users as unknown as Record<string, { name?: string }>)[k];
+        return typeof spalte === "object" && spalte !== null && typeof spalte.name === "string";
+      })
+      .filter((k) => !imPayload.has(k) && !(k in bewusstErhalten));
+
+    expect(
+      vergessen,
+      `Neue users-Spalte(n) ohne Entscheidung zur Löschung: ${vergessen.join(", ")}. ` +
+        "Entweder ins Anonymisierungs-Payload aufnehmen oder mit Begründung in bewusstErhalten eintragen."
+    ).toEqual([]);
+  });
+
+  it("leert die Zwei-Faktor-Felder (#59)", () => {
+    const p = buildAnonymizePayload("abcdef01-0000-0000-0000-000000000000");
+    expect(p.totpSecretEnc).toBeNull();
+    expect(p.totpConfirmedAt).toBeNull();
+    expect(p.totpLastStep).toBeNull();
+    expect(p.totpGraceUntil).toBeNull();
+  });
+});

@@ -91,13 +91,30 @@ describe("Highlight-SoD — Spur nicht überschreibbar (Integration, echte Actio
     reqCtx.cookie = rawToken;
   }
 
+  /**
+   * Admin-Session, wie sie nach einer vollständigen Anmeldung aussieht: mit
+   * bestätigter Zwei-Faktor-Prüfung.
+   *
+   * ZWEI-FAKTOR (#59): Admin-Konten kommen ohne aktives TOTP nicht mehr auf die
+   * Redaktionsfläche (lib/auth/action-context, lib/auth/zwei-faktor). Ohne
+   * `totp_verified_at` an der Session wäre hier nicht die SoD-Spur getestet,
+   * sondern nur noch das Zwei-Faktor-Gate — die Fixture baut die Session deshalb
+   * so, wie sie im Betrieb entsteht (bestätigtes TOTP + Code in dieser Session).
+   * Das GATE wird hier bewusst nicht abgeschwächt.
+   */
   async function makeSession(userId: string): Promise<string> {
     const rawToken = `tok-${nextId()}`;
+    const jetzt = new Date();
+    await db
+      .update(users)
+      .set({ totpSecretEnc: "hlsod-test-secret", totpConfirmedAt: jetzt })
+      .where(eq(users.id, userId));
     await db.insert(sessions).values({
       userId,
       tenantId,
       tokenHash: sha256Hex(rawToken),
       expiresAt: new Date(Date.now() + 3_600_000),
+      totpVerifiedAt: jetzt,
     });
     return rawToken;
   }

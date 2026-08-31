@@ -3,9 +3,15 @@
  * Sitzungen beenden, Konto sperren/entsperren, Offboarding, Sperren per E-Mail.
  *
  * Dünne "use server"-Wrapper (Muster lib/admin/actions.ts): lösen den
- * Auth-Kontext auf (Session-Cookie → Tenant + Caller-UserId + Caller-Rollen),
+ * Auth-Kontext über das ZENTRALE Gate auf (@/lib/auth/action-context),
  * validieren per zod und delegieren in die testbare Kern-Logik
  * (konto-sicherheit-core.ts).
+ *
+ * KEIN EIGENER SESSION-RESOLVER (Gate-B 2026-08-06, BLOCKER): Die frühere lokale
+ * Kopie des Session-Lookups kam an der Zwei-Faktor-Pflicht (#59) vorbei —
+ * ausgerechnet bei `offboarding`/`kontoSperren`, mit denen sich der legitime
+ * Admin entrechten lässt. Wächter:
+ * lib/auth/__tests__/kein-eigener-session-resolver.test.ts.
  *
  * Gate-B: Jede Server Action ist ein eigenständiger Endpoint → prüft Auth +
  * Admin-Rolle + Tenant-Isolierung + Eskalationsgrenze ERNEUT (Defense in Depth;
@@ -14,19 +20,23 @@
  * SIDE-EFFECT-FENCE (Muster Block I): auf dem Demo-Mandanten sind alle
  * Konto-Mutationen gesperrt — der ephemere Demo-Admin darf keine persistenten
  * Konten sperren/offboarden oder deren Sitzungen beenden. Fail-closed.
+ *
+ * ZWEI-FAKTOR-SIGNAL (Review #59, Befund 2): Jede Action reicht das Feld
+ * `zweiFaktor` des Gates UNVERÄNDERT weiter, statt nur `error` zu übernehmen.
+ * Sonst liest der Admin „Diese Aktion verlangt eine frische Bestätigung mit
+ * Ihrem Einmalcode." ohne Link und ohne Knopf — er müsste den Pfad raten. Die
+ * Rollen-Seite rendert daraus components/ZweiFaktorHinweis. An der
+ * Sicherheitslogik ändert die Weitergabe nichts: Das Signal entsteht in den
+ * Gates, hier wird es nur nicht mehr weggeworfen.
  */
 
 "use server";
 
-import { cookies, headers } from "next/headers";
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { createDb, type Db } from "@/db/client";
-import { sessions } from "@/db/schema";
-import { sha256Hex } from "@/lib/auth/crypto";
-import { getTenantFromHost } from "@/lib/tenant";
-import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { getUserRoleTypes } from "@/lib/auth/roles";
+import {
+  requireAdminCtx,
+  requireAdminStepUpCtx,
+} from "@/lib/auth/action-context";
 import { isDemoTenant } from "@/lib/demo/config";
 import {
   sessionsBeendenCore,
@@ -36,48 +46,6 @@ import {
   kontoSperrenPerEmailCore,
   type KontoSicherheitResult,
 } from "@/lib/admin/konto-sicherheit-core";
-
-type AdminAuthContext = {
-  tenant: { id: string; slug: string };
-  userId: string;
-  roleTypes: string[];
-  db: Db;
-};
-
-async function getAdminAuthContext(): Promise<AdminAuthContext | null> {
-  const headerStore = await headers();
-  const host = headerStore.get("host") ?? "localhost";
-  const tenant = await getTenantFromHost(host);
-  if (!tenant) return null;
-
-  const cookieStore = await cookies();
-  const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-  if (!rawToken) return null;
-
-  const tokenHash = sha256Hex(rawToken);
-  const databaseUrl =
-    process.env.DATABASE_URL ??
-    "postgres://partizip:partizip@127.0.0.1:5433/partizip";
-  const db = createDb(databaseUrl);
-
-  const now = new Date();
-  const sessionRows = await db
-    .select()
-    .from(sessions)
-    .where(and(eq(sessions.tokenHash, tokenHash), eq(sessions.tenantId, tenant.id)))
-    .limit(1);
-
-  const session = sessionRows[0];
-  if (!session || session.revokedAt || session.expiresAt < now) return null;
-
-  const roleTypes = await getUserRoleTypes(db, tenant.id, session.userId);
-  return {
-    tenant: { id: tenant.id, slug: tenant.slug },
-    userId: session.userId,
-    roleTypes,
-    db,
-  };
-}
 
 /**
  * SIDE-EFFECT-FENCE (analog DEMO_ROLLEN_GESPERRT in actions.ts): Konto-
@@ -95,8 +63,13 @@ export type KontoSicherheitInput = { targetUserId: string };
 export async function sessionsBeenden(
   rawInput: KontoSicherheitInput,
 ): Promise<KontoSicherheitResult> {
-  const ctx = await getAdminAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // KEIN Step-up: Sitzungen beenden entzieht keine Rechte, sondern verlangt eine
+  // neue Anmeldung — die betroffene Person kommt mit ihrem Magic-Link sofort
+  // wieder herein. Umkehrbar, deshalb reicht das Basis-Gate.
+  const auth = await requireAdminCtx();
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
+  const { ctx } = auth;
+
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_KONTO_GESPERRT };
 
   const parsed = targetSchema.safeParse(rawInput);
@@ -112,8 +85,13 @@ export async function sessionsBeenden(
 export async function kontoSperren(
   rawInput: KontoSicherheitInput,
 ): Promise<KontoSicherheitResult> {
-  const ctx = await getAdminAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // STEP-UP (#59): Sperren nimmt einem Konto SOFORT alle Rollen-Wirkung
+  // (getUserRoleTypes filtert auf account_status='active') — ein übernommenes
+  // Konto könnte damit den legitimen Admin entrechten und allein zurückbleiben.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
+  const { ctx } = auth;
+
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_KONTO_GESPERRT };
 
   const parsed = targetSchema.safeParse(rawInput);
@@ -129,8 +107,17 @@ export async function kontoSperren(
 export async function kontoEntsperren(
   rawInput: KontoSicherheitInput,
 ): Promise<KontoSicherheitResult> {
-  const ctx = await getAdminAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // Step-up (#59): Entsperren wurde zuerst OHNE Step-up gebaut, mit dem Argument,
+  // es sei die wiederherstellende Richtung. Gate-B hat das zu Recht gedreht:
+  // getUserRoleTypes filtert auf account_status='active', ein Entsperren gibt dem
+  // Konto also SCHLAGARTIG alle Rollen zurück — es ist rechtevergebend, genau wie
+  // assignRole. Ein Angreifer mit übernommener Session könnte sonst ein zuvor per
+  // Offboarding gesperrtes Admin-Konto reaktivieren, ohne einen frischen Code zu
+  // liefern. Die Kosten für den legitimen Fall sind sechs Ziffern.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
+  const { ctx } = auth;
+
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_KONTO_GESPERRT };
 
   const parsed = targetSchema.safeParse(rawInput);
@@ -146,8 +133,13 @@ export async function kontoEntsperren(
 export async function offboarding(
   rawInput: KontoSicherheitInput,
 ): Promise<KontoSicherheitResult> {
-  const ctx = await getAdminAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // STEP-UP (#59): Offboarding ENTZIEHT alle Rollen — die Kehrseite von
+  // assignRole, nur in einem Zug. Damit ließe sich der legitime Admin
+  // entrechten; gleiche Schwelle wie revokeRole.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
+  const { ctx } = auth;
+
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_KONTO_GESPERRT };
 
   const parsed = targetSchema.safeParse(rawInput);
@@ -167,8 +159,13 @@ export async function offboarding(
 export async function kontoSperrenPerEmail(
   targetEmail: string,
 ): Promise<KontoSicherheitResult> {
-  const ctx = await getAdminAuthContext();
-  if (!ctx) return { ok: false, error: "Nicht authentifiziert." };
+  // STEP-UP (#59): Dieselbe Wirkung wie kontoSperren, nur über die E-Mail als
+  // Adressierung — sie darf nicht die niedrigere Hürde sein, sonst wäre das
+  // Step-up von kontoSperren über diesen Weg umgehbar.
+  const auth = await requireAdminStepUpCtx();
+  if (!auth.ok) return { ok: false, error: auth.error, zweiFaktor: auth.zweiFaktor };
+  const { ctx } = auth;
+
   if (isDemoTenant(ctx.tenant.slug)) return { ok: false, error: DEMO_KONTO_GESPERRT };
 
   const parsed = z.string().trim().min(1, "Bitte eine E-Mail-Adresse angeben.").max(320)

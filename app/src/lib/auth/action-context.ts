@@ -24,9 +24,17 @@ import { getTenantFromHost, type TenantRow } from "@/lib/tenant";
 import { clientIpFromForwardedFor } from "@/lib/client-ip";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { getStufe } from "@/lib/eligibility/stufe";
-import { getUserRoleTypes, canVerify, isAdmin, isSuperAdmin } from "@/lib/auth/roles";
+import { isDemoTenant } from "@/lib/demo/config";
+import { getUserRoleTypes, canVerify, canRedaktion, isAdmin, isSuperAdmin } from "@/lib/auth/roles";
+import {
+  bewerteZweiFaktor,
+  zugangErlaubt,
+  stepUpErfuellt,
+  type ZweiFaktorLage,
+} from "@/lib/auth/zwei-faktor";
 
 export type UserRow = typeof users.$inferSelect;
+export type SessionRow = typeof sessions.$inferSelect;
 
 /** Standard-DB-URL (lokaler Dev-Fallback); in prod/staging aus der Umgebung. */
 export function databaseUrl(): string {
@@ -42,6 +50,12 @@ export interface OptionalAuthContext {
   /** null bei anonymen Besuchern (keine/ungültige Session). */
   userId: string | null;
   user: UserRow | null;
+  /**
+   * Die gültige Session-Zeile (null bei anonymem Zugriff). Wird für die
+   * Zwei-Faktor-Pflicht gebraucht: `totp_verified_at` hängt an der Session, nicht
+   * am Nutzer — ein zweiter Browser bekommt keinen Freifahrtschein.
+   */
+  session: SessionRow | null;
 }
 
 /** Eingeloggter Kontext (userId garantiert gesetzt) — Rückgabe der require*-Gates. */
@@ -62,7 +76,7 @@ export async function getOptionalAuthContext(): Promise<OptionalAuthContext | nu
 
   const cookieStore = await cookies();
   const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-  if (!rawToken) return { tenant, db, userId: null, user: null };
+  if (!rawToken) return { tenant, db, userId: null, user: null, session: null };
 
   const tokenHash = sha256Hex(rawToken);
   const now = new Date();
@@ -74,7 +88,7 @@ export async function getOptionalAuthContext(): Promise<OptionalAuthContext | nu
 
   const session = sessionRows[0];
   if (!session || session.revokedAt || session.expiresAt < now) {
-    return { tenant, db, userId: null, user: null };
+    return { tenant, db, userId: null, user: null, session: null };
   }
 
   const userRows = await db
@@ -84,8 +98,30 @@ export async function getOptionalAuthContext(): Promise<OptionalAuthContext | nu
     .limit(1);
 
   const user = userRows[0] ?? null;
-  if (!user) return { tenant, db, userId: null, user: null };
-  return { tenant, db, userId: user.id, user };
+  if (!user) return { tenant, db, userId: null, user: null, session: null };
+  return { tenant, db, userId: user.id, user, session };
+}
+
+/**
+ * Ermittelt die Zwei-Faktor-Lage eines Admins (#59).
+ *
+ * REIN LESEND. Vorher schrieb diese Funktion beim ersten Admin-Zugriff eine
+ * Kulanzfrist — Gate-B hat gezeigt, warum das falsch war: Wer nur Server Actions
+ * aufruft, kam nie hier vorbei, behielt `totp_grace_until = NULL` und war damit
+ * dauerhaft von der Pflicht befreit. Die Frist trägt jetzt Migration 0040 einmalig
+ * für die zum Rollout vorhandenen Admins ein; zur Laufzeit setzt sie niemand mehr.
+ */
+export function zweiFaktorLage(
+  ctx: OptionalAuthContext,
+  istAdmin: boolean
+): ZweiFaktorLage {
+  if (!ctx.user || !ctx.session) return { status: "nicht_noetig" };
+  return bewerteZweiFaktor({
+    istAdmin,
+    user: ctx.user,
+    session: ctx.session,
+    demoMandant: isDemoTenant(ctx.tenant.slug),
+  });
 }
 
 /**
@@ -116,37 +152,156 @@ export async function requireStufe1Ctx(): Promise<
   return { ok: true, ctx: { ...ctx, userId: ctx.userId } };
 }
 
-/** Verlangt einen eingeloggten canVerify-Caller (verifier/admin), tenant-scoped. */
+/**
+ * Verlangt einen eingeloggten canVerify-Caller (verifier/admin), tenant-scoped.
+ *
+ * ZWEI-FAKTOR (#59, Gate-B 2026-08-05): Die Pflicht gilt für ADMINS, nicht für
+ * reine Verifizierer — die sitzen im Bürgerbüro und sollen nicht zwingend eine
+ * Authenticator-App brauchen. Ist der Aufrufer aber Admin, gilt sie auch hier.
+ * Sonst bliebe eine Umgehung offen: Ein Admin, der über die Zwei-Faktor-Pflicht
+ * aus /admin ausgesperrt ist, könnte weiterhin Wohnsitz-Verifizierungen vergeben
+ * — also Stufe-2-Stimmrecht erzeugen.
+ */
 export async function requireVerifierCtx(): Promise<
   | { ok: true; ctx: AuthedContext }
-  | { ok: false; error: string }
+  | { ok: false; error: string; zweiFaktor?: ZweiFaktorBedarf }
 > {
   const ctx = await getOptionalAuthContext();
   if (!ctx) return { ok: false, error: "Diese Seite ist nicht erreichbar." };
   if (!ctx.userId) return { ok: false, error: "Nicht authentifiziert." };
-  const allowed = canVerify(await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId));
-  if (!allowed) {
+  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
+  if (!canVerify(roleTypes)) {
     return {
       ok: false,
       error: "Keine Berechtigung (verifier, kommune_admin oder super_admin erforderlich).",
     };
   }
+  if (isAdmin(roleTypes)) {
+    const sperre = zweiFaktorSperre(ctx, true);
+    if (sperre) return sperre;
+  }
   return { ok: true, ctx: { ...ctx, userId: ctx.userId } };
 }
 
-/** Verlangt einen eingeloggten Admin-Caller (kommune_admin/super_admin), tenant-scoped. */
-export async function requireAdminCtx(): Promise<
+/**
+ * Verlangt einen eingeloggten canRedaktion-Caller (redakteur/admin), tenant-scoped.
+ *
+ * WARUM EIGENES GATE UND NICHT requireAdminCtx: Die Digest-Redaktion ist die
+ * Prüfseite des Vier-Augen-Prinzips — Redakteure prüfen Aussagen, Admins geben
+ * frei. Sie durch requireAdminCtx zu schicken, hätte Redakteure ausgesperrt und
+ * damit das Prinzip an der Wurzel gekappt.
+ *
+ * Zwei-Faktor greift wie bei requireVerifierCtx: nur, wenn der Aufrufer Admin
+ * ist. Ein reiner Redakteur fällt nicht unter die Pflicht aus #59.
+ */
+export async function requireRedaktionCtx(): Promise<
   | { ok: true; ctx: AuthedContext }
-  | { ok: false; error: string }
+  | { ok: false; error: string; zweiFaktor?: ZweiFaktorBedarf }
 > {
   const ctx = await getOptionalAuthContext();
   if (!ctx) return { ok: false, error: "Diese Seite ist nicht erreichbar." };
   if (!ctx.userId) return { ok: false, error: "Nicht authentifiziert." };
-  const admin = isAdmin(await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId));
-  if (!admin) {
-    return { ok: false, error: "Keine Berechtigung (kommune_admin oder super_admin erforderlich)." };
+  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
+  if (!canRedaktion(roleTypes)) {
+    return { ok: false, error: "Keine Berechtigung (Redakteur oder Admin erforderlich)." };
+  }
+  if (isAdmin(roleTypes)) {
+    const sperre = zweiFaktorSperre(ctx, true);
+    if (sperre) return sperre;
   }
   return { ok: true, ctx: { ...ctx, userId: ctx.userId } };
+}
+
+/**
+ * Signal für die aufrufende Fläche, dass nicht die Berechtigung fehlt, sondern
+ * der zweite Faktor. UI und Seiten leiten darauf gezielt weiter, statt einen
+ * unspezifischen Berechtigungsfehler anzuzeigen.
+ */
+export type ZweiFaktorBedarf = "code" | "einrichten";
+
+/** Admin-Kontext mit den serverseitig geladenen Rollen des Aufrufers. */
+export type AdminContext = AuthedContext & { roleTypes: string[] };
+
+/**
+ * Gemeinsame Auswertung: Blockiert die Zwei-Faktor-Lage den Zugriff? Gibt bei
+ * Blockade das fertige Fehlerobjekt zurück, sonst null.
+ */
+function zweiFaktorSperre(
+  ctx: OptionalAuthContext,
+  istAdmin: boolean
+): { ok: false; error: string; zweiFaktor: ZweiFaktorBedarf } | null {
+  const lage = zweiFaktorLage(ctx, istAdmin);
+  if (zugangErlaubt(lage)) return null;
+  return lage.status === "code_faellig"
+    ? { ok: false, error: "Zwei-Faktor-Bestätigung erforderlich.", zweiFaktor: "code" }
+    : {
+        ok: false,
+        error: "Zwei-Faktor-Authentisierung muss für Admin-Konten eingerichtet werden.",
+        zweiFaktor: "einrichten",
+      };
+}
+
+/**
+ * Verlangt einen eingeloggten Admin-Caller (kommune_admin/super_admin), tenant-scoped.
+ *
+ * Gibt die geladenen `roleTypes` mit zurück, damit Actions, die sie brauchen,
+ * KEINEN eigenen Session-Resolver mehr bauen müssen. Genau solche Duplikate
+ * waren der Gate-B-BLOCKER: Sie sahen aus wie Autorisierung, kannten die
+ * Zwei-Faktor-Pflicht aber nicht.
+ */
+export async function requireAdminCtx(): Promise<
+  | { ok: true; ctx: AdminContext }
+  | { ok: false; error: string; zweiFaktor?: ZweiFaktorBedarf }
+> {
+  const ctx = await getOptionalAuthContext();
+  if (!ctx) return { ok: false, error: "Diese Seite ist nicht erreichbar." };
+  if (!ctx.userId) return { ok: false, error: "Nicht authentifiziert." };
+  const roleTypes = await getUserRoleTypes(ctx.db, ctx.tenant.id, ctx.userId);
+  if (!isAdmin(roleTypes)) {
+    return { ok: false, error: "Keine Berechtigung (kommune_admin oder super_admin erforderlich)." };
+  }
+  const sperre = zweiFaktorSperre(ctx, true);
+  if (sperre) return sperre;
+  return { ok: true, ctx: { ...ctx, userId: ctx.userId, roleTypes } };
+}
+
+
+/**
+ * Wie requireAdminCtx, verlangt zusätzlich eine FRISCHE TOTP-Prüfung (Step-up).
+ *
+ * Für Aktionen, deren Folgen sich nicht zurücknehmen lassen — Owner-Entscheid
+ * 2026-08-05: Rollenvergabe sowie Veröffentlichen/Freigeben. Rollenvergabe ist
+ * dabei der wichtigste Fall: Über sie könnte ein übernommenes Konto sich selbst
+ * dauerhaft festsetzen.
+ */
+export async function requireAdminStepUpCtx(): Promise<
+  | { ok: true; ctx: AdminContext }
+  | { ok: false; error: string; zweiFaktor?: ZweiFaktorBedarf }
+> {
+  const basis = await requireAdminCtx();
+  if (!basis.ok) return basis;
+  const { ctx } = basis;
+  if (!ctx.user || !ctx.session) {
+    return { ok: false, error: "Nicht authentifiziert." };
+  }
+  if (
+    !stepUpErfuellt({
+      user: ctx.user,
+      session: ctx.session,
+      demoMandant: isDemoTenant(ctx.tenant.slug),
+    })
+  ) {
+    // Ohne aktives TOTP ist Step-up grundsätzlich nicht erfüllbar — dann fehlt
+    // die Einrichtung, nicht der Code.
+    const bedarf: ZweiFaktorBedarf =
+      ctx.user.totpSecretEnc && ctx.user.totpConfirmedAt ? "code" : "einrichten";
+    return {
+      ok: false,
+      error: "Diese Aktion verlangt eine frische Bestätigung mit Ihrem Einmalcode.",
+      zweiFaktor: bedarf,
+    };
+  }
+  return basis;
 }
 
 /**
@@ -166,7 +321,7 @@ export async function requireAdminCtx(): Promise<
  */
 export async function requireSuperAdminCtx(): Promise<
   | { ok: true; ctx: AuthedContext }
-  | { ok: false; error: string }
+  | { ok: false; error: string; zweiFaktor?: ZweiFaktorBedarf }
 > {
   const ctx = await getOptionalAuthContext();
   if (!ctx) return { ok: false, error: "Diese Seite ist nicht erreichbar." };
@@ -175,5 +330,7 @@ export async function requireSuperAdminCtx(): Promise<
   if (!superAdmin) {
     return { ok: false, error: "Keine Berechtigung (super_admin erforderlich)." };
   }
+  const sperre = zweiFaktorSperre(ctx, true);
+  if (sperre) return sperre;
   return { ok: true, ctx: { ...ctx, userId: ctx.userId } };
 }

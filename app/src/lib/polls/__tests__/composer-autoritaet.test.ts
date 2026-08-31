@@ -158,11 +158,21 @@ describe("composer-autoritaet (Integration, echte Actions)", () => {
       .returning();
     await db.insert(roles).values({ tenantId, userId: u.id, roleType, regionId });
     const raw = `tok-${key}-${Date.now()}-${++counter}`;
+    const jetzt = new Date();
+    // Zwei-Faktor (#59): Die Fixture baut die Session so, wie sie im Betrieb
+    // entsteht — bestätigtes TOTP am Konto und ein in DIESER Session gelieferter
+    // Code. Ohne das griffe hier nicht der geprüfte Ablauf, sondern nur das
+    // Zwei-Faktor-Gate. Das Gate wird bewusst nicht abgeschwächt.
+    await db
+      .update(users)
+      .set({ totpSecretEnc: "composer-test-secret", totpConfirmedAt: jetzt })
+      .where(eq(users.id, u.id));
     await db.insert(sessions).values({
       tenantId,
       userId: u.id,
       tokenHash: sha256Hex(raw),
       expiresAt: new Date(Date.now() + 3_600_000),
+      totpVerifiedAt: jetzt,
     });
     tokens[key] = raw;
     return u.id;

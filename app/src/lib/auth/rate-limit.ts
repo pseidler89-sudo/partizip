@@ -259,3 +259,101 @@ async function writeEmailChangeRateLimitAudit(
     metadata: { dimension },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Block #59 — Zwei-Faktor: eigener Rate-Limit-Scope für Code-Versuche
+//
+// Warum das hier zwingend ist: Ein sechsstelliger Code hat 10^6 Möglichkeiten,
+// und wegen der Drift-Toleranz sind zu jedem Zeitpunkt drei davon gültig. Ohne
+// Deckel ließe sich der zweite Faktor mit genügend Versuchen einfach erraten.
+// Mit 5 Versuchen je 15 Minuten liegt die Trefferwahrscheinlichkeit unter
+// 1 : 66.000 pro Fenster — und jeder Fehlversuch ist im Protokoll sichtbar.
+//
+// Der Scope hängt am NUTZER, nicht an der E-Mail: Wer den Code rät, ist bereits
+// eingeloggt (erster Faktor bestanden). Zusätzlich ein IP-Scope gegen breit
+// gestreute Versuche über viele Konten.
+// ---------------------------------------------------------------------------
+
+const TOTP_WINDOW_MIN = 15;
+const TOTP_USER_MAX = 5;
+const TOTP_IP_MAX = 20;
+
+export type TotpRateLimitResult =
+  | { allowed: true }
+  | { allowed: false; reason: "user" | "ip" };
+
+/** Schreibt die Rate-Limit-Events für einen TOTP-Versuch (vor der Prüfung). */
+export async function writeTotpRateLimitEvents(
+  db: Db,
+  opts: { tenantId: string; userId: string; ipAddress: string | null }
+): Promise<void> {
+  const toInsert: Array<{ scope: string; keyHash: string }> = [
+    { scope: "totp_user", keyHash: hmacRateLimit(`${opts.tenantId}:totp:${opts.userId}`) },
+  ];
+  if (opts.ipAddress) {
+    toInsert.push({ scope: "totp_ip", keyHash: hmacRateLimit(opts.ipAddress) });
+  }
+  await db.insert(rateLimitEvents).values(toInsert);
+}
+
+/**
+ * Prüft die TOTP-Versuchsgrenzen. Muss NACH writeTotpRateLimitEvents laufen.
+ * Anders als beim Login wird die Überschreitung dem Nutzer gezeigt — hier gibt
+ * es nichts zu enumerieren, und ein stiller Fehlschlag würde den Admin nur in
+ * die Irre führen.
+ */
+export async function checkTotpRateLimit(
+  db: Db,
+  opts: { tenantId: string; userId: string; ipAddress: string | null }
+): Promise<TotpRateLimitResult> {
+  const since = new Date(Date.now() - TOTP_WINDOW_MIN * 60 * 1000);
+
+  const userRows = await db
+    .select({ n: count() })
+    .from(rateLimitEvents)
+    .where(
+      and(
+        eq(rateLimitEvents.scope, "totp_user"),
+        eq(rateLimitEvents.keyHash, hmacRateLimit(`${opts.tenantId}:totp:${opts.userId}`)),
+        gt(rateLimitEvents.createdAt, since)
+      )
+    );
+  if ((userRows[0]?.n ?? 0) > TOTP_USER_MAX) {
+    await writeTotpRateLimitAudit(db, opts.tenantId, opts.userId, "user");
+    return { allowed: false, reason: "user" };
+  }
+
+  if (opts.ipAddress) {
+    const ipRows = await db
+      .select({ n: count() })
+      .from(rateLimitEvents)
+      .where(
+        and(
+          eq(rateLimitEvents.scope, "totp_ip"),
+          eq(rateLimitEvents.keyHash, hmacRateLimit(opts.ipAddress)),
+          gt(rateLimitEvents.createdAt, since)
+        )
+      );
+    if ((ipRows[0]?.n ?? 0) > TOTP_IP_MAX) {
+      await writeTotpRateLimitAudit(db, opts.tenantId, opts.userId, "ip");
+      return { allowed: false, reason: "ip" };
+    }
+  }
+
+  return { allowed: true };
+}
+
+async function writeTotpRateLimitAudit(
+  db: Db,
+  tenantId: string,
+  actorRef: string | null,
+  dimension: "user" | "ip"
+): Promise<void> {
+  await db.insert(auditEvents).values({
+    tenantId,
+    actorType: "user",
+    actorRef,
+    action: "auth.totp_rate_limited",
+    metadata: { dimension },
+  });
+}

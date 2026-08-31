@@ -182,6 +182,103 @@ export async function sendInteressentNotification(lead: {
   });
 }
 
+/**
+ * #59 (Befund 3): Sicherheits-Info-Mail an die KONTOADRESSE, wenn sich der
+ * zweite Faktor ändert.
+ *
+ * WOZU: Wer ein E-Mail-Postfach übernimmt, BEVOR das Opfer die Zwei-Faktor-
+ * Anmeldung eingerichtet hat, kann seinen eigenen Authenticator an das fremde
+ * Konto binden — ohne diese Mail merkt das Opfer es erst, wenn es selbst nicht
+ * mehr hineinkommt. Die Mail macht die Übernahme wenigstens sichtbar.
+ *
+ * INHALT (bindend): WAS ist passiert und WANN, plus die Bitte, sich sofort zu
+ * melden. KEINE Codes, KEIN Secret, KEIN Link, der etwas auslöst — sonst wäre
+ * die Warnung selbst ein Angriffswerkzeug. Der einzige Verweis ist ein mailto:
+ * an den Betreiber (wie bei sendEmailChangedInfoEmail).
+ */
+export type ZweiFaktorEreignis =
+  /** Erstmalige Aktivierung (bestaetigeEinrichtung). */
+  | "aktiviert"
+  /** Ein Wiederherstellungscode wurde eingelöst. */
+  | "wiederherstellungscode"
+  /** Gerätewechsel: alter Faktor entfernt, Neu-Einrichtung steht an. */
+  | "neu_eingerichtet";
+
+const ZWEI_FAKTOR_EREIGNISSE: Record<ZweiFaktorEreignis, { betreff: string; was: string }> = {
+  aktiviert: {
+    betreff: "Zwei-Faktor-Anmeldung für Ihr Partizip-Konto aktiviert",
+    was: "für Ihr Partizip-Konto wurde die Zwei-Faktor-Anmeldung eingerichtet und aktiviert. Ab sofort wird bei der Anmeldung zusätzlich ein Einmalcode aus Ihrer Authenticator-App verlangt.",
+  },
+  wiederherstellungscode: {
+    betreff: "Wiederherstellungscode Ihres Partizip-Kontos verwendet",
+    was: "für Ihr Partizip-Konto wurde einer Ihrer Wiederherstellungscodes für die Zwei-Faktor-Anmeldung eingelöst. Dieser Code ist damit verbraucht.",
+  },
+  neu_eingerichtet: {
+    betreff: "Zwei-Faktor-Anmeldung Ihres Partizip-Kontos zurückgesetzt",
+    was: "die Zwei-Faktor-Anmeldung Ihres Partizip-Kontos wurde zurückgesetzt, um sie auf einem neuen Gerät einzurichten. Ihre bisherigen Wiederherstellungscodes sind damit ungültig; bis zur erneuten Einrichtung ist kein zweiter Faktor aktiv.",
+  },
+};
+
+/** Zeitpunkt in deutscher Schreibweise, immer Europe/Berlin (Serverzeit egal). */
+function zeitpunktBerlin(zeitpunkt: Date): string {
+  return `${new Intl.DateTimeFormat("de-DE", {
+    dateStyle: "long",
+    timeStyle: "short",
+    timeZone: "Europe/Berlin",
+  }).format(zeitpunkt)} Uhr`;
+}
+
+/**
+ * Baut Betreff und Text der Benachrichtigung. Bewusst als reine Funktion
+ * exportiert: So lässt sich in den Tests ohne SMTP prüfen, dass weder Codes noch
+ * Secrets darin landen können — im Versand kommen sie gar nicht erst vor.
+ */
+export function zweiFaktorAenderungInhalt(
+  ereignis: ZweiFaktorEreignis,
+  zeitpunkt: Date,
+  kontaktEmail: string,
+): { betreff: string; text: string; html: string } {
+  const { betreff, was } = ZWEI_FAKTOR_EREIGNISSE[ereignis];
+  const wann = zeitpunktBerlin(zeitpunkt);
+  const warnung = `Waren Sie das nicht, wenden Sie sich bitte umgehend an ${kontaktEmail} (oder antworten Sie auf diese E-Mail) — dann versucht möglicherweise jemand anderes, Zugriff auf Ihr Konto zu erlangen.`;
+
+  return {
+    betreff,
+    text: `Guten Tag,\n\n${was}\n\nZeitpunkt: ${wann}\n\n${warnung}\n\nDiese E-Mail enthält bewusst keine Codes und keinen Link — Sie müssen nichts tun, wenn die Änderung von Ihnen stammt.`,
+    html: `
+      <p>Guten Tag,</p>
+      <p>${was}</p>
+      <p><strong>Zeitpunkt:</strong> ${wann}</p>
+      <p style="color:#6b7280;font-size:14px;">Waren Sie das nicht, wenden Sie sich bitte umgehend an <a href="mailto:${kontaktEmail}">${kontaktEmail}</a> (oder antworten Sie auf diese E-Mail) — dann versucht möglicherweise jemand anderes, Zugriff auf Ihr Konto zu erlangen.</p>
+      <p style="color:#6b7280;font-size:14px;">Diese E-Mail enthält bewusst keine Codes und keinen Link — Sie müssen nichts tun, wenn die Änderung von Ihnen stammt.</p>
+    `,
+  };
+}
+
+/**
+ * Versendet die Benachrichtigung an die Kontoadresse. Aufrufer behandeln den
+ * Versand BEST EFFORT (try/catch): Eine fehlgeschlagene Info-Mail darf die
+ * Sicherheitsaktion selbst nicht scheitern lassen.
+ */
+export async function sendZweiFaktorAenderungEmail(
+  email: string,
+  ereignis: ZweiFaktorEreignis,
+  zeitpunkt: Date,
+  kontaktEmail: string,
+): Promise<void> {
+  const { betreff, text, html } = zweiFaktorAenderungInhalt(ereignis, zeitpunkt, kontaktEmail);
+  const transport = createTransport();
+
+  await transport.sendMail({
+    from: EMAIL_FROM,
+    to: email,
+    replyTo: kontaktEmail,
+    subject: betreff,
+    text,
+    html,
+  });
+}
+
 export async function sendRegistrationHintEmail(email: string): Promise<void> {
   // Wird gesendet wenn User nicht existiert aber minAgeConfirmed NICHT mitgesandt wurde.
   // Neutral formuliert — kein User-Enumeration-Leak (gleiche Antwort nach außen).

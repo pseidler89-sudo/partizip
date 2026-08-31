@@ -18,6 +18,11 @@ import {
   setAlleStatementsGeprueft,
   setStatementHighlight,
 } from "@/lib/digest/actions";
+// #59: Freigeben/Veröffentlichen verlangen ein Step-up (frische Bestätigung mit
+// dem Einmalcode). Läuft es während der Redaktionsarbeit ab, trägt das
+// Action-Ergebnis ein `zweiFaktor`-Feld — der Hinweis macht daraus den Weg
+// zurück in die Bestätigung. Ohne das Feld rendert er nichts.
+import ZweiFaktorHinweis, { type ZweiFaktorErgebnis } from "@/components/ZweiFaktorHinweis";
 import BestaetigungsDialog from "../../../BestaetigungsDialog";
 
 interface Props {
@@ -57,6 +62,10 @@ export function DigestActionButtons({
   statementHighlight,
 }: Props) {
   const [error, setError] = useState<string | null>(null);
+  // Letztes Action-Ergebnis, nur für den Zwei-Faktor-Hinweis. Wird bei jedem
+  // neuen Versuch zusammen mit `error` zurückgesetzt, damit der Hinweis nicht
+  // stehen bleibt, nachdem die Bestätigung nachgeholt wurde.
+  const [ergebnis, setErgebnis] = useState<ZweiFaktorErgebnis | null>(null);
   const [isPending, startTransition] = useTransition();
   // Block E: Bestätigung vor Freigabe/Veröffentlichung (Veröffentlichen postet
   // unwiderruflich auf die öffentlichen Kanäle — Fediverse/Bluesky).
@@ -69,55 +78,64 @@ export function DigestActionButtons({
   if (statementId !== undefined) {
     async function handleToggleGeprueft() {
       setError(null);
+      setErgebnis(null);
       startTransition(async () => {
         const result = await setStatementGeprueft(statementId!, !(statementGeprueft ?? false));
         if (result.ok) {
           router.refresh();
         } else {
           setError(result.error ?? "Unbekannter Fehler");
+          setErgebnis(result);
         }
       });
     }
 
     async function handleToggleHighlight() {
       setError(null);
+      setErgebnis(null);
       startTransition(async () => {
         const result = await setStatementHighlight(statementId!, !(statementHighlight ?? false));
         if (result.ok) {
           router.refresh();
         } else {
           setError(result.error ?? "Unbekannter Fehler");
+          setErgebnis(result);
         }
       });
     }
 
     return (
-      <div className="flex items-center gap-1.5 shrink-0">
-        <button
-          onClick={handleToggleGeprueft}
-          disabled={isPending}
-          title={statementGeprueft ? "Als ungeprüft markieren" : "Als quellen-geprüft markieren"}
-          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
-            statementGeprueft
-              ? "pz-badge-success hover:opacity-80"
-              : "pz-badge-neutral hover:opacity-80"
-          }`}
-        >
-          ✓ {statementGeprueft ? "Geprüft" : "Prüfen"}
-        </button>
-        <button
-          onClick={handleToggleHighlight}
-          disabled={isPending}
-          title={statementHighlight ? "Highlight entfernen" : "Als Highlight markieren"}
-          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
-            statementHighlight
-              ? "pz-badge-warning hover:opacity-80"
-              : "pz-badge-neutral hover:opacity-80"
-          }`}
-        >
-          {statementHighlight ? "★ Highlight" : "☆ Als Highlight"}
-        </button>
-        {error && <span className="text-xs text-red-600 ml-1">{error}</span>}
+      // Der Hinweis ist ein Block und darf die schmale Aktionsspalte neben dem
+      // Aussagentext nicht sprengen — daher max-w-xs statt voller Breite.
+      <div className="shrink-0 max-w-xs">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleToggleGeprueft}
+            disabled={isPending}
+            title={statementGeprueft ? "Als ungeprüft markieren" : "Als quellen-geprüft markieren"}
+            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+              statementGeprueft
+                ? "pz-badge-success hover:opacity-80"
+                : "pz-badge-neutral hover:opacity-80"
+            }`}
+          >
+            ✓ {statementGeprueft ? "Geprüft" : "Prüfen"}
+          </button>
+          <button
+            onClick={handleToggleHighlight}
+            disabled={isPending}
+            title={statementHighlight ? "Highlight entfernen" : "Als Highlight markieren"}
+            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+              statementHighlight
+                ? "pz-badge-warning hover:opacity-80"
+                : "pz-badge-neutral hover:opacity-80"
+            }`}
+          >
+            {statementHighlight ? "★ Highlight" : "☆ Als Highlight"}
+          </button>
+          {error && <span className="text-xs text-red-600 ml-1">{error}</span>}
+        </div>
+        <ZweiFaktorHinweis ergebnis={ergebnis} />
       </div>
     );
   }
@@ -130,28 +148,33 @@ export function DigestActionButtons({
 
     async function handleAlleGeprueft() {
       setError(null);
+      setErgebnis(null);
       startTransition(async () => {
         const result = await setAlleStatementsGeprueft(digestId);
         if (result.ok) {
           router.refresh();
         } else {
           setError(result.error ?? "Unbekannter Fehler");
+          setErgebnis(result);
         }
       });
     }
 
     return (
-      <div className="flex items-center gap-2">
-        {!alleGeprueft && (
-          <button
-            onClick={handleAlleGeprueft}
-            disabled={isPending}
-            className="pz-btn pz-btn-primary pz-btn-sm"
-          >
-            {isPending ? "Wird gespeichert…" : "Alle als geprüft markieren"}
-          </button>
-        )}
-        {error && <span className="text-xs text-red-600">{error}</span>}
+      <div>
+        <div className="flex items-center gap-2">
+          {!alleGeprueft && (
+            <button
+              onClick={handleAlleGeprueft}
+              disabled={isPending}
+              className="pz-btn pz-btn-primary pz-btn-sm"
+            >
+              {isPending ? "Wird gespeichert…" : "Alle als geprüft markieren"}
+            </button>
+          )}
+          {error && <span className="text-xs text-red-600">{error}</span>}
+        </div>
+        <ZweiFaktorHinweis ergebnis={ergebnis} />
       </div>
     );
   }
@@ -163,6 +186,7 @@ export function DigestActionButtons({
     if (!confirmAktion) return;
     const aktion = confirmAktion;
     setError(null);
+    setErgebnis(null);
     startTransition(async () => {
       const result =
         aktion === "freigeben" ? await freigeben(digestId) : await veroeffentlichen(digestId);
@@ -171,6 +195,11 @@ export function DigestActionButtons({
         router.refresh();
       } else {
         setError(result.error ?? "Unbekannter Fehler");
+        // #59: Fehlt der zweite Faktor, hängt am Ergebnis der Weg zur
+        // Bestätigung. Den Dialog dafür schließen — der Hinweis steht darunter
+        // auf der Seite und wäre hinter dem Overlay sonst unerreichbar.
+        setErgebnis(result);
+        if (result.zweiFaktor) setConfirmAktion(null);
       }
     });
   }
@@ -195,51 +224,57 @@ export function DigestActionButtons({
   }
 
   return (
-    <div className="flex flex-wrap gap-3 items-center">
-      {status === "entwurf" && (
-        <>
+    <div>
+      <div className="flex flex-wrap gap-3 items-center">
+        {status === "entwurf" && (
+          <>
+            <button
+              onClick={() => setConfirmAktion("freigeben")}
+              disabled={isPending || !alleGeprueft || sodGesperrt}
+              title={
+                sodGesperrt
+                  ? "Vier-Augen-Prinzip: Freigabe durch eine zweite Person"
+                  : !alleGeprueft
+                    ? `Freigabe erst möglich, wenn alle Aussagen geprüft sind (${geprueftAnzahl} von ${gesamtAnzahl} geprüft)`
+                    : "Digest freigeben"
+              }
+              className="rounded-md bg-[color:var(--pz-brand)] px-4 py-2 text-sm font-medium text-white hover:bg-[color:var(--pz-brand-strong)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isPending ? "Wird gespeichert…" : "Freigeben"}
+            </button>
+            {!alleGeprueft && gesamtAnzahl > 0 && (
+              <p className="text-xs text-amber-700">
+                Freigabe erst möglich, wenn alle Aussagen quellen-geprüft sind ({geprueftAnzahl} von {gesamtAnzahl} geprüft).
+              </p>
+            )}
+            {alleGeprueft && sodGesperrt && (
+              <p className="text-xs text-amber-700">
+                <strong>Vier-Augen-Prinzip:</strong> Sie haben Aussagen dieses Digests
+                selbst quellen-geprüft. Die Freigabe muss durch eine zweite Person
+                erfolgen.
+              </p>
+            )}
+          </>
+        )}
+
+        {status === "freigegeben" && (
           <button
-            onClick={() => setConfirmAktion("freigeben")}
-            disabled={isPending || !alleGeprueft || sodGesperrt}
-            title={
-              sodGesperrt
-                ? "Vier-Augen-Prinzip: Freigabe durch eine zweite Person"
-                : !alleGeprueft
-                  ? `Freigabe erst möglich, wenn alle Aussagen geprüft sind (${geprueftAnzahl} von ${gesamtAnzahl} geprüft)`
-                  : "Digest freigeben"
-            }
-            className="rounded-md bg-[color:var(--pz-brand)] px-4 py-2 text-sm font-medium text-white hover:bg-[color:var(--pz-brand-strong)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            onClick={() => setConfirmAktion("veroeffentlichen")}
+            disabled={isPending}
+            className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
           >
-            {isPending ? "Wird gespeichert…" : "Freigeben"}
+            {isPending ? "Wird gespeichert…" : "Veröffentlichen"}
           </button>
-          {!alleGeprueft && gesamtAnzahl > 0 && (
-            <p className="text-xs text-amber-700">
-              Freigabe erst möglich, wenn alle Aussagen quellen-geprüft sind ({geprueftAnzahl} von {gesamtAnzahl} geprüft).
-            </p>
-          )}
-          {alleGeprueft && sodGesperrt && (
-            <p className="text-xs text-amber-700">
-              <strong>Vier-Augen-Prinzip:</strong> Sie haben Aussagen dieses Digests
-              selbst quellen-geprüft. Die Freigabe muss durch eine zweite Person
-              erfolgen.
-            </p>
-          )}
-        </>
-      )}
+        )}
 
-      {status === "freigegeben" && (
-        <button
-          onClick={() => setConfirmAktion("veroeffentlichen")}
-          disabled={isPending}
-          className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
-        >
-          {isPending ? "Wird gespeichert…" : "Veröffentlichen"}
-        </button>
-      )}
+        {error && (
+          <p className="text-sm text-red-600">{error}</p>
+        )}
+      </div>
 
-      {error && (
-        <p className="text-sm text-red-600">{error}</p>
-      )}
+      {/* Ergänzt die Fehlermeldung um den Weg zur Bestätigung; bringt seine
+          eigene role="alert"-Region mit und rendert ohne Feld nichts. */}
+      <ZweiFaktorHinweis ergebnis={ergebnis} />
 
       <BestaetigungsDialog
         offen={confirmAktion !== null}

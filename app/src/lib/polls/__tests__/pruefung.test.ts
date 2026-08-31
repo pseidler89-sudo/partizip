@@ -105,11 +105,21 @@ describe("polls/pruefung (Block L, Integration echte Actions)", () => {
 
   async function loginAls(userId: string) {
     const rawToken = `tok-${Date.now()}-${++counter}`;
+    const jetzt = new Date();
+    // Zwei-Faktor (#59): Die Fixture baut die Session so, wie sie im Betrieb
+    // entsteht — bestätigtes TOTP am Konto und ein in DIESER Session gelieferter
+    // Code. Ohne das griffe hier nicht der geprüfte Ablauf, sondern nur das
+    // Zwei-Faktor-Gate. Das Gate wird bewusst nicht abgeschwächt.
+    await db
+      .update(users)
+      .set({ totpSecretEnc: "pruefung-test-secret", totpConfirmedAt: jetzt })
+      .where(eq(users.id, userId));
     await db.insert(sessions).values({
       tenantId,
       userId,
       tokenHash: sha256Hex(rawToken),
       expiresAt: new Date(Date.now() + 3_600_000),
+      totpVerifiedAt: jetzt,
     });
     mockSessionToken = rawToken;
   }

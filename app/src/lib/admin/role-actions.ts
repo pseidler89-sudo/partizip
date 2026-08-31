@@ -24,6 +24,7 @@
 
 import { and, eq, count, ne, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
+import type { ZweiFaktorBedarf } from "@/lib/auth/action-context";
 import { users, roles, auditEvents } from "@/db/schema";
 import {
   ADMIN_ROLES,
@@ -38,7 +39,22 @@ import { identitaetPiiEntfernenWennKeinRollentraeger } from "@/lib/identity/pii-
 
 type ScopeLevel = "ortsteil" | "stadt" | "kreis" | "land";
 
-export type RoleActionResult = { ok: boolean; error?: string; message?: string };
+export type RoleActionResult = {
+  ok: boolean;
+  error?: string;
+  message?: string;
+  /**
+   * #59: Gesetzt, wenn nicht die BERECHTIGUNG fehlt, sondern der zweite Faktor —
+   * die Kern-Logik hier setzt es nie, die Server-Action-Wrapper reichen es aus
+   * dem Gate (requireAdminStepUpCtx) durch. Optional, damit bestehende Aufrufer
+   * und Tests unverändert bleiben; die UI rendert daraus über
+   * components/ZweiFaktorHinweis den Weg zur Bestätigung.
+   *
+   * Nur ein TYP-Import — `action-context` ist ein Server-Modul; `import type`
+   * wird restlos wegkompiliert und hält den Bedarfs-Typ an einer Stelle.
+   */
+  zweiFaktor?: ZweiFaktorBedarf;
+};
 
 export interface AssignRoleInput {
   targetEmail: string;

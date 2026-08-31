@@ -33,6 +33,11 @@ import { regionTypLabel } from "@/lib/region/ebenen";
 // reine, zeitstabil getestete Funktion (Gate-B-Fund: MS-Division machte den
 // „heute"-Zweig unerreichbar).
 import { zuletztAktivLabel } from "@/lib/format/zuletzt-aktiv";
+// #59: Rollenvergabe/-entzug verlangen ein Step-up (frische Bestätigung mit dem
+// Einmalcode). Läuft die Frist mitten in der Arbeit ab, trägt das Action-Ergebnis
+// ein `zweiFaktor`-Feld — der Hinweis macht daraus den Weg zurück in die
+// Bestätigung. Ohne das Feld rendert er nichts.
+import ZweiFaktorHinweis, { type ZweiFaktorErgebnis } from "@/components/ZweiFaktorHinweis";
 import BestaetigungsDialog from "../../BestaetigungsDialog";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -102,18 +107,26 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
   const [targetEmail, setTargetEmail] = useState("");
   const [roleType, setRoleType] = useState(erlaubteRollen[0] ?? "user");
   const [scopeLevel, setScopeLevel] = useState<ScopeLevel>("stadt");
-  const [formMsg, setFormMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [formMsg, setFormMsg] = useState<
+    ({ ok: boolean; text: string } & ZweiFaktorErgebnis) | null
+  >(null);
 
   // Entzug-State (welche Rolle wird gerade entzogen + Fehlermeldung)
-  const [revokeError, setRevokeError] = useState<Record<string, string>>({});
+  const [revokeError, setRevokeError] = useState<
+    Record<string, { text: string } & ZweiFaktorErgebnis>
+  >({});
 
   // K2: Konto-Aktions-State — Dialog + Ergebnis-Meldung je User-Karte.
   const [kontoDialog, setKontoDialog] = useState<KontoDialog>(null);
-  const [kontoMsg, setKontoMsg] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const [kontoMsg, setKontoMsg] = useState<
+    Record<string, { ok: boolean; text: string } & ZweiFaktorErgebnis>
+  >({});
 
   // K2: „Konto per E-Mail sperren" (IR-Notfall-Karte)
   const [sperrEmail, setSperrEmail] = useState("");
-  const [sperrEmailMsg, setSperrEmailMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [sperrEmailMsg, setSperrEmailMsg] = useState<
+    ({ ok: boolean; text: string } & ZweiFaktorErgebnis) | null
+  >(null);
 
   function handleAssign(e: React.FormEvent) {
     e.preventDefault();
@@ -121,7 +134,11 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
     startTransition(async () => {
       const result = await assignRole({ targetEmail, roleType, scopeLevel });
       if (!result.ok) {
-        setFormMsg({ ok: false, text: result.error ?? "Zuweisung fehlgeschlagen." });
+        setFormMsg({
+          ok: false,
+          text: result.error ?? "Zuweisung fehlgeschlagen.",
+          zweiFaktor: result.zweiFaktor,
+        });
         return;
       }
       setFormMsg({ ok: true, text: result.message ?? "Rolle vergeben." });
@@ -139,14 +156,27 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
     startTransition(async () => {
       const result = await revokeRole({ roleId });
       if (!result.ok) {
-        setRevokeError((prev) => ({ ...prev, [roleId]: result.error ?? "Entzug fehlgeschlagen." }));
+        setRevokeError((prev) => ({
+          ...prev,
+          [roleId]: {
+            text: result.error ?? "Entzug fehlgeschlagen.",
+            zweiFaktor: result.zweiFaktor,
+          },
+        }));
         return;
       }
       router.refresh();
     });
   }
 
-  /** Führt die im Dialog bestätigte Konto-Aktion aus (K2). */
+  /**
+   * Führt die im Dialog bestätigte Konto-Aktion aus (K2).
+   *
+   * #59: `setKontoDialog(null)` läuft in JEDEM Zweig — auch im Fehlerfall. Das ist
+   * hier wichtig, nicht nur aufgeräumt: BestaetigungsDialog ist ein modaler Dialog
+   * mit Fokusfalle; bliebe er offen, läge der Zwei-Faktor-Hinweis samt Link
+   * dahinter und wäre weder sichtbar noch per Tastatur erreichbar.
+   */
   function handleKontoBestaetigt() {
     const dialog = kontoDialog;
     if (!dialog) return;
@@ -156,7 +186,11 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
         setSperrEmailMsg(
           result.ok
             ? { ok: true, text: result.message ?? "Konto gesperrt." }
-            : { ok: false, text: result.error ?? "Sperren fehlgeschlagen." },
+            : {
+                ok: false,
+                text: result.error ?? "Sperren fehlgeschlagen.",
+                zweiFaktor: result.zweiFaktor,
+              },
         );
         if (result.ok) setSperrEmail("");
         setKontoDialog(null);
@@ -178,7 +212,11 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
         ...prev,
         [dialog.userId]: result.ok
           ? { ok: true, text: result.message ?? "Aktion ausgeführt." }
-          : { ok: false, text: result.error ?? "Aktion fehlgeschlagen." },
+          : {
+              ok: false,
+              text: result.error ?? "Aktion fehlgeschlagen.",
+              zweiFaktor: result.zweiFaktor,
+            },
       }));
       setKontoDialog(null);
       if (result.ok) router.refresh();
@@ -276,6 +314,10 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
               </p>
             )}
 
+            {/* Ergänzt die Fehlermeldung um den Weg zur Bestätigung; bringt seine
+                eigene role="alert"-Region mit und rendert ohne Feld nichts. */}
+            <ZweiFaktorHinweis ergebnis={formMsg} />
+
             <button
               type="submit"
               disabled={isPending || !targetEmail.trim()}
@@ -372,17 +414,20 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
                   </ul>
                 )}
 
-                {/* Entzug-Fehler je Rolle anzeigen */}
+                {/* Entzug-Fehler je Rolle anzeigen — bei fehlendem zweiten Faktor
+                    zusätzlich der Weg zur Bestätigung (#59). */}
                 {u.roles.map((r) =>
                   revokeError[r.roleId] ? (
-                    <p
-                      key={`err-${r.roleId}`}
-                      className="mt-2 text-sm"
-                      role="alert"
-                      style={{ color: "var(--pz-danger)" }}
-                    >
-                      {revokeError[r.roleId]}
-                    </p>
+                    <div key={`err-${r.roleId}`}>
+                      <p
+                        className="mt-2 text-sm"
+                        role="alert"
+                        style={{ color: "var(--pz-danger)" }}
+                      >
+                        {revokeError[r.roleId].text}
+                      </p>
+                      <ZweiFaktorHinweis ergebnis={revokeError[r.roleId]} />
+                    </div>
                   ) : null
                 )}
 
@@ -457,6 +502,7 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
                     {msg.text}
                   </p>
                 )}
+                <ZweiFaktorHinweis ergebnis={msg} />
               </div>
             );
           })}
@@ -514,6 +560,7 @@ export function RollenVerwaltung({ users, erlaubteRollen, callerUserId, selfAppr
             {sperrEmailMsg.text}
           </p>
         )}
+        <ZweiFaktorHinweis ergebnis={sperrEmailMsg} />
       </section>
 
       {/* K2: Bestätigungs-Dialoge der Konto-Aktionen */}

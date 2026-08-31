@@ -36,6 +36,13 @@ export type AnonymizePayload = {
   minAgeConfirmedAt: null;
   // Benachrichtigungs-Motor: keine Mails an gelöschte Konten.
   notifyNewPolls: false;
+  // Block #59: Der zweite Faktor gehört zum Konto und darf es nicht überleben.
+  // Das Secret ist mit TOTP_ENC_KEY entschlüsselbar — bliebe es stehen, hielte
+  // ein gelöschtes Konto weiter ein gültiges Authenticator-Geheimnis vor.
+  totpSecretEnc: null;
+  totpConfirmedAt: null;
+  totpLastStep: null;
+  totpGraceUntil: null;
   accountStatus: "deleted";
   deletedAt: Date;
 };
@@ -74,6 +81,10 @@ export function buildAnonymizePayload(
     verificationStatus: "pending",
     minAgeConfirmedAt: null,
     notifyNewPolls: false,
+    totpSecretEnc: null,
+    totpConfirmedAt: null,
+    totpLastStep: null,
+    totpGraceUntil: null,
     accountStatus: "deleted",
     deletedAt: now,
   };

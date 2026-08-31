@@ -23,6 +23,7 @@ import {
   verificationSlots,
   invitations,
   roleAppointments,
+  totpRecoveryCodes,
 } from "@/db/schema";
 import { ADMIN_ROLES } from "@/lib/auth/roles";
 import { normalizeEmail } from "@/lib/auth/email";
@@ -211,6 +212,15 @@ export async function deleteKontoCore(
           or(eq(authTokens.email, alteEmail), eq(authTokens.userId, userId)),
         ),
       );
+
+    // 5a-2. Wiederherstellungscodes der Zwei-Faktor-Authentisierung löschen
+    //     (Block #59). Der user_id-FK trägt onDelete:cascade — er feuert hier
+    //     aber NICHT, weil die Produkt-Löschung die users-Zeile anonymisiert
+    //     statt sie zu löschen (dieselbe Falle wie bei auth_tokens oben).
+    //     Zurückbleiben würden zehn Hashes mit user_id und created_at.
+    await tx
+      .delete(totpRecoveryCodes)
+      .where(and(eq(totpRecoveryCodes.tenantId, tenantId), eq(totpRecoveryCodes.userId, userId)));
 
     // 5b. qr_redemptions des Users löschen (direkter user_id-FK → sonst nach der
     //     Anonymisierung re-identifizierbar; Art. 17). tenant+user-scoped. Der

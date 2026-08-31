@@ -25,6 +25,11 @@ import {
   verifierErnennungEntscheiden,
   verifierErnennungZurueckziehen,
 } from "@/lib/admin/appointment-actions";
+// #59: Die Bestätigung einer Ernennung vergibt die verifier-Rolle und verlangt
+// ein Step-up. Läuft es ab, trägt das Ergebnis ein `zweiFaktor`-Feld — der
+// Hinweis macht daraus den Weg zurück in die Bestätigung; ohne das Feld rendert
+// er nichts.
+import ZweiFaktorHinweis, { type ZweiFaktorErgebnis } from "@/components/ZweiFaktorHinweis";
 import BestaetigungsDialog from "../../BestaetigungsDialog";
 
 export interface Ernennung {
@@ -58,10 +63,18 @@ export function ErnennungenVerwaltung({ ernennungen, callerUserId, selfApprovalA
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [dialog, setDialog] = useState<Dialog>(null);
-  const [rowMsg, setRowMsg] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const [rowMsg, setRowMsg] = useState<
+    Record<string, { ok: boolean; text: string } & ZweiFaktorErgebnis>
+  >({});
 
   if (ernennungen.length === 0) return null;
 
+  /**
+   * #59: `setDialog(null)` läuft in JEDEM Fall — auch bei Fehlern. Das ist hier
+   * nicht nur aufgeräumt, sondern notwendig: BestaetigungsDialog ist modal und
+   * hält den Fokus fest; bliebe er offen, läge der Zwei-Faktor-Hinweis samt Link
+   * dahinter und wäre weder sichtbar noch per Tastatur erreichbar.
+   */
   function handleBestaetigt() {
     const d = dialog;
     if (!d) return;
@@ -77,7 +90,11 @@ export function ErnennungenVerwaltung({ ernennungen, callerUserId, selfApprovalA
         ...prev,
         [d.ernennung.id]: result.ok
           ? { ok: true, text: result.message ?? "Aktion ausgeführt." }
-          : { ok: false, text: result.error ?? "Aktion fehlgeschlagen." },
+          : {
+              ok: false,
+              text: result.error ?? "Aktion fehlgeschlagen.",
+              zweiFaktor: result.zweiFaktor,
+            },
       }));
       setDialog(null);
       if (result.ok) router.refresh();
@@ -159,6 +176,7 @@ export function ErnennungenVerwaltung({ ernennungen, callerUserId, selfApprovalA
                   {msg.text}
                 </p>
               )}
+              <ZweiFaktorHinweis ergebnis={msg} />
             </div>
           );
         })}
